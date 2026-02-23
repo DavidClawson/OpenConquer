@@ -66,19 +66,19 @@ struct SHPFile {
         for i in 0..<numShapes {
             let off = Int(readLE32(data, 2 + i * 4))
             let pos = 2 + off  // bytebuf + 2 + offset
-            guard pos + 26 <= data.count else { continue }
+            guard pos + 10 <= data.count else { continue }
 
             let shapeType = Int(readLE16(data, pos))
             let height = Int(data[pos + 2])
             let width = Int(readLE16(data, pos + 3))
-            let dataLength = Int(readLE16(data, pos + 8))
 
             guard width > 0 && height > 0 else {
                 frames.append(SHPFrame(width: 0, height: 0, pixels: []))
                 continue
             }
 
-            let headerSize = 26
+            // Header is 10 bytes without colortable, 26 with (only for compact/type 1)
+            let headerSize = (shapeType & 0x01) != 0 ? 26 : 10
             let compStart = pos + headerSize
             let expectedSize = width * height
 
@@ -94,9 +94,8 @@ struct SHPFile {
                 }
             } else {
                 // LCW compressed
-                let uncompSize = dataLength > 0 ? dataLength : expectedSize
                 if compStart < data.count {
-                    pixels = lcwDecompress(Array(data[compStart...]), outputSize: uncompSize)
+                    pixels = lcwDecompress(Array(data[compStart...]), outputSize: expectedSize)
                 } else {
                     pixels = [UInt8](repeating: 0, count: expectedSize)
                 }
@@ -115,6 +114,7 @@ struct SHPFile {
     }
 
     // MARK: - KeyFrame format (unit/building sprites)
+    // Faithfully follows Build_Frame() from Vanilla Conquer keyframe.cpp
 
     private static func parseKeyFrame(data: Data) throws -> [SHPFrame] {
         // Header: frames(2) x(2) y(2) width(2) height(2) largest(2) flags(2) = 14 bytes
@@ -129,101 +129,204 @@ struct SHPFile {
         }
 
         let buffSize = width * height
-
-        // After header: numFrames * 8 bytes of offset data (2 uint32s per frame)
-        // Then: compressed frame data
+        let headerSize = 14  // sizeof(KeyFrameHeaderType)
 
         var frames: [SHPFrame] = []
-        var baseBuffer = [UInt8](repeating: 0, count: buffSize)
 
         for f in 0..<numFrames {
-            let offTablePos = 14 + f * 8
+            let offTablePos = headerSize + f * 8
             guard offTablePos + 8 <= data.count else { break }
 
             let off0 = readLE32(data, offTablePos)
-            let off1 = readLE32(data, offTablePos + 4)
-
             let frameFlags = UInt8(off0 >> 24)
-            let frameOffset = Int(off0 & 0x00FFFFFF)
 
-            let isKeyframe = (frameFlags & 0x20) != 0  // KF_KEYFRAME
+            var buffer = [UInt8](repeating: 0, count: buffSize)
 
-            if isKeyframe {
+            if (frameFlags & 0x80) != 0 {  // KF_KEYFRAME = 0x80
                 // Key frame: LCW decompress directly
-                var ptr = frameOffset
+                var ptr = Int(off0 & 0x00FFFFFF)
                 if hasPalette { ptr += 768 }
                 guard ptr < data.count else { break }
                 let decompressed = lcwDecompress(Array(data[ptr...]), outputSize: buffSize)
-                baseBuffer = decompressed.count >= buffSize
-                    ? Array(decompressed.prefix(buffSize))
-                    : decompressed + [UInt8](repeating: 0, count: buffSize - decompressed.count)
+                buffer = fitToSize(decompressed, buffSize)
             } else {
-                // Delta frame: find the referenced keyframe and apply deltas
-                let refFrame = Int(off1 & 0xFFFF)
-                let refOffTablePos = 14 + refFrame * 8
-                guard refOffTablePos + 12 <= data.count else { break }
+                // Delta or key-delta frame
+                // Read offset table entries for this frame (we need 3 uint32s = 12 bytes)
+                // offset[0] = frameflags:8 | offset:24 (this frame's delta data)
+                // offset[1] = reference keyframe's LCW data offset (or ref frame index for KF_DELTA)
 
-                let refOff0 = readLE32(data, refOffTablePos)
-                let refOff1 = readLE32(data, refOffTablePos + 4)
-                let refOffset = Int(refOff1 & 0x00FFFFFF)
+                let isDelta = (frameFlags & 0x20) != 0  // KF_DELTA = 0x20
+
+                // For KF_DELTA frames, offset[1] low 16 bits is the reference frame number
+                // We need to load that frame's offset table to find the actual key frame
+                var offsets = [UInt32](repeating: 0, count: 7)  // SUBFRAMEOFFS = 7
+
+                if isDelta {
+                    let off1 = readLE32(data, offTablePos + 4)
+                    let currframe = Int(off1 & 0xFFFF)
+
+                    // Read offset table starting from the referenced key frame
+                    let refTablePos = headerSize + currframe * 8
+                    let bytesToRead = min(7, (data.count - refTablePos) / 4)
+                    for i in 0..<bytesToRead {
+                        let readPos = refTablePos + i * 4
+                        guard readPos + 4 <= data.count else { break }
+                        offsets[i] = readLE32(data, readPos)
+                    }
+                } else {
+                    // Key-delta: read from this frame's offset table position
+                    let bytesToRead = min(7, (data.count - offTablePos) / 4)
+                    for i in 0..<bytesToRead {
+                        let readPos = offTablePos + i * 4
+                        guard readPos + 4 <= data.count else { break }
+                        offsets[i] = readLE32(data, readPos)
+                    }
+                }
+
+                // Key frame LCW data is at offsets[1] & 0x00FFFFFF
+                let keyLCWOffset = Int(offsets[1] & 0x00FFFFFF)
+                // Key delta data offset
+                let keyDeltaOffset = Int(offsets[0] & 0x00FFFFFF)
 
                 // Decompress the key frame
-                var keyPtr = refOffset
+                var keyPtr = keyLCWOffset
                 if hasPalette { keyPtr += 768 }
                 if keyPtr < data.count {
                     let decompressed = lcwDecompress(Array(data[keyPtr...]), outputSize: buffSize)
-                    baseBuffer = decompressed.count >= buffSize
-                        ? Array(decompressed.prefix(buffSize))
-                        : decompressed + [UInt8](repeating: 0, count: buffSize - decompressed.count)
+                    buffer = fitToSize(decompressed, buffSize)
                 }
 
-                // Apply key delta
-                let keyDeltaOffset = Int(refOff0 & 0x00FFFFFF)
-                if keyDeltaOffset < data.count {
-                    applyXORDelta(&baseBuffer, delta: Array(data[keyDeltaOffset...]))
+                // Apply key delta (difference between key frame and key delta)
+                let keyDeltaDiff = keyDeltaOffset - keyLCWOffset
+                if keyDeltaDiff > 0 {
+                    let deltaPtr = keyPtr + keyDeltaDiff
+                    if deltaPtr < data.count {
+                        applyXORDelta(&buffer, delta: Array(data[deltaPtr...]))
+                    }
                 }
 
-                // Apply subsequent deltas up to current frame
-                // (simplified — just apply the current frame's delta)
-                if frameOffset < data.count && frameOffset != keyDeltaOffset {
-                    applyXORDelta(&baseBuffer, delta: Array(data[frameOffset...]))
+                // For KF_DELTA: apply subsequent deltas up to the requested frame
+                if isDelta {
+                    let off1 = readLE32(data, offTablePos + 4)
+                    var currframe = Int(off1 & 0xFFFF) + 1
+                    var subframe = 2  // start at offset[2]
+
+                    while currframe <= f {
+                        let deltaOff = Int(offsets[subframe] & 0x00FFFFFF)
+                        let deltaDiff = deltaOff - keyLCWOffset
+                        if deltaDiff > 0 {
+                            let deltaPtr = keyPtr + deltaDiff
+                            if deltaPtr < data.count {
+                                applyXORDelta(&buffer, delta: Array(data[deltaPtr...]))
+                            }
+                        }
+
+                        currframe += 1
+                        subframe += 2
+
+                        // Reload offset table if we've exhausted current batch
+                        if subframe >= 6 && currframe <= f {
+                            let reloadPos = headerSize + currframe * 8
+                            let bytesToRead = min(7, (data.count - reloadPos) / 4)
+                            for i in 0..<bytesToRead {
+                                let readPos = reloadPos + i * 4
+                                guard readPos + 4 <= data.count else { break }
+                                offsets[i] = readLE32(data, readPos)
+                            }
+                            subframe = 0
+                        }
+                    }
                 }
             }
 
-            frames.append(SHPFrame(width: width, height: height, pixels: baseBuffer))
+            frames.append(SHPFrame(width: width, height: height, pixels: buffer))
         }
         return frames
     }
 
-    // MARK: - XOR Delta
+    private static func fitToSize(_ data: [UInt8], _ size: Int) -> [UInt8] {
+        if data.count >= size {
+            return Array(data.prefix(size))
+        }
+        return data + [UInt8](repeating: 0, count: size - data.count)
+    }
+
+    // MARK: - XOR Delta (Apply_XOR_Delta from xordelta.cpp)
 
     private static func applyXORDelta(_ buffer: inout [UInt8], delta: [UInt8]) {
         var sp = 0
         var dp = 0
 
-        while sp < delta.count && dp < buffer.count {
+        while true {
+            guard sp < delta.count else { break }
             let cmd = delta[sp]
             sp += 1
 
-            if cmd == 0 {
-                // Skip N bytes
-                guard sp < delta.count else { break }
-                let count = Int(delta[sp])
-                sp += 1
-                if count == 0 { break }  // end marker
-                dp += count
-            } else if cmd < 0x80 {
-                // XOR next N bytes
-                let count = Int(cmd)
-                for _ in 0..<count {
-                    guard sp < delta.count && dp < buffer.count else { break }
-                    buffer[dp] ^= delta[sp]
-                    sp += 1
-                    dp += 1
+            if (cmd & 0x80) == 0 {
+                // cmd 0b0???????
+                if cmd == 0 {
+                    // Fill mode: XOR next count bytes with a single value
+                    guard sp + 1 < delta.count else { break }
+                    let count = Int(delta[sp])
+                    let value = delta[sp + 1]
+                    sp += 2
+                    for _ in 0..<count {
+                        guard dp < buffer.count else { break }
+                        buffer[dp] ^= value
+                        dp += 1
+                    }
+                } else {
+                    // XOR next cmd bytes from delta stream
+                    let count = Int(cmd)
+                    for _ in 0..<count {
+                        guard sp < delta.count && dp < buffer.count else { break }
+                        buffer[dp] ^= delta[sp]
+                        sp += 1
+                        dp += 1
+                    }
                 }
             } else {
-                // Skip (cmd - 0x80) bytes
-                dp += Int(cmd) - 0x80
+                // cmd 0b1???????
+                let count7 = Int(cmd & 0x7F)
+                if count7 != 0 {
+                    // Short skip
+                    dp += count7
+                } else {
+                    // Extended command: read 16-bit count
+                    guard sp + 1 < delta.count else { break }
+                    let extCount = Int(delta[sp]) | (Int(delta[sp + 1]) << 8)
+                    sp += 2
+
+                    if extCount == 0 {
+                        // End of delta
+                        break
+                    }
+
+                    if (extCount & 0x8000) == 0 {
+                        // Long skip
+                        dp += extCount
+                    } else if (extCount & 0x4000) != 0 {
+                        // Long fill: XOR count bytes with a single value
+                        let fillCount = extCount & 0x3FFF
+                        guard sp < delta.count else { break }
+                        let value = delta[sp]
+                        sp += 1
+                        for _ in 0..<fillCount {
+                            guard dp < buffer.count else { break }
+                            buffer[dp] ^= value
+                            dp += 1
+                        }
+                    } else {
+                        // Long XOR from delta stream
+                        let xorCount = extCount & 0x3FFF
+                        for _ in 0..<xorCount {
+                            guard sp < delta.count && dp < buffer.count else { break }
+                            buffer[dp] ^= delta[sp]
+                            sp += 1
+                            dp += 1
+                        }
+                    }
+                }
             }
         }
     }

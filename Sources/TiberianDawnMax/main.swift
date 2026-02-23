@@ -42,6 +42,8 @@ func loadGameData() {
         "STRUGGLE.AUD",  // Audio
         "CHOOSE.WSA",    // Choose side animation
         "SCG01EA.INI",   // GDI mission 1 scenario
+        "TEMPERAT.PAL",  // Temperate theater palette
+        "DESERT.PAL",    // Desert theater palette
     ]
 
     print("File lookup test:")
@@ -67,7 +69,7 @@ if CommandLine.arguments.contains("--test-mix") {
 
 // If --test-shp, parse and dump SHP info
 if CommandLine.arguments.contains("--test-shp") {
-    let testShapes = ["MOUSE.SHP", "OPTIONS.SHP", "TRANS.ICN"]
+    let testShapes = ["MOUSE.SHP", "OPTIONS.SHP", "LTNK.SHP"]
     for name in testShapes {
         print("Testing \(name)...")
         fflush(stdout)
@@ -114,6 +116,26 @@ if CommandLine.arguments.contains("--test-shp") {
     exit(0)
 }
 
+// MARK: - Palette
+
+// Load the 256-color palette (768 bytes, 6-bit VGA RGB)
+func loadPalette(_ name: String = "TEMPERAT.PAL") -> [(r: UInt8, g: UInt8, b: UInt8)] {
+    guard let data = mixManager.retrieve(name), data.count >= 768 else {
+        print("Warning: Could not load palette \(name), using grayscale")
+        return (0..<256).map { i in (r: UInt8(i), g: UInt8(i), b: UInt8(i)) }
+    }
+    let palData = Data(data)
+    return (0..<256).map { i in
+        // 6-bit VGA (0-63) -> 8-bit (0-255): multiply by ~4
+        let r6 = palData[i * 3]
+        let g6 = palData[i * 3 + 1]
+        let b6 = palData[i * 3 + 2]
+        return (r: (r6 << 2) | (r6 >> 4), g: (g6 << 2) | (g6 >> 4), b: (b6 << 2) | (b6 >> 4))
+    }
+}
+
+let gamePalette = loadPalette()
+
 // MARK: - Types
 
 enum Faction: String {
@@ -132,6 +154,54 @@ enum MenuState {
     case chooseDifficulty
     case chooseFaction
     case launching(Faction, Difficulty)
+    case spriteViewer
+}
+
+// MARK: - Sprite Viewer State
+
+let viewableShapes = [
+    "MOUSE.SHP", "OPTIONS.SHP",
+    "HTNK.SHP", "MTNK.SHP", "LTNK.SHP", "MLRS.SHP",  // tanks
+    "E1.SHP", "E2.SHP", "E3.SHP", "E4.SHP",            // infantry
+    "HARV.SHP", "MCV.SHP", "APC.SHP", "MSAM.SHP",      // vehicles
+    "ORCA.SHP", "A10.SHP", "HELI.SHP", "TRAN.SHP",     // aircraft
+    "WEAP.SHP", "FACT.SHP", "PROC.SHP", "NUKE.SHP",    // buildings
+    "GUN.SHP", "GTWR.SHP", "ATWR.SHP", "SAM.SHP",      // defenses
+    "ICON.SHP",
+]
+
+var spriteViewerIndex = 0
+var spriteViewerFrame = 0
+var currentSHP: SHPFile? = nil
+var spriteViewerAnimating = true
+var spriteViewerFrameTimer: UInt32 = 0
+
+func loadCurrentSprite() {
+    let name = viewableShapes[spriteViewerIndex]
+    spriteViewerFrame = 0
+    if let data = mixManager.retrieve(name) {
+        do {
+            currentSHP = try SHPFile(data: Data(data))
+        } catch {
+            print("Failed to parse \(name): \(error)")
+            currentSHP = nil
+        }
+    } else {
+        currentSHP = nil
+    }
+}
+
+func renderSHPFrame(_ renderer: OpaquePointer?, frame: SHPFrame, atX: Int32, atY: Int32, scale: Int32) {
+    for row in 0..<frame.height {
+        for col in 0..<frame.width {
+            let pixel = frame.pixels[row * frame.width + col]
+            if pixel == 0 { continue }  // transparent
+            let color = gamePalette[Int(pixel)]
+            SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, 255)
+            var rect = SDL_Rect(x: atX + Int32(col) * scale, y: atY + Int32(row) * scale, w: scale, h: scale)
+            SDL_RenderFillRect(renderer, &rect)
+        }
+    }
 }
 
 // MARK: - Colors (C&C palette style)
@@ -324,7 +394,11 @@ func makeMainButtons() -> [Button] {
         Button(label: "Start New Game", x: cx, y: startY, w: bw, h: bh) {
             state = .chooseDifficulty
         },
-        Button(label: "Exit Game", x: cx, y: startY + 70, w: bw, h: bh) {
+        Button(label: "Sprite Viewer", x: cx, y: startY + 60, w: bw, h: bh) {
+            loadCurrentSprite()
+            state = .spriteViewer
+        },
+        Button(label: "Exit Game", x: cx, y: startY + 120, w: bw, h: bh) {
             running = false
         },
     ]
@@ -386,6 +460,28 @@ while running {
                     state = .chooseDifficulty
                 case .launching:
                     state = .chooseFaction
+                case .spriteViewer:
+                    state = .main
+                }
+            }
+            // Sprite viewer controls
+            if case .spriteViewer = state {
+                if key == Int32(SDLK_RIGHT.rawValue) || key == Int32(SDLK_d.rawValue) {
+                    spriteViewerIndex = (spriteViewerIndex + 1) % viewableShapes.count
+                    loadCurrentSprite()
+                } else if key == Int32(SDLK_LEFT.rawValue) || key == Int32(SDLK_a.rawValue) {
+                    spriteViewerIndex = (spriteViewerIndex - 1 + viewableShapes.count) % viewableShapes.count
+                    loadCurrentSprite()
+                } else if key == Int32(SDLK_UP.rawValue) || key == Int32(SDLK_w.rawValue) {
+                    if let shp = currentSHP, shp.frames.count > 0 {
+                        spriteViewerFrame = (spriteViewerFrame + 1) % shp.frames.count
+                    }
+                } else if key == Int32(SDLK_DOWN.rawValue) || key == Int32(SDLK_s.rawValue) {
+                    if let shp = currentSHP, shp.frames.count > 0 {
+                        spriteViewerFrame = (spriteViewerFrame - 1 + shp.frames.count) % shp.frames.count
+                    }
+                } else if key == Int32(SDLK_SPACE.rawValue) {
+                    spriteViewerAnimating = !spriteViewerAnimating
                 }
             }
 
@@ -400,6 +496,7 @@ while running {
                 case .main: buttons = makeMainButtons()
                 case .chooseDifficulty: buttons = makeDifficultyButtons()
                 case .chooseFaction: buttons = makeFactionButtons()
+                case .spriteViewer: buttons = []
                 case .launching: buttons = []
                 }
                 for btn in buttons {
@@ -461,6 +558,53 @@ while running {
         // TODO: Actually launch game engine here
         drawText(renderer, "Game engine not yet connected", centerX: windowWidth / 2, centerY: windowHeight / 2 + 70, color: .gray, scale: 1)
         drawText(renderer, "Esc: Back", centerX: windowWidth / 2, centerY: windowHeight - 40, color: .gray, scale: 1)
+
+    case .spriteViewer:
+        let shapeName = viewableShapes[spriteViewerIndex]
+
+        // Title and info
+        drawText(renderer, "Sprite Viewer", centerX: windowWidth / 2, centerY: 30, color: .amber, scale: 3)
+        drawText(renderer, shapeName, centerX: windowWidth / 2, centerY: 70, color: .green, scale: 2)
+
+        if let shp = currentSHP, !shp.frames.isEmpty {
+            // Auto-animate
+            let now = SDL_GetTicks()
+            if spriteViewerAnimating && now - spriteViewerFrameTimer > 100 {
+                spriteViewerFrameTimer = now
+                spriteViewerFrame = (spriteViewerFrame + 1) % shp.frames.count
+            }
+
+            let frame = shp.frames[spriteViewerFrame]
+            let info = "Frame \(spriteViewerFrame)/\(shp.frames.count)  \(frame.width)x\(frame.height)"
+            drawText(renderer, info, centerX: windowWidth / 2, centerY: 100, color: .green, scale: 1)
+
+            // Calculate scale to fit sprite nicely
+            let maxDisplayW: Int32 = 400
+            let maxDisplayH: Int32 = 350
+            let scaleX = frame.width > 0 ? maxDisplayW / Int32(frame.width) : 1
+            let scaleY = frame.height > 0 ? maxDisplayH / Int32(frame.height) : 1
+            let pixelScale = max(1, min(scaleX, scaleY))
+
+            let drawW = Int32(frame.width) * pixelScale
+            let drawH = Int32(frame.height) * pixelScale
+            let drawX = windowWidth / 2 - drawW / 2
+            let drawY: Int32 = 130 + (maxDisplayH - drawH) / 2
+
+            // Draw a subtle border around the sprite area
+            SDL_SetRenderDrawColor(renderer, 40, 40, 40, 255)
+            var border = SDL_Rect(x: drawX - 2, y: drawY - 2, w: drawW + 4, h: drawH + 4)
+            SDL_RenderDrawRect(renderer, &border)
+
+            // Render the sprite
+            renderSHPFrame(renderer, frame: frame, atX: drawX, atY: drawY, scale: pixelScale)
+        } else {
+            drawText(renderer, "Not Found", centerX: windowWidth / 2, centerY: windowHeight / 2, color: .red, scale: 2)
+        }
+
+        // Controls
+        let animLabel = spriteViewerAnimating ? "Playing" : "Paused"
+        drawText(renderer, "Left/Right: Shape  Up/Down: Frame  Space: \(animLabel)", centerX: windowWidth / 2, centerY: windowHeight - 60, color: .gray, scale: 1)
+        drawText(renderer, "Esc: Back", centerX: windowWidth / 2, centerY: windowHeight - 35, color: .gray, scale: 1)
     }
 
     SDL_RenderPresent(renderer)
