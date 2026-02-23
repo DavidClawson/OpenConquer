@@ -127,7 +127,43 @@ func loadPalette(_ name: String = "TEMPERAT.PAL") -> [(r: UInt8, g: UInt8, b: UI
     }
 }
 
-let gamePalette = loadPalette()
+var gamePalette = loadPalette()
+
+// MARK: - Scenario Discovery
+
+/// Build a list of available scenario base names from the MIX files
+func discoverScenarios() -> [String] {
+    var found: [String] = []
+    // GDI missions: SCG01EA through SCG15EA, plus B/C variants
+    for i in 1...15 {
+        let num = String(format: "%02d", i)
+        for variant in ["EA", "EB", "EC"] {
+            let name = "SCG\(num)\(variant)"
+            if mixManager.contains("\(name).INI") {
+                found.append(name)
+            }
+        }
+    }
+    // Nod missions: SCB01EA through SCB13EA, plus B/C variants
+    for i in 1...13 {
+        let num = String(format: "%02d", i)
+        for variant in ["EA", "EB", "EC"] {
+            let name = "SCB\(num)\(variant)"
+            if mixManager.contains("\(name).INI") {
+                found.append(name)
+            }
+        }
+    }
+    if found.isEmpty {
+        found.append("SCG01EA")
+    }
+    return found
+}
+
+var scenarioList = discoverScenarios()
+var scenarioIndex = 0
+
+print("Discovered \(scenarioList.count) scenarios: \(scenarioList.joined(separator: ", "))")
 
 // MARK: - Types
 
@@ -149,184 +185,7 @@ enum MenuState {
     case launching(Faction, Difficulty)
     case spriteViewer
     case mapViewer
-}
-
-// MARK: - Sprite Viewer State
-
-let viewableShapes = [
-    "MOUSE.SHP", "OPTIONS.SHP",
-    "HTNK.SHP", "MTNK.SHP", "LTNK.SHP", "MLRS.SHP",  // tanks
-    "E1.SHP", "E2.SHP", "E3.SHP", "E4.SHP",            // infantry
-    "HARV.SHP", "MCV.SHP", "APC.SHP", "MSAM.SHP",      // vehicles
-    "ORCA.SHP", "A10.SHP", "HELI.SHP", "TRAN.SHP",     // aircraft
-    "WEAP.SHP", "FACT.SHP", "PROC.SHP", "NUKE.SHP",    // buildings
-    "GUN.SHP", "GTWR.SHP", "ATWR.SHP", "SAM.SHP",      // defenses
-    "ICON.SHP",
-]
-
-var spriteViewerIndex = 0
-var spriteViewerFrame = 0
-var currentSHP: SHPFile? = nil
-var spriteViewerAnimating = true
-var spriteViewerFrameTimer: UInt32 = 0
-
-func loadCurrentSprite() {
-    let name = viewableShapes[spriteViewerIndex]
-    spriteViewerFrame = 0
-    if let data = mixManager.retrieve(name) {
-        do {
-            currentSHP = try SHPFile(data: Data(data))
-        } catch {
-            print("Failed to parse \(name): \(error)")
-            currentSHP = nil
-        }
-    } else {
-        currentSHP = nil
-    }
-}
-
-// MARK: - Map Viewer State
-
-var mapCells: [MapCell] = []
-var cameraX: Int = 0
-var cameraY: Int = 0
-var icnCache: [String: ICNFile] = [:]
-var tileTextureCache: [String: OpaquePointer] = [:]
-var mapFailedICNs: Set<String> = []  // avoid repeated load attempts
-
-func loadMapViewerData() {
-    cameraX = 0
-    cameraY = 0
-    if let cells = loadMap("SCG01EA.BIN", from: mixManager) {
-        mapCells = cells
-    } else {
-        print("MapViewer: Failed to load SCG01EA.BIN")
-        mapCells = (0..<4096).map { _ in MapCell(templateType: 0xFF, iconIndex: 0) }
-    }
-}
-
-func createTileTexture(_ renderer: OpaquePointer?, pixels: [UInt8]) -> OpaquePointer? {
-    let format: UInt32 = 0x16362004  // SDL_PIXELFORMAT_ARGB8888
-    guard let texture = SDL_CreateTexture(renderer, format, Int32(SDL_TEXTUREACCESS_STATIC.rawValue), 24, 24) else {
-        return nil
-    }
-
-    var argb = [UInt32](repeating: 0, count: 576)
-    for i in 0..<576 {
-        let palIdx = Int(pixels[i])
-        let c = gamePalette[palIdx]
-        argb[i] = 0xFF000000 | (UInt32(c.r) << 16) | (UInt32(c.g) << 8) | UInt32(c.b)
-    }
-
-    _ = argb.withUnsafeMutableBufferPointer { buf in
-        SDL_UpdateTexture(texture, nil, buf.baseAddress, 24 * 4)
-    }
-
-    return texture
-}
-
-func getTileTexture(_ renderer: OpaquePointer?, icnName: String, iconIndex: Int) -> OpaquePointer? {
-    let key = "\(icnName)_\(iconIndex)"
-    if let cached = tileTextureCache[key] {
-        return cached
-    }
-
-    // Load ICN file if not cached
-    if icnCache[icnName] == nil && !mapFailedICNs.contains(icnName) {
-        let filename = icnName + ".TEM"  // TEMPERATE theater
-        if let data = mixManager.retrieve(filename) {
-            do {
-                icnCache[icnName] = try ICNFile(data: data)
-            } catch {
-                print("MapViewer: Failed to parse \(filename): \(error)")
-                mapFailedICNs.insert(icnName)
-            }
-        } else {
-            mapFailedICNs.insert(icnName)
-        }
-    }
-
-    guard let icn = icnCache[icnName], let pixels = icn.tile(icon: iconIndex) else {
-        return nil
-    }
-
-    if let texture = createTileTexture(renderer, pixels: pixels) {
-        tileTextureCache[key] = texture
-        return texture
-    }
-    return nil
-}
-
-func renderMapViewer(_ renderer: OpaquePointer?) {
-    let tileSize = 24
-    let mapSize = 64
-
-    let startCellX = max(0, cameraX / tileSize)
-    let startCellY = max(0, cameraY / tileSize)
-    let endCellX = min(mapSize - 1, (cameraX + Int(windowWidth)) / tileSize)
-    let endCellY = min(mapSize - 1, (cameraY + Int(windowHeight)) / tileSize)
-
-    for cellY in startCellY...endCellY {
-        for cellX in startCellX...endCellX {
-            let cellIndex = cellY * mapSize + cellX
-            let cell = mapCells[cellIndex]
-
-            let templateType = Int(cell.templateType)
-            let iconIndex = Int(cell.iconIndex)
-
-            let icnName: String
-            let actualIconIndex: Int
-            if templateType == 0xFF || templateType >= templateTable.count {
-                icnName = "CLEAR1"
-                actualIconIndex = 0
-            } else {
-                icnName = templateTable[templateType].icnName
-                actualIconIndex = iconIndex
-            }
-
-            if let texture = getTileTexture(renderer, icnName: icnName, iconIndex: actualIconIndex) {
-                let screenX = Int32(cellX * tileSize - cameraX)
-                let screenY = Int32(cellY * tileSize - cameraY)
-                var dstRect = SDL_Rect(x: screenX, y: screenY, w: Int32(tileSize), h: Int32(tileSize))
-                SDL_RenderCopy(renderer, texture, nil, &dstRect)
-            } else {
-                // Fallback: draw a green rectangle for missing tiles
-                let screenX = Int32(cellX * tileSize - cameraX)
-                let screenY = Int32(cellY * tileSize - cameraY)
-                SDL_SetRenderDrawColor(renderer, 0, 100, 0, 255)
-                var rect = SDL_Rect(x: screenX, y: screenY, w: Int32(tileSize), h: Int32(tileSize))
-                SDL_RenderFillRect(renderer, &rect)
-            }
-        }
-    }
-}
-
-func renderSHPFrame(_ renderer: OpaquePointer?, frame: SHPFrame, atX: Int32, atY: Int32, scale: Int32) {
-    for row in 0..<frame.height {
-        for col in 0..<frame.width {
-            let pixel = frame.pixels[row * frame.width + col]
-            if pixel == 0 { continue }  // transparent
-            let color = gamePalette[Int(pixel)]
-            SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, 255)
-            var rect = SDL_Rect(x: atX + Int32(col) * scale, y: atY + Int32(row) * scale, w: scale, h: scale)
-            SDL_RenderFillRect(renderer, &rect)
-        }
-    }
-}
-
-// MARK: - Colors (C&C palette style)
-
-struct Color {
-    let r: UInt8, g: UInt8, b: UInt8, a: UInt8
-
-    static let black       = Color(r: 0,   g: 0,   b: 0,   a: 255)
-    static let darkGreen   = Color(r: 0,   g: 100, b: 0,   a: 255)
-    static let green       = Color(r: 0,   g: 180, b: 0,   a: 255)
-    static let brightGreen = Color(r: 0,   g: 255, b: 0,   a: 255)
-    static let amber       = Color(r: 200, g: 160, b: 0,   a: 255)
-    static let red         = Color(r: 180, g: 0,   b: 0,   a: 255)
-    static let gray        = Color(r: 120, g: 120, b: 120, a: 255)
-    static let white       = Color(r: 255, g: 255, b: 255, a: 255)
+    case playing
 }
 
 // MARK: - Button
@@ -365,100 +224,6 @@ struct Button {
     }
 }
 
-// MARK: - Simple text rendering (pixel font)
-
-// 5x7 pixel font for uppercase + digits + space
-let glyphs: [Character: [[Bool]]] = buildGlyphTable()
-
-func buildGlyphTable() -> [Character: [[Bool]]] {
-    // Each glyph is 5 wide x 7 tall, encoded as strings for readability
-    func g(_ rows: [String]) -> [[Bool]] {
-        rows.map { row in row.map { $0 == "#" } }
-    }
-
-    return [
-        "A": g(["_###_", "#___#", "#___#", "#####", "#___#", "#___#", "#___#"]),
-        "B": g(["####_", "#___#", "#___#", "####_", "#___#", "#___#", "####_"]),
-        "C": g(["_####", "#____", "#____", "#____", "#____", "#____", "_####"]),
-        "D": g(["####_", "#___#", "#___#", "#___#", "#___#", "#___#", "####_"]),
-        "E": g(["#####", "#____", "#____", "####_", "#____", "#____", "#####"]),
-        "F": g(["#####", "#____", "#____", "####_", "#____", "#____", "#____"]),
-        "G": g(["_####", "#____", "#____", "#_###", "#___#", "#___#", "_####"]),
-        "H": g(["#___#", "#___#", "#___#", "#####", "#___#", "#___#", "#___#"]),
-        "I": g(["#####", "__#__", "__#__", "__#__", "__#__", "__#__", "#####"]),
-        "J": g(["__###", "___#_", "___#_", "___#_", "___#_", "#__#_", "_##__"]),
-        "K": g(["#___#", "#__#_", "#_#__", "##___", "#_#__", "#__#_", "#___#"]),
-        "L": g(["#____", "#____", "#____", "#____", "#____", "#____", "#####"]),
-        "M": g(["#___#", "##_##", "#_#_#", "#___#", "#___#", "#___#", "#___#"]),
-        "N": g(["#___#", "##__#", "#_#_#", "#__##", "#___#", "#___#", "#___#"]),
-        "O": g(["_###_", "#___#", "#___#", "#___#", "#___#", "#___#", "_###_"]),
-        "P": g(["####_", "#___#", "#___#", "####_", "#____", "#____", "#____"]),
-        "Q": g(["_###_", "#___#", "#___#", "#___#", "#_#_#", "#__#_", "_##_#"]),
-        "R": g(["####_", "#___#", "#___#", "####_", "#_#__", "#__#_", "#___#"]),
-        "S": g(["_####", "#____", "#____", "_###_", "____#", "____#", "####_"]),
-        "T": g(["#####", "__#__", "__#__", "__#__", "__#__", "__#__", "__#__"]),
-        "U": g(["#___#", "#___#", "#___#", "#___#", "#___#", "#___#", "_###_"]),
-        "V": g(["#___#", "#___#", "#___#", "#___#", "_#_#_", "_#_#_", "__#__"]),
-        "W": g(["#___#", "#___#", "#___#", "#___#", "#_#_#", "##_##", "#___#"]),
-        "X": g(["#___#", "#___#", "_#_#_", "__#__", "_#_#_", "#___#", "#___#"]),
-        "Y": g(["#___#", "#___#", "_#_#_", "__#__", "__#__", "__#__", "__#__"]),
-        "Z": g(["#####", "____#", "___#_", "__#__", "_#___", "#____", "#####"]),
-        "0": g(["_###_", "#___#", "#__##", "#_#_#", "##__#", "#___#", "_###_"]),
-        "1": g(["__#__", "_##__", "__#__", "__#__", "__#__", "__#__", "#####"]),
-        "2": g(["_###_", "#___#", "____#", "__##_", "_#___", "#____", "#####"]),
-        "3": g(["_###_", "#___#", "____#", "_###_", "____#", "#___#", "_###_"]),
-        "4": g(["#___#", "#___#", "#___#", "#####", "____#", "____#", "____#"]),
-        "5": g(["#####", "#____", "####_", "____#", "____#", "#___#", "_###_"]),
-        "6": g(["_###_", "#____", "#____", "####_", "#___#", "#___#", "_###_"]),
-        "7": g(["#####", "____#", "___#_", "__#__", "_#___", "_#___", "_#___"]),
-        "8": g(["_###_", "#___#", "#___#", "_###_", "#___#", "#___#", "_###_"]),
-        "9": g(["_###_", "#___#", "#___#", "_####", "____#", "____#", "_###_"]),
-        " ": g(["_____", "_____", "_____", "_____", "_____", "_____", "_____"]),
-        ":": g(["_____", "__#__", "__#__", "_____", "__#__", "__#__", "_____"]),
-        "-": g(["_____", "_____", "_____", "#####", "_____", "_____", "_____"]),
-        "&": g(["_##__", "#__#_", "#_#__", "_#___", "#_#_#", "#__#_", "_##_#"]),
-        "/": g(["____#", "___#_", "___#_", "__#__", "_#___", "_#___", "#____"]),
-        "'": g(["__#__", "__#__", "_#___", "_____", "_____", "_____", "_____"]),
-    ]
-}
-
-func drawText(_ renderer: OpaquePointer?, _ text: String, centerX: Int32, centerY: Int32, color: Color, scale: Int32 = 2) {
-    let charW: Int32 = 5 * scale + scale  // 5 pixels + 1 pixel gap, scaled
-    let charH: Int32 = 7 * scale
-    let totalW = Int32(text.count) * charW
-    var cursorX = centerX - totalW / 2
-    let cursorY = centerY - charH / 2
-
-    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a)
-
-    for ch in text.uppercased() {
-        if let glyph = glyphs[ch] {
-            for (row, rowData) in glyph.enumerated() {
-                for (col, on) in rowData.enumerated() {
-                    if on {
-                        var pixel = SDL_Rect(
-                            x: cursorX + Int32(col) * scale,
-                            y: cursorY + Int32(row) * scale,
-                            w: scale,
-                            h: scale
-                        )
-                        SDL_RenderFillRect(renderer, &pixel)
-                    }
-                }
-            }
-        }
-        cursorX += charW
-    }
-}
-
-func drawTextLeft(_ renderer: OpaquePointer?, _ text: String, x: Int32, y: Int32, color: Color, scale: Int32 = 2) {
-    let charW: Int32 = 5 * scale + scale
-    let charH: Int32 = 7 * scale
-    let totalW = Int32(text.count) * charW
-    // Reuse centered drawing with adjusted center
-    drawText(renderer, text, centerX: x + totalW / 2, centerY: y + charH / 2, color: color, scale: scale)
-}
-
 // MARK: - App
 
 let windowWidth: Int32 = 960
@@ -494,6 +259,11 @@ var mouseY: Int32 = 0
 var selectedDifficulty: Difficulty = .normal
 var selectedFaction: Faction = .gdi
 
+// Mouse panning state for map viewer
+var mousePanning = false
+var lastMouseX: Int32 = 0
+var lastMouseY: Int32 = 0
+
 func makeMainButtons() -> [Button] {
     let bw: Int32 = 300
     let bh: Int32 = 44
@@ -509,7 +279,7 @@ func makeMainButtons() -> [Button] {
             state = .spriteViewer
         },
         Button(label: "Map Viewer", x: cx, y: startY + 120, w: bw, h: bh) {
-            loadMapViewerData()
+            loadMapViewerData(scenarioList[scenarioIndex])
             state = .mapViewer
         },
         Button(label: "Exit Game", x: cx, y: startY + 180, w: bw, h: bh) {
@@ -578,6 +348,12 @@ while running {
                     state = .main
                 case .mapViewer:
                     state = .main
+                case .playing:
+                    if let world = gameWorld, !world.selectedObjects().isEmpty {
+                        world.deselectAll()
+                    } else {
+                        state = .mapViewer
+                    }
                 }
             }
             // Sprite viewer controls
@@ -600,13 +376,117 @@ while running {
                     spriteViewerAnimating = !spriteViewerAnimating
                 }
             }
+            // Map viewer controls: [ and ] to cycle scenarios, +/- to zoom
+            if case .mapViewer = state {
+                if key == Int32(SDLK_RIGHTBRACKET.rawValue) {
+                    scenarioIndex = (scenarioIndex + 1) % scenarioList.count
+                    loadMapViewerData(scenarioList[scenarioIndex])
+                } else if key == Int32(SDLK_LEFTBRACKET.rawValue) {
+                    scenarioIndex = (scenarioIndex - 1 + scenarioList.count) % scenarioList.count
+                    loadMapViewerData(scenarioList[scenarioIndex])
+                } else if key == Int32(SDLK_EQUALS.rawValue) {
+                    zoomLevel = min(3.0, zoomLevel + 0.25)
+                } else if key == Int32(SDLK_MINUS.rawValue) {
+                    zoomLevel = max(0.5, zoomLevel - 0.25)
+                } else if key == Int32(SDLK_g.rawValue) {
+                    showGrid = !showGrid
+                } else if key == Int32(SDLK_i.rawValue) {
+                    showInfoPanel = !showInfoPanel
+                } else if key == Int32(SDLK_t.rawValue) {
+                    showCellTriggers = !showCellTriggers
+                } else if key == Int32(SDLK_b.rawValue) {
+                    showBaseList = !showBaseList
+                } else if key == Int32(SDLK_p.rawValue) {
+                    // Enter playing mode
+                    if let sd = scenarioData {
+                        initGameWorld(scenario: sd, scenarioName: scenarioList[scenarioIndex])
+                        // Initialize game camera to match map viewer camera
+                        gameCameraX = Double(cameraX)
+                        gameCameraY = Double(cameraY)
+                        gameZoomLevel = zoomLevel
+                        lastTickTime = 0
+                        tickAccumulator = 0
+                        state = .playing
+                    }
+                } else if key >= Int32(SDLK_0.rawValue) && key <= Int32(SDLK_9.rawValue) {
+                    let wpId = Int(key - Int32(SDLK_0.rawValue))
+                    if let sd = scenarioData,
+                       let wp = sd.waypoints.first(where: { $0.id == wpId }) {
+                        let pos = cellToPixel(wp.cell)
+                        cameraX = pos.px - Int(Double(windowWidth) / zoomLevel) / 2
+                        cameraY = pos.py - Int(Double(windowHeight) / zoomLevel) / 2
+                        // Clamp camera
+                        let visW = Int(Double(windowWidth) / zoomLevel)
+                        let visH = Int(Double(windowHeight) / zoomLevel)
+                        let maxCX = 64 * 24 - visW
+                        let maxCY = 64 * 24 - visH
+                        cameraX = max(0, min(maxCX, cameraX))
+                        cameraY = max(0, min(maxCY, cameraY))
+                    }
+                }
+            }
+            // Playing state key controls
+            if case .playing = state {
+                if key == Int32(SDLK_EQUALS.rawValue) {
+                    gameZoomLevel = min(3.0, gameZoomLevel + 0.25)
+                } else if key == Int32(SDLK_MINUS.rawValue) {
+                    gameZoomLevel = max(0.5, gameZoomLevel - 0.25)
+                }
+            }
 
         case SDL_MOUSEMOTION:
             mouseX = event.motion.x
             mouseY = event.motion.y
+            // Update world coordinates for info panel
+            if case .mapViewer = state {
+                mouseWorldX = cameraX + Int(Double(event.motion.x) / zoomLevel)
+                mouseWorldY = cameraY + Int(Double(event.motion.y) / zoomLevel)
+            }
+            // Drag select tracking in playing mode
+            if case .playing = state {
+                if selectionBoxStartX != nil {
+                    handleGameLeftDrag(event.motion.x, event.motion.y)
+                }
+            }
+            // Mouse panning in map viewer
+            if case .mapViewer = state, mousePanning {
+                let dx = event.motion.xrel
+                let dy = event.motion.yrel
+                cameraX -= Int(Double(dx) / zoomLevel)
+                cameraY -= Int(Double(dy) / zoomLevel)
+                // Clamp
+                let visW = Int(Double(windowWidth) / zoomLevel)
+                let visH = Int(Double(windowHeight) / zoomLevel)
+                let maxCX = 64 * 24 - visW
+                let maxCY = 64 * 24 - visH
+                cameraX = max(0, min(maxCX, cameraX))
+                cameraY = max(0, min(maxCY, cameraY))
+            }
+
+        case SDL_MOUSEBUTTONUP:
+            if event.button.button == UInt8(SDL_BUTTON_LEFT) {
+                mousePanning = false
+                if case .playing = state {
+                    let shiftHeld = (SDL_GetModState().rawValue & UInt32(KMOD_SHIFT.rawValue)) != 0
+                    handleGameLeftUp(event.button.x, event.button.y, shiftHeld: shiftHeld)
+                }
+            }
 
         case SDL_MOUSEBUTTONDOWN:
             if event.button.button == UInt8(SDL_BUTTON_LEFT) {
+                // Start mouse panning in map viewer
+                if case .mapViewer = state {
+                    mousePanning = true
+                    lastMouseX = event.button.x
+                    lastMouseY = event.button.y
+                }
+
+                // Start selection in playing mode
+                if case .playing = state {
+                    let shiftHeld = (SDL_GetModState().rawValue & UInt32(KMOD_SHIFT.rawValue)) != 0
+                    handleGameLeftDown(event.button.x, event.button.y, shiftHeld: shiftHeld)
+                }
+
                 let buttons: [Button]
                 switch state {
                 case .main: buttons = makeMainButtons()
@@ -615,12 +495,19 @@ while running {
                 case .spriteViewer: buttons = []
                 case .mapViewer: buttons = []
                 case .launching: buttons = []
+                case .playing: buttons = []
                 }
                 for btn in buttons {
                     if btn.contains(mouseX, mouseY) {
                         btn.action()
                         break
                     }
+                }
+            }
+            // Right click for move order in playing mode
+            if event.button.button == UInt8(SDL_BUTTON_RIGHT) {
+                if case .playing = state {
+                    handleGameRightClick(event.button.x, event.button.y)
                 }
             }
 
@@ -631,9 +518,11 @@ while running {
 
     // Map viewer camera panning (continuous key state)
     if case .mapViewer = state {
-        let panSpeed = 8
-        let maxCameraX = 64 * 24 - Int(windowWidth)
-        let maxCameraY = 64 * 24 - Int(windowHeight)
+        let panSpeed = max(1, Int(8.0 / zoomLevel))
+        let visibleW = Int(Double(windowWidth) / zoomLevel)
+        let visibleH = Int(Double(windowHeight) / zoomLevel)
+        let maxCameraX = 64 * 24 - visibleW
+        let maxCameraY = 64 * 24 - visibleH
 
         if let keyState = SDL_GetKeyboardState(nil) {
             if keyState[Int(SDL_SCANCODE_LEFT.rawValue)] != 0 || keyState[Int(SDL_SCANCODE_A.rawValue)] != 0 {
@@ -649,6 +538,35 @@ while running {
                 cameraY = min(maxCameraY, cameraY + panSpeed)
             }
         }
+    }
+
+    // Playing state camera panning (continuous key state)
+    if case .playing = state {
+        let panSpeed = max(1.0, 8.0 / gameZoomLevel)
+        let visibleW = Double(windowWidth) / gameZoomLevel
+        let visibleH = Double(windowHeight) / gameZoomLevel
+        let maxCamX = Double(64 * 24) - visibleW
+        let maxCamY = Double(64 * 24) - visibleH
+
+        if let keyState = SDL_GetKeyboardState(nil) {
+            if keyState[Int(SDL_SCANCODE_LEFT.rawValue)] != 0 || keyState[Int(SDL_SCANCODE_A.rawValue)] != 0 {
+                gameCameraX = max(0, gameCameraX - panSpeed)
+            }
+            if keyState[Int(SDL_SCANCODE_RIGHT.rawValue)] != 0 || keyState[Int(SDL_SCANCODE_D.rawValue)] != 0 {
+                gameCameraX = min(maxCamX, gameCameraX + panSpeed)
+            }
+            if keyState[Int(SDL_SCANCODE_UP.rawValue)] != 0 || keyState[Int(SDL_SCANCODE_W.rawValue)] != 0 {
+                gameCameraY = max(0, gameCameraY - panSpeed)
+            }
+            if keyState[Int(SDL_SCANCODE_DOWN.rawValue)] != 0 || keyState[Int(SDL_SCANCODE_S.rawValue)] != 0 {
+                gameCameraY = min(maxCamY, gameCameraY + panSpeed)
+            }
+        }
+    }
+
+    // Update game logic in playing state
+    if case .playing = state {
+        updateGame()
     }
 
     // Render
@@ -746,15 +664,27 @@ while running {
         drawText(renderer, "Esc: Back", centerX: windowWidth / 2, centerY: windowHeight - 35, color: .gray, scale: 1)
 
     case .mapViewer:
-        // Render the map tiles
+        // Increment animation frame for terrain (trees etc.)
+        animationFrame += 1
+
+        // Render the map tiles + scenario objects
         renderMapViewer(renderer)
 
         // HUD overlay
         let cellX = cameraX / 24
         let cellY = cameraY / 24
-        drawText(renderer, "Map Viewer - GDI Mission 1", centerX: windowWidth / 2, centerY: 15, color: .amber, scale: 2)
-        drawText(renderer, "Camera: \(cellX) \(cellY)", centerX: windowWidth / 2, centerY: 35, color: .green, scale: 1)
-        drawText(renderer, "Arrows/WASD: Pan  Esc: Back", centerX: windowWidth / 2, centerY: windowHeight - 15, color: .gray, scale: 1)
+        let scenarioLabel = "\(scenarioList[scenarioIndex]) (\(scenarioIndex + 1)/\(scenarioList.count))"
+        drawText(renderer, "Map Viewer - \(scenarioLabel)", centerX: windowWidth / 2, centerY: 15, color: .amber, scale: 2)
+        let zoomPct = String(format: "%.0f%%", zoomLevel * 100)
+        drawText(renderer, "Camera: \(cellX) \(cellY)  Zoom: \(zoomPct)", centerX: windowWidth / 2, centerY: 35, color: .green, scale: 1)
+        if let sd = scenarioData {
+            let counts = "T:\(sd.terrain.count) O:\(sd.overlays.count) S:\(sd.structures.count) U:\(sd.units.count) I:\(sd.infantry.count)"
+            drawText(renderer, counts, centerX: windowWidth / 2, centerY: 52, color: .green, scale: 1)
+        }
+        drawText(renderer, "Arrows/Drag: Pan  +/-: Zoom  [/]: Scenario  G: Grid  I: Info  T: Triggers  B: Base  P: Play  0-9: WP", centerX: windowWidth / 2, centerY: windowHeight - 15, color: .gray, scale: 1)
+
+    case .playing:
+        renderGame(renderer)
     }
 
     SDL_RenderPresent(renderer)

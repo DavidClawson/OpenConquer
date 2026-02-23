@@ -1,0 +1,364 @@
+import Foundation
+
+// MARK: - Theater Type
+
+enum TheaterType: String, CaseIterable {
+    case temperate = "TEMPERATE"
+    case desert = "DESERT"
+    case winter = "WINTER"
+
+    var suffix: String {
+        switch self {
+        case .temperate: return ".TEM"
+        case .desert:    return ".DES"
+        case .winter:    return ".WIN"
+        }
+    }
+
+    var paletteName: String {
+        switch self {
+        case .temperate: return "TEMPERAT.PAL"
+        case .desert:    return "DESERT.PAL"
+        case .winter:    return "WINTER.PAL"
+        }
+    }
+
+    var mixName: String {
+        switch self {
+        case .temperate: return "TEMPERAT.MIX"
+        case .desert:    return "DESERT.MIX"
+        case .winter:    return "WINTER.MIX"
+        }
+    }
+
+    static func from(_ string: String) -> TheaterType {
+        let upper = string.uppercased()
+        for theater in TheaterType.allCases {
+            if upper == theater.rawValue {
+                return theater
+            }
+        }
+        return .temperate
+    }
+}
+
+// MARK: - House (Faction)
+
+enum House: String, CaseIterable {
+    case goodGuy = "GoodGuy"   // GDI
+    case badGuy = "BadGuy"     // Nod
+    case neutral = "Neutral"
+    case special = "Special"
+    case multi1 = "Multi1"
+    case multi2 = "Multi2"
+    case multi3 = "Multi3"
+    case multi4 = "Multi4"
+    case multi5 = "Multi5"
+    case multi6 = "Multi6"
+
+    var displayColor: (r: UInt8, g: UInt8, b: UInt8) {
+        switch self {
+        case .goodGuy: return (r: 220, g: 180, b: 40)   // Gold/yellow for GDI
+        case .badGuy:  return (r: 200, g: 40,  b: 40)   // Red for Nod
+        case .neutral: return (r: 140, g: 140, b: 140)  // Gray
+        case .special: return (r: 180, g: 180, b: 40)   // Yellow-ish
+        case .multi1:  return (r: 100, g: 160, b: 220)  // Light blue
+        case .multi2:  return (r: 220, g: 140, b: 40)   // Orange
+        case .multi3:  return (r: 40,  g: 180, b: 40)   // Green
+        case .multi4:  return (r: 220, g: 180, b: 40)   // Gold (same as GDI)
+        case .multi5:  return (r: 200, g: 40,  b: 40)   // Red (same as Nod)
+        case .multi6:  return (r: 40,  g: 40,  b: 200)  // Blue
+        }
+    }
+
+    static func from(_ string: String) -> House {
+        let lower = string.lowercased()
+        for house in House.allCases {
+            if lower == house.rawValue.lowercased() {
+                return house
+            }
+        }
+        return .neutral
+    }
+}
+
+// MARK: - Scenario Data Types
+
+struct MapBounds {
+    let x: Int
+    let y: Int
+    let width: Int
+    let height: Int
+}
+
+struct ScenarioTerrain {
+    let cell: Int
+    let typeName: String  // e.g. "T08", "TC01"
+}
+
+struct ScenarioOverlay {
+    let cell: Int
+    let typeName: String  // e.g. "TI1", "SBAG"
+}
+
+struct ScenarioStructure {
+    let house: House
+    let typeName: String   // e.g. "FACT", "PYLE"
+    let strength: Int
+    let cell: Int
+    let facing: Int
+    let trigger: String
+}
+
+struct ScenarioUnit {
+    let house: House
+    let typeName: String   // e.g. "MTNK", "HMMV"
+    let strength: Int
+    let cell: Int
+    let facing: Int
+    let mission: String
+    let trigger: String
+}
+
+struct ScenarioInfantry {
+    let house: House
+    let typeName: String   // e.g. "E1", "E3"
+    let strength: Int
+    let cell: Int
+    let subLocation: Int   // 0-4 sub-cell position
+    let mission: String
+    let facing: Int
+    let trigger: String
+}
+
+struct ScenarioWaypoint {
+    let id: Int
+    let cell: Int
+}
+
+struct ScenarioCellTrigger {
+    let cell: Int
+    let triggerName: String
+}
+
+struct ScenarioBaseBuilding {
+    let typeName: String
+    let cell: Int
+}
+
+// MARK: - Scenario Data
+
+struct ScenarioData {
+    let theater: TheaterType
+    let mapBounds: MapBounds?
+    let terrain: [ScenarioTerrain]
+    let overlays: [ScenarioOverlay]
+    let structures: [ScenarioStructure]
+    let units: [ScenarioUnit]
+    let infantry: [ScenarioInfantry]
+    let waypoints: [ScenarioWaypoint]
+    let cellTriggers: [ScenarioCellTrigger]
+    let baseBuildings: [ScenarioBaseBuilding]
+}
+
+// MARK: - Cell Coordinate Helpers
+
+/// Convert cell number to (x, y) on the 64x64 grid
+func cellToXY(_ cell: Int) -> (x: Int, y: Int) {
+    return (x: cell % 64, y: cell / 64)
+}
+
+/// Convert cell number to pixel position (top-left of cell)
+func cellToPixel(_ cell: Int) -> (px: Int, py: Int) {
+    let xy = cellToXY(cell)
+    return (px: xy.x * 24, py: xy.y * 24)
+}
+
+// MARK: - Sub-cell offsets for infantry (5 positions within a cell)
+
+/// Returns pixel offset within a 24x24 cell for infantry sub-positions
+func subCellOffset(_ subLocation: Int) -> (dx: Int, dy: Int) {
+    switch subLocation {
+    case 0: return (dx: 6,  dy: 6)   // Center
+    case 1: return (dx: 2,  dy: 2)   // Top-left
+    case 2: return (dx: 14, dy: 2)   // Top-right
+    case 3: return (dx: 2,  dy: 14)  // Bottom-left
+    case 4: return (dx: 14, dy: 14)  // Bottom-right
+    default: return (dx: 6, dy: 6)
+    }
+}
+
+// MARK: - Building Size Lookup
+
+/// Returns (width, height) in cells for known building types
+func buildingSize(_ typeName: String) -> (w: Int, h: Int) {
+    switch typeName.uppercased() {
+    case "FACT":                       return (w: 3, h: 3)  // Construction Yard
+    case "PROC":                       return (w: 3, h: 3)  // Refinery
+    case "WEAP":                       return (w: 3, h: 2)  // Weapons Factory
+    case "AFLD":                       return (w: 3, h: 2)  // Airfield
+    case "TMPL", "FIX":               return (w: 3, h: 3)  // Temple / Repair
+    case "NUKE", "NUK2":              return (w: 2, h: 2)  // Power Plant
+    case "PYLE", "HAND":              return (w: 2, h: 2)  // Barracks
+    case "SAM":                        return (w: 2, h: 2)  // SAM Site
+    case "HPAD":                       return (w: 2, h: 2)  // Helipad
+    case "EYE":                        return (w: 2, h: 2)  // Adv. Comm Center
+    case "SILO":                       return (w: 2, h: 1)  // Tiberium Silo
+    case "HQ":                         return (w: 2, h: 2)  // HQ / Comm Center
+    case "ARCO", "HOSP", "BIO", "MISS": return (w: 2, h: 2)
+    case "ATWR", "GTWR", "GUN", "OBLI": return (w: 1, h: 1)  // Turrets
+    default:                           return (w: 2, h: 2)
+    }
+}
+
+// MARK: - Scenario Loader
+
+func loadScenario(_ name: String, from mixManager: MIXFileManager) -> ScenarioData? {
+    guard let data = mixManager.retrieve(name) else {
+        print("ScenarioLoader: Could not find \(name)")
+        return nil
+    }
+
+    let ini = INIFile(data: data)
+
+    // [MAP] section
+    let theaterStr = ini.string("MAP", "Theater", default: "TEMPERATE")
+    let theater = TheaterType.from(theaterStr)
+
+    var mapBounds: MapBounds? = nil
+    if ini.hasSection("MAP") {
+        let x = ini.int("MAP", "X", default: 0)
+        let y = ini.int("MAP", "Y", default: 0)
+        let width = ini.int("MAP", "Width", default: 64)
+        let height = ini.int("MAP", "Height", default: 64)
+        mapBounds = MapBounds(x: x, y: y, width: width, height: height)
+    }
+
+    // [TERRAIN] — key is cell number, value is "TypeName" or "TypeName,TriggerName"
+    var terrain: [ScenarioTerrain] = []
+    for entry in ini.entries("TERRAIN") {
+        if let cell = Int(entry.key) {
+            // Strip trigger name after comma (e.g. "T08,NONE" -> "T08")
+            let typeName = entry.value.components(separatedBy: ",").first ?? entry.value
+            terrain.append(ScenarioTerrain(cell: cell, typeName: typeName.trimmingCharacters(in: .whitespaces)))
+        }
+    }
+
+    // [OVERLAY] — key is cell number, value is overlay type
+    var overlays: [ScenarioOverlay] = []
+    for entry in ini.entries("OVERLAY") {
+        if let cell = Int(entry.key) {
+            overlays.append(ScenarioOverlay(cell: cell, typeName: entry.value))
+        }
+    }
+
+    // [STRUCTURES] — value format: House,Type,Strength,Cell,Facing,Trigger
+    var structures: [ScenarioStructure] = []
+    for entry in ini.entries("STRUCTURES") {
+        let parts = entry.value.components(separatedBy: ",")
+        if parts.count >= 5 {
+            let house = House.from(parts[0].trimmingCharacters(in: .whitespaces))
+            let typeName = parts[1].trimmingCharacters(in: .whitespaces)
+            let strength = Int(parts[2].trimmingCharacters(in: .whitespaces)) ?? 256
+            let cell = Int(parts[3].trimmingCharacters(in: .whitespaces)) ?? 0
+            let facing = Int(parts[4].trimmingCharacters(in: .whitespaces)) ?? 0
+            let trigger = parts.count > 5 ? parts[5].trimmingCharacters(in: .whitespaces) : "None"
+            structures.append(ScenarioStructure(
+                house: house, typeName: typeName, strength: strength,
+                cell: cell, facing: facing, trigger: trigger
+            ))
+        }
+    }
+
+    // [UNITS] — value format: House,Type,Strength,Cell,Facing,Mission,Trigger
+    var units: [ScenarioUnit] = []
+    for entry in ini.entries("UNITS") {
+        let parts = entry.value.components(separatedBy: ",")
+        if parts.count >= 6 {
+            let house = House.from(parts[0].trimmingCharacters(in: .whitespaces))
+            let typeName = parts[1].trimmingCharacters(in: .whitespaces)
+            let strength = Int(parts[2].trimmingCharacters(in: .whitespaces)) ?? 256
+            let cell = Int(parts[3].trimmingCharacters(in: .whitespaces)) ?? 0
+            let facing = Int(parts[4].trimmingCharacters(in: .whitespaces)) ?? 0
+            let mission = parts[5].trimmingCharacters(in: .whitespaces)
+            let trigger = parts.count > 6 ? parts[6].trimmingCharacters(in: .whitespaces) : "None"
+            units.append(ScenarioUnit(
+                house: house, typeName: typeName, strength: strength,
+                cell: cell, facing: facing, mission: mission, trigger: trigger
+            ))
+        }
+    }
+
+    // [INFANTRY] — value format: House,Type,Strength,Cell,SubLocation,Mission,Facing,Trigger
+    var infantry: [ScenarioInfantry] = []
+    for entry in ini.entries("INFANTRY") {
+        let parts = entry.value.components(separatedBy: ",")
+        if parts.count >= 7 {
+            let house = House.from(parts[0].trimmingCharacters(in: .whitespaces))
+            let typeName = parts[1].trimmingCharacters(in: .whitespaces)
+            let strength = Int(parts[2].trimmingCharacters(in: .whitespaces)) ?? 256
+            let cell = Int(parts[3].trimmingCharacters(in: .whitespaces)) ?? 0
+            let subLocation = Int(parts[4].trimmingCharacters(in: .whitespaces)) ?? 0
+            let mission = parts[5].trimmingCharacters(in: .whitespaces)
+            let facing = Int(parts[6].trimmingCharacters(in: .whitespaces)) ?? 0
+            let trigger = parts.count > 7 ? parts[7].trimmingCharacters(in: .whitespaces) : "None"
+            infantry.append(ScenarioInfantry(
+                house: house, typeName: typeName, strength: strength,
+                cell: cell, subLocation: subLocation, mission: mission,
+                facing: facing, trigger: trigger
+            ))
+        }
+    }
+
+    // [WAYPOINTS] — key is waypoint ID, value is cell number
+    var waypoints: [ScenarioWaypoint] = []
+    for entry in ini.entries("WAYPOINTS") {
+        if let id = Int(entry.key), let cell = Int(entry.value), cell >= 0 {
+            waypoints.append(ScenarioWaypoint(id: id, cell: cell))
+        }
+    }
+
+    // [CellTriggers] — key is cell number, value is trigger name
+    var cellTriggers: [ScenarioCellTrigger] = []
+    for entry in ini.entries("CELLTRIGGERS") {
+        if let cell = Int(entry.key) {
+            cellTriggers.append(ScenarioCellTrigger(cell: cell, triggerName: entry.value.trimmingCharacters(in: .whitespaces)))
+        }
+    }
+
+    // [Base] — numbered keys (000, 001, ...), value = "TypeName,CellNumber"
+    var baseBuildings: [ScenarioBaseBuilding] = []
+    for entry in ini.entries("BASE") {
+        // Skip "Count" key
+        if entry.key.uppercased() == "COUNT" { continue }
+        let parts = entry.value.components(separatedBy: ",")
+        if parts.count >= 2 {
+            let typeName = parts[0].trimmingCharacters(in: .whitespaces)
+            if let cell = Int(parts[1].trimmingCharacters(in: .whitespaces)) {
+                baseBuildings.append(ScenarioBaseBuilding(typeName: typeName, cell: cell))
+            }
+        }
+    }
+
+    print("ScenarioLoader: Loaded \(name)")
+    print("  Theater: \(theater.rawValue)")
+    if let bounds = mapBounds {
+        print("  Map bounds: \(bounds.x),\(bounds.y) \(bounds.width)x\(bounds.height)")
+    }
+    print("  Terrain: \(terrain.count), Overlays: \(overlays.count)")
+    print("  Structures: \(structures.count), Units: \(units.count), Infantry: \(infantry.count)")
+    print("  Waypoints: \(waypoints.count), CellTriggers: \(cellTriggers.count), Base: \(baseBuildings.count)")
+
+    return ScenarioData(
+        theater: theater,
+        mapBounds: mapBounds,
+        terrain: terrain,
+        overlays: overlays,
+        structures: structures,
+        units: units,
+        infantry: infantry,
+        waypoints: waypoints,
+        cellTriggers: cellTriggers,
+        baseBuildings: baseBuildings
+    )
+}
