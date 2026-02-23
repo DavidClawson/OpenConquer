@@ -1,0 +1,35 @@
+# Build artifacts
+.build/
+build/
+DerivedData/
+*.o
+*.d
+*.app
+
+# Data files (MIX archives, game assets)
+*.MIX
+*.mix
+*.AUD
+*.aud
+*.VQA
+*.vqa
+*.VQP
+*.vqp
+*.WSA
+*.wsa
+*.PAL
+*.pal
+
+# macOS
+.DS_Store
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# Swift Package Manager
+.swiftpm/
+Package.resolved
+
+# IDE
+.vscode/
+*.swp
+*~
