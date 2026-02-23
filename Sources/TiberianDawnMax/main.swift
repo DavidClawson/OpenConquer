@@ -72,36 +72,29 @@ if CommandLine.arguments.contains("--test-shp") {
     let testShapes = ["MOUSE.SHP", "OPTIONS.SHP", "LTNK.SHP"]
     for name in testShapes {
         print("Testing \(name)...")
-        fflush(stdout)
         if let data = mixManager.retrieve(name) {
-            print("\(name): \(data.count) bytes raw data")
-            fflush(stdout)
-            // Re-base data to start at index 0 (MIX returns a slice with non-zero startIndex)
             let data = Data(data)
-            // Dump first 32 bytes for debugging
-            let header = data.prefix(32).map { String(format: "%02X", $0) }.joined(separator: " ")
-            print("  header: \(header)")
-            fflush(stdout)
-            // Parse numshapes and first offset manually
-            let numShapes = Int(data[0]) | (Int(data[1]) << 8)
-            print("  numShapes: \(numShapes)")
-            if numShapes > 0 && data.count >= 6 {
-                let off0 = Int(data[2]) | (Int(data[3]) << 8) | (Int(data[4]) << 16) | (Int(data[5]) << 24)
-                print("  offset[0]: \(off0)")
-                let shapeStart = 2 + off0
-                if shapeStart + 10 < data.count {
-                    let shapeType = Int(data[shapeStart]) | (Int(data[shapeStart+1]) << 8)
-                    let h = Int(data[shapeStart+2])
-                    let w = Int(data[shapeStart+3]) | (Int(data[shapeStart+4]) << 8)
-                    print("  frame0: type=\(shapeType) w=\(w) h=\(h)")
-                }
-            }
             do {
                 let shp = try SHPFile(data: data)
                 print("  \(shp.frames.count) frames parsed")
                 for (i, frame) in shp.frames.prefix(5).enumerated() {
                     let nonZero = frame.pixels.filter { $0 != 0 }.count
                     print("  frame \(i): \(frame.width)x\(frame.height), \(nonZero) visible pixels")
+                }
+                // Also print frame 33 for MOUSE.SHP
+                if name == "MOUSE.SHP" && shp.frames.count > 33 {
+                    let f33 = shp.frames[33]
+                    let nz33 = f33.pixels.filter { $0 != 0 }.count
+                    print("  frame 33: \(f33.width)x\(f33.height), \(nz33) visible pixels")
+                    // Print ASCII art
+                    for y in 0..<f33.height {
+                        var row = "  "
+                        for x in 0..<f33.width {
+                            let p = f33.pixels[y * f33.width + x]
+                            row += p == 0 ? "." : String(format: "%X", p & 0xF)
+                        }
+                        print(row)
+                    }
                 }
                 if shp.frames.count > 5 {
                     print("  ... (\(shp.frames.count - 5) more frames)")
@@ -155,6 +148,7 @@ enum MenuState {
     case chooseFaction
     case launching(Faction, Difficulty)
     case spriteViewer
+    case mapViewer
 }
 
 // MARK: - Sprite Viewer State
@@ -188,6 +182,122 @@ func loadCurrentSprite() {
         }
     } else {
         currentSHP = nil
+    }
+}
+
+// MARK: - Map Viewer State
+
+var mapCells: [MapCell] = []
+var cameraX: Int = 0
+var cameraY: Int = 0
+var icnCache: [String: ICNFile] = [:]
+var tileTextureCache: [String: OpaquePointer] = [:]
+var mapFailedICNs: Set<String> = []  // avoid repeated load attempts
+
+func loadMapViewerData() {
+    cameraX = 0
+    cameraY = 0
+    if let cells = loadMap("SCG01EA.BIN", from: mixManager) {
+        mapCells = cells
+    } else {
+        print("MapViewer: Failed to load SCG01EA.BIN")
+        mapCells = (0..<4096).map { _ in MapCell(templateType: 0xFF, iconIndex: 0) }
+    }
+}
+
+func createTileTexture(_ renderer: OpaquePointer?, pixels: [UInt8]) -> OpaquePointer? {
+    let format: UInt32 = 0x16362004  // SDL_PIXELFORMAT_ARGB8888
+    guard let texture = SDL_CreateTexture(renderer, format, Int32(SDL_TEXTUREACCESS_STATIC.rawValue), 24, 24) else {
+        return nil
+    }
+
+    var argb = [UInt32](repeating: 0, count: 576)
+    for i in 0..<576 {
+        let palIdx = Int(pixels[i])
+        let c = gamePalette[palIdx]
+        argb[i] = 0xFF000000 | (UInt32(c.r) << 16) | (UInt32(c.g) << 8) | UInt32(c.b)
+    }
+
+    _ = argb.withUnsafeMutableBufferPointer { buf in
+        SDL_UpdateTexture(texture, nil, buf.baseAddress, 24 * 4)
+    }
+
+    return texture
+}
+
+func getTileTexture(_ renderer: OpaquePointer?, icnName: String, iconIndex: Int) -> OpaquePointer? {
+    let key = "\(icnName)_\(iconIndex)"
+    if let cached = tileTextureCache[key] {
+        return cached
+    }
+
+    // Load ICN file if not cached
+    if icnCache[icnName] == nil && !mapFailedICNs.contains(icnName) {
+        let filename = icnName + ".TEM"  // TEMPERATE theater
+        if let data = mixManager.retrieve(filename) {
+            do {
+                icnCache[icnName] = try ICNFile(data: data)
+            } catch {
+                print("MapViewer: Failed to parse \(filename): \(error)")
+                mapFailedICNs.insert(icnName)
+            }
+        } else {
+            mapFailedICNs.insert(icnName)
+        }
+    }
+
+    guard let icn = icnCache[icnName], let pixels = icn.tile(icon: iconIndex) else {
+        return nil
+    }
+
+    if let texture = createTileTexture(renderer, pixels: pixels) {
+        tileTextureCache[key] = texture
+        return texture
+    }
+    return nil
+}
+
+func renderMapViewer(_ renderer: OpaquePointer?) {
+    let tileSize = 24
+    let mapSize = 64
+
+    let startCellX = max(0, cameraX / tileSize)
+    let startCellY = max(0, cameraY / tileSize)
+    let endCellX = min(mapSize - 1, (cameraX + Int(windowWidth)) / tileSize)
+    let endCellY = min(mapSize - 1, (cameraY + Int(windowHeight)) / tileSize)
+
+    for cellY in startCellY...endCellY {
+        for cellX in startCellX...endCellX {
+            let cellIndex = cellY * mapSize + cellX
+            let cell = mapCells[cellIndex]
+
+            let templateType = Int(cell.templateType)
+            let iconIndex = Int(cell.iconIndex)
+
+            let icnName: String
+            let actualIconIndex: Int
+            if templateType == 0xFF || templateType >= templateTable.count {
+                icnName = "CLEAR1"
+                actualIconIndex = 0
+            } else {
+                icnName = templateTable[templateType].icnName
+                actualIconIndex = iconIndex
+            }
+
+            if let texture = getTileTexture(renderer, icnName: icnName, iconIndex: actualIconIndex) {
+                let screenX = Int32(cellX * tileSize - cameraX)
+                let screenY = Int32(cellY * tileSize - cameraY)
+                var dstRect = SDL_Rect(x: screenX, y: screenY, w: Int32(tileSize), h: Int32(tileSize))
+                SDL_RenderCopy(renderer, texture, nil, &dstRect)
+            } else {
+                // Fallback: draw a green rectangle for missing tiles
+                let screenX = Int32(cellX * tileSize - cameraX)
+                let screenY = Int32(cellY * tileSize - cameraY)
+                SDL_SetRenderDrawColor(renderer, 0, 100, 0, 255)
+                var rect = SDL_Rect(x: screenX, y: screenY, w: Int32(tileSize), h: Int32(tileSize))
+                SDL_RenderFillRect(renderer, &rect)
+            }
+        }
     }
 }
 
@@ -398,7 +508,11 @@ func makeMainButtons() -> [Button] {
             loadCurrentSprite()
             state = .spriteViewer
         },
-        Button(label: "Exit Game", x: cx, y: startY + 120, w: bw, h: bh) {
+        Button(label: "Map Viewer", x: cx, y: startY + 120, w: bw, h: bh) {
+            loadMapViewerData()
+            state = .mapViewer
+        },
+        Button(label: "Exit Game", x: cx, y: startY + 180, w: bw, h: bh) {
             running = false
         },
     ]
@@ -462,6 +576,8 @@ while running {
                     state = .chooseFaction
                 case .spriteViewer:
                     state = .main
+                case .mapViewer:
+                    state = .main
                 }
             }
             // Sprite viewer controls
@@ -497,6 +613,7 @@ while running {
                 case .chooseDifficulty: buttons = makeDifficultyButtons()
                 case .chooseFaction: buttons = makeFactionButtons()
                 case .spriteViewer: buttons = []
+                case .mapViewer: buttons = []
                 case .launching: buttons = []
                 }
                 for btn in buttons {
@@ -509,6 +626,28 @@ while running {
 
         default:
             break
+        }
+    }
+
+    // Map viewer camera panning (continuous key state)
+    if case .mapViewer = state {
+        let panSpeed = 8
+        let maxCameraX = 64 * 24 - Int(windowWidth)
+        let maxCameraY = 64 * 24 - Int(windowHeight)
+
+        if let keyState = SDL_GetKeyboardState(nil) {
+            if keyState[Int(SDL_SCANCODE_LEFT.rawValue)] != 0 || keyState[Int(SDL_SCANCODE_A.rawValue)] != 0 {
+                cameraX = max(0, cameraX - panSpeed)
+            }
+            if keyState[Int(SDL_SCANCODE_RIGHT.rawValue)] != 0 || keyState[Int(SDL_SCANCODE_D.rawValue)] != 0 {
+                cameraX = min(maxCameraX, cameraX + panSpeed)
+            }
+            if keyState[Int(SDL_SCANCODE_UP.rawValue)] != 0 || keyState[Int(SDL_SCANCODE_W.rawValue)] != 0 {
+                cameraY = max(0, cameraY - panSpeed)
+            }
+            if keyState[Int(SDL_SCANCODE_DOWN.rawValue)] != 0 || keyState[Int(SDL_SCANCODE_S.rawValue)] != 0 {
+                cameraY = min(maxCameraY, cameraY + panSpeed)
+            }
         }
     }
 
@@ -605,6 +744,17 @@ while running {
         let animLabel = spriteViewerAnimating ? "Playing" : "Paused"
         drawText(renderer, "Left/Right: Shape  Up/Down: Frame  Space: \(animLabel)", centerX: windowWidth / 2, centerY: windowHeight - 60, color: .gray, scale: 1)
         drawText(renderer, "Esc: Back", centerX: windowWidth / 2, centerY: windowHeight - 35, color: .gray, scale: 1)
+
+    case .mapViewer:
+        // Render the map tiles
+        renderMapViewer(renderer)
+
+        // HUD overlay
+        let cellX = cameraX / 24
+        let cellY = cameraY / 24
+        drawText(renderer, "Map Viewer - GDI Mission 1", centerX: windowWidth / 2, centerY: 15, color: .amber, scale: 2)
+        drawText(renderer, "Camera: \(cellX) \(cellY)", centerX: windowWidth / 2, centerY: 35, color: .green, scale: 1)
+        drawText(renderer, "Arrows/WASD: Pan  Esc: Back", centerX: windowWidth / 2, centerY: windowHeight - 15, color: .gray, scale: 1)
     }
 
     SDL_RenderPresent(renderer)
