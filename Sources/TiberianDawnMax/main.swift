@@ -65,6 +65,55 @@ if CommandLine.arguments.contains("--test-mix") {
     exit(0)
 }
 
+// If --test-shp, parse and dump SHP info
+if CommandLine.arguments.contains("--test-shp") {
+    let testShapes = ["MOUSE.SHP", "OPTIONS.SHP", "TRANS.ICN"]
+    for name in testShapes {
+        print("Testing \(name)...")
+        fflush(stdout)
+        if let data = mixManager.retrieve(name) {
+            print("\(name): \(data.count) bytes raw data")
+            fflush(stdout)
+            // Re-base data to start at index 0 (MIX returns a slice with non-zero startIndex)
+            let data = Data(data)
+            // Dump first 32 bytes for debugging
+            let header = data.prefix(32).map { String(format: "%02X", $0) }.joined(separator: " ")
+            print("  header: \(header)")
+            fflush(stdout)
+            // Parse numshapes and first offset manually
+            let numShapes = Int(data[0]) | (Int(data[1]) << 8)
+            print("  numShapes: \(numShapes)")
+            if numShapes > 0 && data.count >= 6 {
+                let off0 = Int(data[2]) | (Int(data[3]) << 8) | (Int(data[4]) << 16) | (Int(data[5]) << 24)
+                print("  offset[0]: \(off0)")
+                let shapeStart = 2 + off0
+                if shapeStart + 10 < data.count {
+                    let shapeType = Int(data[shapeStart]) | (Int(data[shapeStart+1]) << 8)
+                    let h = Int(data[shapeStart+2])
+                    let w = Int(data[shapeStart+3]) | (Int(data[shapeStart+4]) << 8)
+                    print("  frame0: type=\(shapeType) w=\(w) h=\(h)")
+                }
+            }
+            do {
+                let shp = try SHPFile(data: data)
+                print("  \(shp.frames.count) frames parsed")
+                for (i, frame) in shp.frames.prefix(5).enumerated() {
+                    let nonZero = frame.pixels.filter { $0 != 0 }.count
+                    print("  frame \(i): \(frame.width)x\(frame.height), \(nonZero) visible pixels")
+                }
+                if shp.frames.count > 5 {
+                    print("  ... (\(shp.frames.count - 5) more frames)")
+                }
+            } catch {
+                print("  PARSE ERROR: \(error)")
+            }
+        } else {
+            print("\(name): not found in MIX files")
+        }
+    }
+    exit(0)
+}
+
 // MARK: - Types
 
 enum Faction: String {
