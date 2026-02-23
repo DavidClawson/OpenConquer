@@ -349,7 +349,10 @@ while running {
                 case .mapViewer:
                     state = .main
                 case .playing:
-                    if let world = gameWorld, !world.selectedObjects().isEmpty {
+                    if isPlacingStructure {
+                        isPlacingStructure = false
+                        placementType = nil
+                    } else if let world = gameWorld, !world.selectedObjects().isEmpty {
                         world.deselectAll()
                     } else {
                         state = .mapViewer
@@ -467,8 +470,10 @@ while running {
             if event.button.button == UInt8(SDL_BUTTON_LEFT) {
                 mousePanning = false
                 if case .playing = state {
-                    let shiftHeld = (SDL_GetModState().rawValue & UInt32(KMOD_SHIFT.rawValue)) != 0
-                    handleGameLeftUp(event.button.x, event.button.y, shiftHeld: shiftHeld)
+                    if event.button.x < windowWidth - sidebarWidth && !isPlacingStructure {
+                        let shiftHeld = (SDL_GetModState().rawValue & UInt32(KMOD_SHIFT.rawValue)) != 0
+                        handleGameLeftUp(event.button.x, event.button.y, shiftHeld: shiftHeld)
+                    }
                 }
             }
 
@@ -483,8 +488,15 @@ while running {
 
                 // Start selection in playing mode
                 if case .playing = state {
-                    let shiftHeld = (SDL_GetModState().rawValue & UInt32(KMOD_SHIFT.rawValue)) != 0
-                    handleGameLeftDown(event.button.x, event.button.y, shiftHeld: shiftHeld)
+                    // Check if click is in sidebar area
+                    if event.button.x >= windowWidth - sidebarWidth {
+                        handleSidebarClick(event.button.x, event.button.y)
+                    } else if isPlacingStructure {
+                        handleStructurePlacement(event.button.x, event.button.y)
+                    } else {
+                        let shiftHeld = (SDL_GetModState().rawValue & UInt32(KMOD_SHIFT.rawValue)) != 0
+                        handleGameLeftDown(event.button.x, event.button.y, shiftHeld: shiftHeld)
+                    }
                 }
 
                 let buttons: [Button]
@@ -504,10 +516,15 @@ while running {
                     }
                 }
             }
-            // Right click for move order in playing mode
+            // Right click for move order in playing mode (or cancel placement)
             if event.button.button == UInt8(SDL_BUTTON_RIGHT) {
                 if case .playing = state {
-                    handleGameRightClick(event.button.x, event.button.y)
+                    if isPlacingStructure {
+                        isPlacingStructure = false
+                        placementType = nil
+                    } else {
+                        handleGameRightClick(event.button.x, event.button.y)
+                    }
                 }
             }
 
@@ -543,7 +560,7 @@ while running {
     // Playing state camera panning (continuous key state)
     if case .playing = state {
         let panSpeed = max(1.0, 8.0 / gameZoomLevel)
-        let visibleW = Double(windowWidth) / gameZoomLevel
+        let visibleW = Double(windowWidth - sidebarWidth) / gameZoomLevel
         let visibleH = Double(windowHeight) / gameZoomLevel
         let maxCamX = Double(64 * 24) - visibleW
         let maxCamY = Double(64 * 24) - visibleH

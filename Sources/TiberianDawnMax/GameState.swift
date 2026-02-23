@@ -13,14 +13,18 @@ enum Mission: String {
     case move = "Move"
     case stop = "Stop"
     case sleep = "Sleep"
+    case attack = "Attack"
+    case harvest = "Harvest"
 
     static func from(_ string: String) -> Mission {
         switch string.lowercased() {
-        case "guard":  return .guard_
-        case "move":   return .move
-        case "stop":   return .stop
-        case "sleep":  return .sleep
-        default:       return .guard_
+        case "guard":   return .guard_
+        case "move":    return .move
+        case "stop":    return .stop
+        case "sleep":   return .sleep
+        case "attack":  return .attack
+        case "harvest": return .harvest
+        default:        return .guard_
         }
     }
 }
@@ -48,6 +52,13 @@ class GameObject {
     var moveTargetY: Double? = nil
     var speed: Double        // Pixels per tick
     var movePath: [(cellX: Int, cellY: Int)] = []
+
+    // Combat
+    var attackTarget: Int? = nil   // target object ID
+    var reloadTimer: Int = 0
+
+    // Harvesting
+    var tiberiumLoad: Int = 0
 
     // Infantry sub-cell
     var subCell: Int
@@ -83,6 +94,7 @@ class GameWorld {
     var theater: TheaterType = .temperate
     var mapBounds: MapBounds?
     var occupancy: [Int: Int] = [:]  // cell -> object id occupying it
+    var playerHouse: House = .goodGuy
 
     func addObject(_ obj: GameObject) {
         objects.append(obj)

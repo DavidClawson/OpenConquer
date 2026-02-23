@@ -115,10 +115,31 @@ func initGameWorld(scenario: ScenarioData, scenarioName: String) {
         world.addObject(obj)
     }
 
+    // Set player house based on scenario name (SCG = GDI, SCB = Nod)
+    if scenarioName.uppercased().hasPrefix("SCB") {
+        world.playerHouse = .badGuy
+    } else {
+        world.playerHouse = .goodGuy
+    }
+
     gameWorld = world
     print("GameInit: Created \(world.objects.count) objects from \(scenarioName)")
     print("  Structures: \(scenario.structures.count), Units: \(scenario.units.count), Infantry: \(scenario.infantry.count)")
+    print("  Player house: \(world.playerHouse.rawValue)")
 
     // Build static passability map
     buildPassabilityMap()
+
+    // Initialize tiberium cells from overlays
+    initTiberiumCells()
+
+    // Set harvesters to harvest mission
+    for obj in world.objects {
+        if obj.typeName.uppercased() == "HARV" && obj.house == world.playerHouse {
+            obj.mission = .harvest
+        }
+    }
+
+    // Initialize fog of war
+    initFog()
 }

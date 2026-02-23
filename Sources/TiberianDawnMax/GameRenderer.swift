@@ -118,6 +118,17 @@ func handleGameRightClick(_ x: Int32, _ y: Int32) {
     let selected = world.selectedObjects()
     if selected.isEmpty { return }
 
+    // Check if right-clicking on an enemy → attack order
+    if let enemy = findEnemyAtWorldPos(worldX: worldPos.worldX, worldY: worldPos.worldY) {
+        for obj in selected {
+            if obj.kind == .structure { continue }
+            obj.attackTarget = enemy.id
+            obj.mission = .attack
+            obj.movePath = []
+        }
+        return
+    }
+
     // Formation spread: arrange targets in a grid so units don't pile up
     let count = selected.count
     let cols = Int(ceil(sqrt(Double(count))))
@@ -137,6 +148,7 @@ func handleGameRightClick(_ x: Int32, _ y: Int32) {
         obj.moveTargetX = max(12, min(64 * 24 - 12, obj.moveTargetX!))
         obj.moveTargetY = max(12, min(64 * 24 - 12, obj.moveTargetY!))
 
+        obj.attackTarget = nil
         obj.mission = .move
         obj.movePath = []  // Clear old path so A* recalculates
     }
@@ -150,10 +162,15 @@ func renderGame(_ renderer: OpaquePointer?) {
     let mapSize = 64
     let theater = world.theater
 
+    // Clip game rendering to viewport area (left of sidebar)
+    let gameViewportWidth = windowWidth - sidebarWidth
+    var clipRect = SDL_Rect(x: 0, y: 0, w: gameViewportWidth, h: windowHeight)
+    SDL_RenderSetClipRect(renderer, &clipRect)
+
     // Apply zoom scaling
     SDL_RenderSetScale(renderer, Float(gameZoomLevel), Float(gameZoomLevel))
 
-    let visibleWidth = Int(Double(windowWidth) / gameZoomLevel)
+    let visibleWidth = Int(Double(gameViewportWidth) / gameZoomLevel)
     let visibleHeight = Int(Double(windowHeight) / gameZoomLevel)
     let camX = Int(gameCameraX)
     let camY = Int(gameCameraY)
@@ -250,6 +267,25 @@ func renderGame(_ renderer: OpaquePointer?) {
         }
     }
 
+    // === Pass 3.5: Fog of War Overlay ===
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
+    for cellY in startCellY...endCellY {
+        for cellX in startCellX...endCellX {
+            let cellIndex = cellY * mapSize + cellX
+            let fog = fogState[cellIndex]
+            if fog == .visible { continue }
+            let screenX = Int32(cellX * tileSize - camX)
+            let screenY = Int32(cellY * tileSize - camY)
+            var rect = SDL_Rect(x: screenX, y: screenY, w: Int32(tileSize), h: Int32(tileSize))
+            if fog == .unexplored {
+                SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255)
+            } else {
+                SDL_SetRenderDrawColor(renderer, 0, 0, 0, 128)
+            }
+            SDL_RenderFillRect(renderer, &rect)
+        }
+    }
+
     // === Pass 4: Game objects sorted by Y (structures first, then units/infantry by Y) ===
     // Separate structures from mobile units for proper draw order
     var structures: [GameObject] = []
@@ -314,6 +350,9 @@ func renderGame(_ renderer: OpaquePointer?) {
 
     // Draw mobile game objects (units and infantry) from their live positions
     for obj in mobileObjects {
+        // Skip enemy objects on non-visible cells (fog of war)
+        if obj.house != world.playerHouse && !isCellVisible(obj.cell) { continue }
+
         let screenX = Int32(obj.worldX - Double(camX))
         let screenY = Int32(obj.worldY - Double(camY))
 
@@ -442,23 +481,35 @@ func renderGame(_ renderer: OpaquePointer?) {
         }
     }
 
+    // Placement preview (rendered in world space with zoom)
+    if isPlacingStructure {
+        renderPlacementPreview(renderer, mouseScreenX: mouseX, mouseScreenY: mouseY)
+    }
+
     // Reset scale for HUD and minimap
     SDL_RenderSetScale(renderer, 1.0, 1.0)
 
-    // === Minimap ===
+    // Remove clip rect for minimap and sidebar
+    SDL_RenderSetClipRect(renderer, nil)
+
+    // === Minimap === (position adjusted for sidebar)
     renderGameMinimap(renderer, world: world)
 
+    // === Sidebar ===
+    renderSidebar(renderer)
+
     // === HUD ===
+    let gameViewportCenter = (windowWidth - sidebarWidth) / 2
     let selectedCount = world.selectedObjects().count
     let scenarioLabel = scenarioList[scenarioIndex]
-    drawText(renderer, "PLAYING - \(scenarioLabel)", centerX: windowWidth / 2, centerY: 15, color: .amber, scale: 2)
+    drawText(renderer, "PLAYING - \(scenarioLabel)", centerX: gameViewportCenter, centerY: 15, color: .amber, scale: 2)
 
     if selectedCount > 0 {
-        drawText(renderer, "\(selectedCount) SELECTED", centerX: windowWidth / 2, centerY: 35, color: .green, scale: 1)
+        drawText(renderer, "\(selectedCount) SELECTED", centerX: gameViewportCenter, centerY: 35, color: .green, scale: 1)
     }
 
-    drawText(renderer, "Click: Select  Drag: Box Select  Right Click: Move  Esc: Deselect/Menu",
-             centerX: windowWidth / 2, centerY: windowHeight - 15, color: .gray, scale: 1)
+    drawText(renderer, "Select  Drag  Right Click: Move/Attack  Esc: Menu",
+             centerX: gameViewportCenter, centerY: windowHeight - 15, color: .gray, scale: 1)
 }
 
 // MARK: - Selection Box Rendering
@@ -502,7 +553,7 @@ func renderGameMinimap(_ renderer: OpaquePointer?, world: GameWorld) {
     let minimapCellSize: Int32 = 2
     let minimapSize: Int32 = 64 * minimapCellSize
     let minimapPad: Int32 = 10
-    let minimapX = windowWidth - minimapSize - minimapPad
+    let minimapX = windowWidth - sidebarWidth - minimapSize - minimapPad
     let minimapY = windowHeight - minimapSize - minimapPad
     let mapSize = 64
     let tileSize = 24
@@ -551,15 +602,25 @@ func renderGameMinimap(_ renderer: OpaquePointer?, world: GameWorld) {
                 }
             }
 
+            // Apply fog to minimap colors
+            let fog = fogState[cellIndex]
+            if fog == .unexplored {
+                r = 0; g = 0; b = 0
+            } else if fog == .explored {
+                r = r / 2; g = g / 2; b = b / 2
+            }
+
             SDL_SetRenderDrawColor(renderer, r, g, b, 255)
             var dot = SDL_Rect(x: px, y: py, w: minimapCellSize, h: minimapCellSize)
             SDL_RenderFillRect(renderer, &dot)
         }
     }
 
-    // Draw mobile units on minimap as bright dots
+    // Draw mobile units on minimap as bright dots (only if visible)
     for obj in world.objects {
         if obj.kind == .structure { continue }
+        // Skip enemies on non-visible cells
+        if obj.house != world.playerHouse && !isCellVisible(obj.cell) { continue }
         let px = minimapX + Int32(obj.worldX / Double(tileSize)) * minimapCellSize
         let py = minimapY + Int32(obj.worldY / Double(tileSize)) * minimapCellSize
         let hc = obj.house.displayColor
@@ -605,7 +666,7 @@ func renderGameMinimap(_ renderer: OpaquePointer?, world: GameWorld) {
     // Camera viewport indicator
     let vpX = minimapX + Int32(gameCameraX / Double(tileSize)) * minimapCellSize
     let vpY = minimapY + Int32(gameCameraY / Double(tileSize)) * minimapCellSize
-    let vpW = Int32(Double(windowWidth) / gameZoomLevel / Double(tileSize)) * minimapCellSize
+    let vpW = Int32(Double(windowWidth - sidebarWidth) / gameZoomLevel / Double(tileSize)) * minimapCellSize
     let vpH = Int32(Double(windowHeight) / gameZoomLevel / Double(tileSize)) * minimapCellSize
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255)
     var vpRect = SDL_Rect(x: vpX, y: vpY, w: vpW, h: vpH)

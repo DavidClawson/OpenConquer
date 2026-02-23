@@ -37,15 +37,36 @@ func gameTick() {
     // Update occupancy at start of tick
     updateOccupancy()
 
+    // Update fog of war
+    updateFog()
+
+    // Tick production
+    tickProduction()
+
+    // Tick AI
+    tickAI()
+
     // Update each object by mission
     for obj in world.objects {
         switch obj.mission {
         case .move:
             tickMove(obj)
-        case .guard_, .stop, .sleep:
+        case .attack:
+            tickAttack(obj)
+        case .harvest:
+            tickHarvest(obj)
+        case .guard_:
+            // Auto-target enemies for armed units/structures
+            if weaponData[obj.typeName.uppercased()] != nil {
+                tickGuardScan(obj)
+            }
+        case .stop, .sleep:
             break
         }
     }
+
+    // Remove dead objects
+    removeDeadObjects()
 }
 
 // MARK: - Movement Tick
