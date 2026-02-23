@@ -1,6 +1,70 @@
 import CSDL2
 import Foundation
 
+// MARK: - Game Data
+
+let dataPath = FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent("Library/Application Support/Vanilla-Conquer/vanillatd")
+
+let mixManager = MIXFileManager()
+
+func loadGameData() {
+    print("Loading game data from: \(dataPath.path)")
+
+    do {
+        try mixManager.registerAll(in: dataPath)
+
+        // Also check gdi/ and nod/ subdirectories
+        let gdiDir = dataPath.appendingPathComponent("gdi")
+        let nodDir = dataPath.appendingPathComponent("nod")
+        if FileManager.default.fileExists(atPath: gdiDir.path) {
+            try mixManager.registerAll(in: gdiDir)
+        }
+        if FileManager.default.fileExists(atPath: nodDir.path) {
+            try mixManager.registerAll(in: nodDir)
+        }
+    } catch {
+        print("Error loading MIX files: \(error)")
+    }
+
+    print("Total MIX files: \(mixManager.registeredFiles.count)")
+    print("Total entries: \(mixManager.totalEntries)")
+    print("")
+
+    // Test some known filenames
+    let testFiles = [
+        "CONQUER.ENG",   // English language strings
+        "DESERT.MIX",    // Desert theater tileset (nested MIX)
+        "TRANS.ICN",     // Transparent icon
+        "MOUSE.SHP",     // Mouse cursor shapes
+        "OPTIONS.SHP",   // Options menu shapes
+        "SIDEBAR.SHP",   // Sidebar shapes
+        "STRUGGLE.AUD",  // Audio
+        "CHOOSE.WSA",    // Choose side animation
+        "SCG01EA.INI",   // GDI mission 1 scenario
+    ]
+
+    print("File lookup test:")
+    for file in testFiles {
+        if let location = mixManager.locate(file) {
+            let data = mixManager.retrieve(file)!
+            print("  \(file) -> \(location) (\(data.count) bytes)")
+        } else {
+            let crc = MIXFile.crc(for: file)
+            print("  \(file) -> NOT FOUND (CRC: 0x\(String(UInt32(bitPattern: crc), radix: 16, uppercase: true)))")
+        }
+    }
+    print("")
+}
+
+// Run MIX loading on startup
+loadGameData()
+
+// If --test-mix flag, just print results and exit
+if CommandLine.arguments.contains("--test-mix") {
+    exit(0)
+}
+
 // MARK: - Types
 
 enum Faction: String {
