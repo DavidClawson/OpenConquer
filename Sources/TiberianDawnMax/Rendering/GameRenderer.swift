@@ -807,7 +807,8 @@ func renderProceduralExplosion(_ renderer: OpaquePointer?, anim: GameAnimation, 
         var flash = SDL_Rect(x: screenX - 3, y: screenY - 3, w: 6, h: 6)
         SDL_RenderFillRect(renderer, &flash)
         return
-    case .napalm1, .napalm2, .napalm3, .burnSmall, .burnMed, .burnBig:
+    case .napalm1, .napalm2, .napalm3, .burnSmall, .burnMed, .burnBig,
+         .onFireSmall, .onFireMed, .onFireBig, .fireSmall, .fireMed, .fireMed2, .fireTiny:
         r = 255; g = UInt8(max(0, 160 - Int(progress * 160))); b = 0
     case .piff, .piffpiff:
         r = 255; g = 255; b = 200

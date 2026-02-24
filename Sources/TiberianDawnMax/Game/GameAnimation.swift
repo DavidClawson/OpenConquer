@@ -346,11 +346,15 @@ func tickAnimations() {
     for anim in session.activeAnimations {
         guard !anim.isFinished else { continue }
 
-        // Update position for sticky anims
-        if let targetId = anim.attachedToId,
-           let target = world.findObject(id: targetId) {
-            anim.worldX = target.worldX
-            anim.worldY = target.worldY
+        // Update position for sticky anims; clean up if parent was destroyed
+        if let targetId = anim.attachedToId {
+            if let target = world.findObject(id: targetId) {
+                anim.worldX = target.worldX
+                anim.worldY = target.worldY
+            } else {
+                anim.isFinished = true  // Parent object destroyed — remove orphaned animation
+                continue
+            }
         }
 
         // Frame delay

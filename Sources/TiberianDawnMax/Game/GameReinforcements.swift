@@ -416,9 +416,35 @@ private func doBeachReinforcement(teamType: TeamType, isGunboat: Bool) {
         let destX = Double(landingPos.px) + 12.0
         let destY = Double(landingPos.py) + 12.0
 
-        // Spawn hovercraft off the south edge of the map, directly below the landing cell
+        // Spawn hovercraft at the southernmost water cell in the landing column
+        // (NOT outside map bounds, which would be impassable for hover units)
         let landingCellX = landingCell % 64
-        let spawnY = Double(min(63, bounds.y + bounds.height) * 24) + 48.0
+        var spawnCellY = bounds.y + bounds.height - 1
+        for y in stride(from: bounds.y + bounds.height - 1, through: bounds.y, by: -1) {
+            let cell = y * 64 + landingCellX
+            if cell >= 0 && cell < 4096 && waterPassability[cell] {
+                spawnCellY = y
+                break
+            }
+        }
+        // If no water found in this column, try adjacent columns
+        if !waterPassability[spawnCellY * 64 + landingCellX] {
+            for dx in 1...5 {
+                for tryX in [landingCellX - dx, landingCellX + dx] {
+                    guard tryX >= bounds.x && tryX < bounds.x + bounds.width else { continue }
+                    for y in stride(from: bounds.y + bounds.height - 1, through: bounds.y, by: -1) {
+                        let cell = y * 64 + tryX
+                        if cell >= 0 && cell < 4096 && waterPassability[cell] {
+                            spawnCellY = y
+                            break
+                        }
+                    }
+                    if waterPassability[spawnCellY * 64 + min(63, max(0, tryX))] { break }
+                }
+                if spawnCellY != bounds.y + bounds.height - 1 { break }
+            }
+        }
+        let spawnY = Double(spawnCellY * 24) + 12.0
         let spawnX = Double(landingCellX * 24) + 12.0
 
         // Separate transport from cargo
@@ -703,12 +729,22 @@ extension GameObject {
                             moveTargetY = worldY
                             mission = .move
                         } else if cachedSpeedType == .hover || cachedSpeedType == .float_ {
-                            // Water transport (hovercraft): sail south off map
+                            // Water transport (hovercraft): sail to southernmost water cell then get cleaned up
                             if let bounds = world.mapBounds {
+                                // Find southernmost water cell in current column within bounds
+                                let col = cellX
+                                var exitY = cellY
+                                for y in stride(from: bounds.y + bounds.height - 1, through: cellY, by: -1) {
+                                    let cell = y * 64 + col
+                                    if cell >= 0 && cell < 4096 && waterPassability[cell] {
+                                        exitY = y
+                                        break
+                                    }
+                                }
                                 moveTargetX = worldX
-                                moveTargetY = Double((bounds.y + bounds.height + 2) * 24)
+                                moveTargetY = Double(exitY * 24) + 12.0
                             } else {
-                                moveTargetY = 64.0 * 24.0 + 48.0
+                                moveTargetY = worldY + 96.0
                                 moveTargetX = worldX
                             }
                             facing = 128  // DIR_S

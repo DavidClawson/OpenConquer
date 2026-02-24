@@ -665,10 +665,11 @@ extension GameObject {
             return
         }
 
-        // If only 1 frame, skip animation
+        // If only 1 frame, skip animation but still trigger completion bonuses
         if buildUpTotalFrames <= 1 {
             buildUpFrame = -1
             mission = .guard_
+            onBuildUpComplete()
             return
         }
 

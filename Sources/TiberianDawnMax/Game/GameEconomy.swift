@@ -15,8 +15,8 @@ func initTiberiumCells() {
     guard let map = session.world?.map else { return }
     map.tiberiumCells.removeAll()
     map.tiberiumDensity.removeAll()
-    guard let scenario = scenarioData else {
-        print("GameEconomy: No scenarioData available for tiberium init")
+    guard let scenario = map.scenarioData else {
+        print("GameEconomy: No scenarioData available for tiberium init (map.scenarioData is nil)")
         return
     }
     print("GameEconomy: Scanning \(scenario.overlays.count) overlays for tiberium")
