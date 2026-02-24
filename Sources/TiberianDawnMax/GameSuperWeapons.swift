@@ -252,16 +252,16 @@ func deployIonCannon(worldX: Double, worldY: Double) {
 
         // Central cell: full damage
         if objCellX == targetCellX && objCellY == targetCellY {
-            let died = applyDamage(obj, amount: 600, warhead: .pb)
+            let died = obj.applyDamage(amount: 600, warhead: .pb)
             if died {
-                spawnDeathEffects(obj)
+                obj.spawnDeathEffects()
             }
         }
         // Adjacent cells: half damage
         else if abs(objCellX - targetCellX) <= 1 && abs(objCellY - targetCellY) <= 1 {
-            let died = applyDamage(obj, amount: 300, warhead: .pb)
+            let died = obj.applyDamage(amount: 300, warhead: .pb)
             if died {
-                spawnDeathEffects(obj)
+                obj.spawnDeathEffects()
             }
         }
     }
@@ -309,9 +309,9 @@ func deployNuclearStrike(worldX: Double, worldY: Double) {
                 damage = centerDamage / (cellDist + 1)
             }
 
-            let died = applyDamage(obj, amount: damage, warhead: .fire)
+            let died = obj.applyDamage(amount: damage, warhead: .fire)
             if died {
-                spawnDeathEffects(obj)
+                obj.spawnDeathEffects()
             }
         }
     }
@@ -467,11 +467,11 @@ func deployAIIonCannon(worldX: Double, worldY: Double, house: House) {
         let dy = abs(obj.cellY - targetCellY)
 
         if dx == 0 && dy == 0 {
-            let died = applyDamage(obj, amount: 600, warhead: .pb)
-            if died { spawnDeathEffects(obj) }
+            let died = obj.applyDamage(amount: 600, warhead: .pb)
+            if died { obj.spawnDeathEffects() }
         } else if dx <= 1 && dy <= 1 {
-            let died = applyDamage(obj, amount: 300, warhead: .pb)
-            if died { spawnDeathEffects(obj) }
+            let died = obj.applyDamage(amount: 300, warhead: .pb)
+            if died { obj.spawnDeathEffects() }
         }
     }
 }
@@ -496,8 +496,8 @@ func deployAINukeStrike(worldX: Double, worldY: Double, house: House) {
 
         if cellDist <= radius {
             let damage = cellDist == 0 ? centerDamage : centerDamage / (cellDist + 1)
-            let died = applyDamage(obj, amount: damage, warhead: .fire)
-            if died { spawnDeathEffects(obj) }
+            let died = obj.applyDamage(amount: damage, warhead: .fire)
+            if died { obj.spawnDeathEffects() }
         }
     }
 }

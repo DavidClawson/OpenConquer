@@ -368,7 +368,7 @@ func tickAnimations() {
             for obj in world.objects {
                 if obj.strength <= 0 { continue }
                 if obj.cellX == cellX && obj.cellY == cellY {
-                    applyDamage(obj, amount: anim.data.damage)
+                    obj.applyDamage(amount: anim.data.damage)
                 }
             }
         }
@@ -427,60 +427,64 @@ func explosionAnimForWarhead(_ warhead: WarheadType) -> GameAnimType {
     }
 }
 
-/// Spawn death effects for a destroyed unit
-func spawnDeathEffects(_ obj: GameObject) {
-    switch obj.kind {
-    case .unit:
-        // Vehicle destruction: fireball + smoke
-        spawnAnimation(.fball1, worldX: obj.worldX, worldY: obj.worldY)
-        // Offset secondary explosion
-        spawnAnimation(.frag1,
-                       worldX: obj.worldX + Double.random(in: -8...8),
-                       worldY: obj.worldY + Double.random(in: -8...8))
+// MARK: - Death Effects Extensions
 
-    case .infantry:
-        // Infantry death: small piff + optional fire
-        if let lastWarhead = warheadThatKilled(obj) {
-            switch lastWarhead {
-            case .fire, .laser, .pb:
-                spawnAnimation(.napalm1, worldX: obj.worldX, worldY: obj.worldY)
-            case .he:
-                spawnAnimation(.artExp1, worldX: obj.worldX, worldY: obj.worldY)
-            default:
-                spawnAnimation(.piff, worldX: obj.worldX, worldY: obj.worldY)
+extension GameObject {
+    /// Spawn death effects for a destroyed unit
+    func spawnDeathEffects() {
+        switch kind {
+        case .unit:
+            // Vehicle destruction: fireball + smoke
+            spawnAnimation(.fball1, worldX: worldX, worldY: worldY)
+            // Offset secondary explosion
+            spawnAnimation(.frag1,
+                           worldX: worldX + Double.random(in: -8...8),
+                           worldY: worldY + Double.random(in: -8...8))
+
+        case .infantry:
+            // Infantry death: small piff + optional fire
+            if let lastWarhead = warheadThatKilled() {
+                switch lastWarhead {
+                case .fire, .laser, .pb:
+                    spawnAnimation(.napalm1, worldX: worldX, worldY: worldY)
+                case .he:
+                    spawnAnimation(.artExp1, worldX: worldX, worldY: worldY)
+                default:
+                    spawnAnimation(.piff, worldX: worldX, worldY: worldY)
+                }
+            } else {
+                spawnAnimation(.piff, worldX: worldX, worldY: worldY)
             }
-        } else {
-            spawnAnimation(.piff, worldX: obj.worldX, worldY: obj.worldY)
-        }
 
-    case .structure:
-        // Building destruction: large fireball + fires + smoke
-        let size = buildingSize(obj.typeName)
-        let halfW = Double(size.w * 24) / 2.0
-        let halfH = Double(size.h * 24) / 2.0
+        case .structure:
+            // Building destruction: large fireball + fires + smoke
+            let size = buildingSize(typeName)
+            let halfW = Double(size.w * 24) / 2.0
+            let halfH = Double(size.h * 24) / 2.0
 
-        // Multiple explosion points across the building footprint
-        for _ in 0..<(size.w * size.h) {
-            let ox = Double.random(in: -halfW...halfW)
-            let oy = Double.random(in: -halfH...halfH)
-            spawnAnimation(.fball1, worldX: obj.worldX + ox, worldY: obj.worldY + oy)
-        }
-        // Lingering fire
-        spawnAnimation(.burnBig, worldX: obj.worldX, worldY: obj.worldY)
-    }
-}
-
-/// Determine what warhead killed an object (for death anim selection)
-func warheadThatKilled(_ obj: GameObject) -> WarheadType? {
-    // Find the last attacker by searching world for objects targeting this one
-    guard let world = session.world else { return nil }
-    for other in world.objects {
-        if other.attackTarget == obj.id, let weapon = other.primaryWeapon,
-           let wData = weaponTypeData[weapon] {
-            return bulletTypeData[wData.fires]?.warhead
+            // Multiple explosion points across the building footprint
+            for _ in 0..<(size.w * size.h) {
+                let ox = Double.random(in: -halfW...halfW)
+                let oy = Double.random(in: -halfH...halfH)
+                spawnAnimation(.fball1, worldX: worldX + ox, worldY: worldY + oy)
+            }
+            // Lingering fire
+            spawnAnimation(.burnBig, worldX: worldX, worldY: worldY)
         }
     }
-    return nil
+
+    /// Determine what warhead killed this object (for death anim selection)
+    func warheadThatKilled() -> WarheadType? {
+        // Find the last attacker by searching world for objects targeting this one
+        guard let world = session.world else { return nil }
+        for other in world.objects {
+            if other.attackTarget == id, let weapon = other.primaryWeapon,
+               let wData = weaponTypeData[weapon] {
+                return bulletTypeData[wData.fires]?.warhead
+            }
+        }
+        return nil
+    }
 }
 
 /// Spawn impact effects at a target location (bullet/weapon hit)

@@ -11,36 +11,40 @@ struct ResolvedWeapon {
     let warhead: WarheadType
 }
 
-/// Resolve the weapon stats for a game object using the type data system
-func resolveWeapon(for obj: GameObject) -> ResolvedWeapon? {
-    guard let weapon = obj.primaryWeapon,
-          let wData = weaponTypeData[weapon] else { return nil }
+// MARK: - Weapon Resolution Extensions
 
-    let warhead = bulletTypeData[wData.fires]?.warhead ?? .sa
+extension GameObject {
+    /// Resolve primary weapon stats from type data
+    func resolveWeapon() -> ResolvedWeapon? {
+        guard let weapon = primaryWeapon,
+              let wData = weaponTypeData[weapon] else { return nil }
 
-    return ResolvedWeapon(
-        range: wData.rangeInPixels,
-        damage: wData.damage,
-        reloadTicks: wData.rof,
-        weaponType: weapon,
-        warhead: warhead
-    )
-}
+        let warhead = bulletTypeData[wData.fires]?.warhead ?? .sa
 
-/// Resolve secondary weapon stats
-func resolveSecondaryWeapon(for obj: GameObject) -> ResolvedWeapon? {
-    guard let weapon = obj.secondaryWeapon,
-          let wData = weaponTypeData[weapon] else { return nil }
+        return ResolvedWeapon(
+            range: wData.rangeInPixels,
+            damage: wData.damage,
+            reloadTicks: wData.rof,
+            weaponType: weapon,
+            warhead: warhead
+        )
+    }
 
-    let warhead = bulletTypeData[wData.fires]?.warhead ?? .sa
+    /// Resolve secondary weapon stats
+    func resolveSecondaryWeapon() -> ResolvedWeapon? {
+        guard let weapon = secondaryWeapon,
+              let wData = weaponTypeData[weapon] else { return nil }
 
-    return ResolvedWeapon(
-        range: wData.rangeInPixels,
-        damage: wData.damage,
-        reloadTicks: wData.rof,
-        weaponType: weapon,
-        warhead: warhead
-    )
+        let warhead = bulletTypeData[wData.fires]?.warhead ?? .sa
+
+        return ResolvedWeapon(
+            range: wData.rangeInPixels,
+            damage: wData.damage,
+            reloadTicks: wData.rof,
+            weaponType: weapon,
+            warhead: warhead
+        )
+    }
 }
 
 // MARK: - Combat Functions
@@ -80,184 +84,222 @@ func findObjectById(_ id: Int) -> GameObject? {
     return world.objects.first { $0.id == id }
 }
 
-/// Apply damage to a target using authentic warhead/armor calculation.
-/// Returns true if target dies.
-@discardableResult
-func applyDamage(_ target: GameObject, amount: Int, warhead: WarheadType? = nil) -> Bool {
-    let finalDamage: Int
-    if let wh = warhead {
-        // Use authentic damage model: warhead modifier vs armor type
-        finalDamage = modifyDamage(amount, warhead: wh, armor: target.armorType)
-    } else {
-        finalDamage = max(1, amount)
-    }
+// MARK: - Combat Extensions
 
-    target.strength -= finalDamage
-    if let world = session.world {
-        target.lastDamagedTick = world.tickCount
-        target.lastWhoHurtMe = nil  // Could set to attacker's house
-    }
-    if target.strength <= 0 {
-        target.strength = 0
-        return true
-    }
-
-    // Infantry fear: taking damage increases fear
-    if target.kind == .infantry {
-        let fearIncrease = min(255 - Int(target.fear), finalDamage * 3)
-        target.fear = UInt8(min(255, Int(target.fear) + fearIncrease))
-    }
-
-    // Spring "attacked" trigger if attached
-    if let trigName = target.triggerName {
-        springTrigger(named: trigName, event: .attacked)
-    }
-
-    return false
-}
-
-// MARK: - Turret Rotation
-
-/// Rotate turret facing toward a target facing, returning true when aligned.
-/// Uses VC's approach: rotate at most N steps per tick toward desired facing.
-func rotateTurretToward(_ obj: GameObject, targetFacing: Int, rotateSpeed: Int = 8) -> Bool {
-    guard obj.hasTurret else {
-        obj.turretFacing = obj.facing
-        return true
-    }
-
-    let diff = ((targetFacing - obj.turretFacing) + 256) % 256
-    if diff == 0 { return true }
-
-    // Rotate the shorter way
-    if diff <= 128 {
-        // Rotate clockwise
-        let step = min(diff, rotateSpeed)
-        obj.turretFacing = (obj.turretFacing + step) % 256
-    } else {
-        // Rotate counter-clockwise
-        let step = min(256 - diff, rotateSpeed)
-        obj.turretFacing = (obj.turretFacing - step + 256) % 256
-    }
-
-    // Check if close enough
-    let newDiff = ((targetFacing - obj.turretFacing) + 256) % 256
-    return newDiff < rotateSpeed || newDiff > (256 - rotateSpeed)
-}
-
-// MARK: - Attack Logic
-
-/// Tick the attack mission for an object
-func tickAttack(_ obj: GameObject) {
-    guard let world = session.world else { return }
-
-    // Decrement reload timer
-    if obj.reloadTimer > 0 {
-        obj.reloadTimer -= 1
-    }
-
-    // Find our target
-    guard let targetId = obj.attackTarget,
-          let target = findObjectById(targetId),
-          target.strength > 0 else {
-        // Target gone or dead — return to previous mission
-        obj.attackTarget = nil
-        if let suspended = obj.suspendedMission {
-            obj.mission = suspended
-            obj.suspendedMission = nil
-            obj.missionStatus = 0
+extension GameObject {
+    /// Apply damage using warhead/armor calculation. Returns true if killed.
+    @discardableResult
+    func applyDamage(amount: Int, warhead: WarheadType? = nil) -> Bool {
+        let finalDamage: Int
+        if let wh = warhead {
+            // Use authentic damage model: warhead modifier vs armor type
+            finalDamage = modifyDamage(amount, warhead: wh, armor: armorType)
         } else {
-            obj.mission = .guard_
+            finalDamage = max(1, amount)
         }
-        obj.moveTargetX = nil
-        obj.moveTargetY = nil
-        return
+
+        strength -= finalDamage
+        if let world = session.world {
+            lastDamagedTick = world.tickCount
+            lastWhoHurtMe = nil  // Could set to attacker's house
+        }
+        if strength <= 0 {
+            strength = 0
+            return true
+        }
+
+        // Infantry fear: taking damage increases fear
+        if kind == .infantry {
+            let fearIncrease = min(255 - Int(fear), finalDamage * 3)
+            fear = UInt8(min(255, Int(fear) + fearIncrease))
+        }
+
+        // Spring "attacked" trigger if attached
+        if let trigName = triggerName {
+            springTrigger(named: trigName, event: .attacked)
+        }
+
+        return false
     }
 
-    let resolved = resolveWeapon(for: obj)
-    let range = resolved?.range ?? 96.0
+    /// Rotate turret toward target facing. Returns true when aligned.
+    func rotateTurretToward(targetFacing: Int, rotateSpeed: Int = 8) -> Bool {
+        guard hasTurret else {
+            turretFacing = facing
+            return true
+        }
 
-    let dx = target.worldX - obj.worldX
-    let dy = target.worldY - obj.worldY
-    let dist = sqrt(dx * dx + dy * dy)
+        let diff = ((targetFacing - turretFacing) + 256) % 256
+        if diff == 0 { return true }
 
-    // Face the target — turret or body depending on unit type
-    let targetFacing = directionToFacing(dx: dx, dy: dy)
-    if dist > 0.5 {
-        if obj.hasTurret {
-            // Body faces movement direction, turret faces target
-            let turretAligned = rotateTurretToward(obj, targetFacing: targetFacing)
-            if dist <= range && !turretAligned {
-                // In range but turret not aligned — wait for rotation
-                obj.moveTargetX = nil
-                obj.moveTargetY = nil
-                obj.movePath = []
-                return
+        // Rotate the shorter way
+        if diff <= 128 {
+            // Rotate clockwise
+            let step = min(diff, rotateSpeed)
+            turretFacing = (turretFacing + step) % 256
+        } else {
+            // Rotate counter-clockwise
+            let step = min(256 - diff, rotateSpeed)
+            turretFacing = (turretFacing - step + 256) % 256
+        }
+
+        // Check if close enough
+        let newDiff = ((targetFacing - turretFacing) + 256) % 256
+        return newDiff < rotateSpeed || newDiff > (256 - rotateSpeed)
+    }
+
+    /// Tick the attack mission
+    func tickAttack() {
+        guard let world = session.world else { return }
+
+        // Decrement reload timer
+        if reloadTimer > 0 {
+            reloadTimer -= 1
+        }
+
+        // Find our target
+        guard let targetId = attackTarget,
+              let target = findObjectById(targetId),
+              target.strength > 0 else {
+            // Target gone or dead — return to previous mission
+            attackTarget = nil
+            if let suspended = suspendedMission {
+                mission = suspended
+                suspendedMission = nil
+                missionStatus = 0
+            } else {
+                mission = .guard_
+            }
+            moveTargetX = nil
+            moveTargetY = nil
+            return
+        }
+
+        let resolved = resolveWeapon()
+        let range = resolved?.range ?? 96.0
+
+        let dx = target.worldX - worldX
+        let dy = target.worldY - worldY
+        let dist = sqrt(dx * dx + dy * dy)
+
+        // Face the target — turret or body depending on unit type
+        let tgtFacing = directionToFacing(dx: dx, dy: dy)
+        if dist > 0.5 {
+            if hasTurret {
+                // Body faces movement direction, turret faces target
+                let turretAligned = rotateTurretToward(targetFacing: tgtFacing)
+                if dist <= range && !turretAligned {
+                    // In range but turret not aligned — wait for rotation
+                    moveTargetX = nil
+                    moveTargetY = nil
+                    movePath = []
+                    return
+                }
+            } else {
+                facing = tgtFacing
+            }
+        }
+
+        if dist <= range {
+            // In range — stop moving and fire if reloaded
+            moveTargetX = nil
+            moveTargetY = nil
+            movePath = []
+
+            if reloadTimer <= 0, let resolved = resolved {
+                reloadTimer = resolved.reloadTicks
+                lastFireTick = world.tickCount
+
+                // Decrement ammo if limited
+                if ammo > 0 {
+                    ammo -= 1
+                }
+
+                // Play weapon fire sound
+                if let weapon = cachedPrimaryWeapon {
+                    soundEffect(weaponFireSound(weapon), worldX: worldX, worldY: worldY)
+                }
+
+                // Spawn projectile — the projectile system handles damage on impact.
+                // Invisible bullets (sniper, rifle, laser) apply damage immediately
+                // inside spawnProjectile; visible ones (missiles, shells) fly first.
+                let bulletType = weaponTypeData[resolved.weaponType]?.fires ?? .bullet
+                spawnProjectile(bulletType: bulletType, from: self, to: target,
+                               damage: resolved.damage, warhead: resolved.warhead)
             }
         } else {
-            obj.facing = targetFacing
+            // Out of range — move closer (without touching mission)
+            if kind != .structure {
+                moveTargetX = target.worldX
+                moveTargetY = target.worldY
+                if movePath.isEmpty {
+                    let path = findPath(
+                        fromX: cellX, fromY: cellY,
+                        toX: target.cellX, toY: target.cellY,
+                        ignoring: self,
+                        speedType: cachedSpeedType
+                    )
+                    movePath = path
+                }
+                moveOneStep()
+            } else {
+                // Structure out of range — give up on this target
+                attackTarget = nil
+                mission = .guard_
+            }
         }
     }
 
-    if dist <= range {
-        // In range — stop moving and fire if reloaded
-        obj.moveTargetX = nil
-        obj.moveTargetY = nil
-        obj.movePath = []
+    /// Auto-target enemies in guard range
+    func tickGuardScan() {
+        let resolved = resolveWeapon()
+        // Guard range is slightly larger than weapon range
+        let guardRange = (resolved?.range ?? 96.0) * 1.5
 
-        if obj.reloadTimer <= 0, let resolved = resolved {
-            obj.reloadTimer = resolved.reloadTicks
-            obj.lastFireTick = world.tickCount
-
-            // Decrement ammo if limited
-            if obj.ammo > 0 {
-                obj.ammo -= 1
-            }
-
-            // Play weapon fire sound
-            if let weapon = obj.cachedPrimaryWeapon {
-                soundEffect(weaponFireSound(weapon), worldX: obj.worldX, worldY: obj.worldY)
-            }
-
-            // Spawn projectile — the projectile system handles damage on impact.
-            // Invisible bullets (sniper, rifle, laser) apply damage immediately
-            // inside spawnProjectile; visible ones (missiles, shells) fly first.
-            let bulletType = weaponTypeData[resolved.weaponType]?.fires ?? .bullet
-            spawnProjectile(bulletType: bulletType, from: obj, to: target,
-                           damage: resolved.damage, warhead: resolved.warhead)
-        }
-    } else {
-        // Out of range — move closer (without touching mission)
-        if obj.kind != .structure {
-            obj.moveTargetX = target.worldX
-            obj.moveTargetY = target.worldY
-            if obj.movePath.isEmpty {
-                let path = findPath(
-                    fromX: obj.cellX, fromY: obj.cellY,
-                    toX: target.cellX, toY: target.cellY,
-                    ignoring: obj,
-                    speedType: obj.cachedSpeedType
-                )
-                obj.movePath = path
-            }
-            let _ = moveOneStep(obj)
-        } else {
-            // Structure out of range — give up on this target
-            obj.attackTarget = nil
-            obj.mission = .guard_
+        if let enemy = findNearestEnemy(self, range: guardRange) {
+            attackTarget = enemy.id
+            mission = .attack
         }
     }
-}
 
-/// Auto-target enemies that enter guard range
-func tickGuardScan(_ obj: GameObject) {
-    let resolved = resolveWeapon(for: obj)
-    // Guard range is slightly larger than weapon range
-    let guardRange = (resolved?.range ?? 96.0) * 1.5
+    /// Tick infantry fear decay and panic behavior
+    func tickFear() {
+        guard kind == .infantry else { return }
+        guard let world = session.world else { return }
 
-    if let enemy = findNearestEnemy(obj, range: guardRange) {
-        obj.attackTarget = enemy.id
-        obj.mission = .attack
+        // Fear decays by 1 every 8 ticks when not recently damaged
+        let ticksSinceDamage = world.tickCount - lastDamagedTick
+        if ticksSinceDamage > 15 && world.tickCount % 8 == 0 {
+            if fear > 0 {
+                fear -= 1
+            }
+            if isProne && fear < fearAnxious {
+                isProne = false
+            }
+        }
+
+        // Go prone when scared
+        if fear >= fearScared && !isProne {
+            isProne = true
+        }
+
+        // Panic scatter when fear is extreme
+        if fear >= fearPanic && mission != .attack {
+            if moveTargetX == nil {
+                // Scatter: move to a random nearby cell
+                let scatterDist = 3
+                let nx = cellX + Int.random(in: -scatterDist...scatterDist)
+                let ny = cellY + Int.random(in: -scatterDist...scatterDist)
+                let clampedX = max(0, min(63, nx))
+                let clampedY = max(0, min(63, ny))
+                if isCellPassable(cellX: clampedX, cellY: clampedY, speedType: cachedSpeedType) {
+                    moveTargetX = Double(clampedX * 24) + 12.0
+                    moveTargetY = Double(clampedY * 24) + 12.0
+                    movePath = []
+                    mission = .retreat
+                }
+            }
+        }
     }
 }
 
@@ -268,46 +310,6 @@ let fearAnxious: UInt8 = 10
 let fearScared: UInt8 = 100
 let fearPanic: UInt8 = 200
 let fearMaximum: UInt8 = 255
-
-/// Tick fear reduction for infantry — fear decays slowly when not taking damage
-func tickFear(_ obj: GameObject) {
-    guard obj.kind == .infantry else { return }
-    guard let world = session.world else { return }
-
-    // Fear decays by 1 every 8 ticks when not recently damaged
-    let ticksSinceDamage = world.tickCount - obj.lastDamagedTick
-    if ticksSinceDamage > 15 && world.tickCount % 8 == 0 {
-        if obj.fear > 0 {
-            obj.fear -= 1
-        }
-        if obj.isProne && obj.fear < fearAnxious {
-            obj.isProne = false
-        }
-    }
-
-    // Go prone when scared
-    if obj.fear >= fearScared && !obj.isProne {
-        obj.isProne = true
-    }
-
-    // Panic scatter when fear is extreme
-    if obj.fear >= fearPanic && obj.mission != .attack {
-        if obj.moveTargetX == nil {
-            // Scatter: move to a random nearby cell
-            let scatterDist = 3
-            let nx = obj.cellX + Int.random(in: -scatterDist...scatterDist)
-            let ny = obj.cellY + Int.random(in: -scatterDist...scatterDist)
-            let clampedX = max(0, min(63, nx))
-            let clampedY = max(0, min(63, ny))
-            if isCellPassable(cellX: clampedX, cellY: clampedY, speedType: obj.cachedSpeedType) {
-                obj.moveTargetX = Double(clampedX * 24) + 12.0
-                obj.moveTargetY = Double(clampedY * 24) + 12.0
-                obj.movePath = []
-                obj.mission = .retreat
-            }
-        }
-    }
-}
 
 // MARK: - Cleanup
 

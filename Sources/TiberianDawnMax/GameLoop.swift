@@ -70,23 +70,23 @@ func gameTick() {
     for obj in world.objects {
         // Aircraft-specific handling
         if obj.isAircraft {
-            tickAircraft(obj)
+            obj.tickAircraft()
             switch obj.mission {
             case .attack:
-                tickAircraftAttack(obj)
+                obj.tickAircraftAttack()
             case .guard_:
-                tickAircraftGuard(obj)
+                obj.tickAircraftGuard()
             case .return_:
-                tickAircraftReturn(obj)
+                obj.tickAircraftReturn()
             case .move:
                 if obj.altitude >= flightLevel {
-                    let arrived = !flyToward(obj)
+                    let arrived = !obj.flyToward()
                     if arrived {
                         obj.mission = .guard_
                     }
                 }
             case .hunt, .timedHunt:
-                tickAircraftGuard(obj)
+                obj.tickAircraftGuard()
                 if obj.mission == .guard_ { obj.mission = .hunt }
             default:
                 break
@@ -96,20 +96,20 @@ func gameTick() {
 
         switch obj.mission {
         case .move:
-            tickMove(obj)
+            obj.tickMove()
         case .attack:
-            tickAttack(obj)
+            obj.tickAttack()
         case .harvest:
             tickHarvest(obj)
         case .guard_:
             // Auto-target enemies for armed units/structures
             if obj.isArmed {
-                tickGuardScan(obj)
+                obj.tickGuardScan()
             }
         case .guardArea:
-            tickGuardArea(obj)
+            obj.tickGuardArea()
         case .hunt, .timedHunt:
-            tickHunt(obj)
+            obj.tickHunt()
         case .ambush:
             // Ambush: like sleep but switches to hunt when discovered
             // Becomes hunt when any player unit is in sight range
@@ -119,24 +119,24 @@ func gameTick() {
         case .stop, .sleep, .sticky:
             break
         case .retreat:
-            tickRetreat(obj)
+            obj.tickRetreat()
         case .return_:
-            tickReturn(obj)
+            obj.tickReturn()
         case .enter:
             // Move toward nav target (transport/building)
             if obj.moveTargetX != nil {
-                let _ = moveOneStep(obj)
+                obj.moveOneStep()
             } else {
                 obj.mission = .guard_
             }
         case .capture:
-            tickCapture(obj)
+            obj.tickCapture()
         case .unload:
-            tickUnload(obj)
+            obj.tickUnload()
         case .repair:
-            tickBuildingRepair(obj)
+            obj.tickBuildingRepair()
         case .selling:
-            tickBuildingSell(obj)
+            obj.tickBuildingSell()
         case .construction, .deconstruction:
             break  // Handled by production system
         case .missile:
@@ -147,7 +147,7 @@ func gameTick() {
     // Tick infantry fear system
     for obj in world.objects {
         if obj.kind == .infantry {
-            tickFear(obj)
+            obj.tickFear()
         }
     }
 
@@ -175,7 +175,7 @@ func gameTick() {
             if obj.lastDamagedTick == world.tickCount {
                 // Already handled by combat this tick
             } else if obj.kind == .structure {
-                spawnDeathEffects(obj)
+                obj.spawnDeathEffects()
             }
         }
     }
@@ -191,179 +191,181 @@ func gameTick() {
     playerState.credits = session.sidebarCredits
 }
 
-// MARK: - Movement Tick
+// MARK: - Movement Extensions
 
-func tickMove(_ obj: GameObject) {
-    guard let targetX = obj.moveTargetX, let targetY = obj.moveTargetY else {
-        obj.mission = .guard_
-        return
-    }
-
-    // If we have no path, compute one via A*
-    if obj.movePath.isEmpty {
-        let fromCellX = obj.cellX
-        let fromCellY = obj.cellY
-        let toCellX = Int(targetX) / 24
-        let toCellY = Int(targetY) / 24
-
-        // Only pathfind if we're not already at the target cell
-        if fromCellX != toCellX || fromCellY != toCellY {
-            let path = findPath(
-                fromX: fromCellX, fromY: fromCellY,
-                toX: toCellX, toY: toCellY,
-                ignoring: obj,
-                speedType: obj.cachedSpeedType
-            )
-            if path.isEmpty {
-                // No path found, stop
-                obj.mission = .guard_
-                obj.moveTargetX = nil
-                obj.moveTargetY = nil
-                return
-            }
-            obj.movePath = path
+extension GameObject {
+    /// Tick the move mission (follow path to target)
+    func tickMove() {
+        guard let targetX = moveTargetX, let targetY = moveTargetY else {
+            mission = .guard_
+            return
         }
-    }
 
-    // Determine the next waypoint to move toward
-    let nextX: Double
-    let nextY: Double
+        // If we have no path, compute one via A*
+        if movePath.isEmpty {
+            let fromCellX = cellX
+            let fromCellY = cellY
+            let toCellX = Int(targetX) / 24
+            let toCellY = Int(targetY) / 24
 
-    if !obj.movePath.isEmpty {
-        // Move toward the center of the next path cell
-        let nextCell = obj.movePath[0]
-        nextX = Double(nextCell.cellX * 24) + 12.0
-        nextY = Double(nextCell.cellY * 24) + 12.0
-    } else {
-        // We're in the target cell, move to exact target position
-        nextX = targetX
-        nextY = targetY
-    }
-
-    let dx = nextX - obj.worldX
-    let dy = nextY - obj.worldY
-    let dist = sqrt(dx * dx + dy * dy)
-
-    // Update facing to point toward movement direction
-    if dist > 0.5 {
-        obj.facing = directionToFacing(dx: dx, dy: dy)
-    }
-
-    if dist <= obj.speed {
-        // Arrived at waypoint
-        obj.worldX = nextX
-        obj.worldY = nextY
-
-        if !obj.movePath.isEmpty {
-            obj.movePath.removeFirst()
-
-            // If we've consumed all waypoints, check if we're at final target
-            if obj.movePath.isEmpty {
-                let finalDx = targetX - obj.worldX
-                let finalDy = targetY - obj.worldY
-                let finalDist = sqrt(finalDx * finalDx + finalDy * finalDy)
-                if finalDist < 2.0 {
-                    obj.mission = .guard_
-                    obj.moveTargetX = nil
-                    obj.moveTargetY = nil
+            // Only pathfind if we're not already at the target cell
+            if fromCellX != toCellX || fromCellY != toCellY {
+                let path = findPath(
+                    fromX: fromCellX, fromY: fromCellY,
+                    toX: toCellX, toY: toCellY,
+                    ignoring: self,
+                    speedType: cachedSpeedType
+                )
+                if path.isEmpty {
+                    // No path found, stop
+                    mission = .guard_
+                    moveTargetX = nil
+                    moveTargetY = nil
+                    return
                 }
+                movePath = path
+            }
+        }
+
+        // Determine the next waypoint to move toward
+        let nextX: Double
+        let nextY: Double
+
+        if !movePath.isEmpty {
+            // Move toward the center of the next path cell
+            let nextCell = movePath[0]
+            nextX = Double(nextCell.cellX * 24) + 12.0
+            nextY = Double(nextCell.cellY * 24) + 12.0
+        } else {
+            // We're in the target cell, move to exact target position
+            nextX = targetX
+            nextY = targetY
+        }
+
+        let dx = nextX - worldX
+        let dy = nextY - worldY
+        let dist = sqrt(dx * dx + dy * dy)
+
+        // Update facing to point toward movement direction
+        if dist > 0.5 {
+            facing = directionToFacing(dx: dx, dy: dy)
+        }
+
+        if dist <= speed {
+            // Arrived at waypoint
+            worldX = nextX
+            worldY = nextY
+
+            if !movePath.isEmpty {
+                movePath.removeFirst()
+
+                // If we've consumed all waypoints, check if we're at final target
+                if movePath.isEmpty {
+                    let finalDx = targetX - worldX
+                    let finalDy = targetY - worldY
+                    let finalDist = sqrt(finalDx * finalDx + finalDy * finalDy)
+                    if finalDist < 2.0 {
+                        mission = .guard_
+                        moveTargetX = nil
+                        moveTargetY = nil
+                    }
+                }
+            } else {
+                // Arrived at final target
+                mission = .guard_
+                moveTargetX = nil
+                moveTargetY = nil
             }
         } else {
-            // Arrived at final target
-            obj.mission = .guard_
-            obj.moveTargetX = nil
-            obj.moveTargetY = nil
-        }
-    } else {
-        // Move toward waypoint
-        let moveX = (dx / dist) * obj.speed
-        let moveY = (dy / dist) * obj.speed
-        obj.worldX += moveX
-        obj.worldY += moveY
-    }
-}
-
-// MARK: - Movement Step (mission-agnostic)
-
-/// Move one step toward the current move target without touching the mission.
-/// Returns true if still moving, false if arrived or no target.
-func moveOneStep(_ obj: GameObject) -> Bool {
-    guard let targetX = obj.moveTargetX, let targetY = obj.moveTargetY else {
-        return false
-    }
-
-    // If we have no path, compute one via A*
-    if obj.movePath.isEmpty {
-        let fromCellX = obj.cellX
-        let fromCellY = obj.cellY
-        let toCellX = Int(targetX) / 24
-        let toCellY = Int(targetY) / 24
-
-        if fromCellX != toCellX || fromCellY != toCellY {
-            let path = findPath(
-                fromX: fromCellX, fromY: fromCellY,
-                toX: toCellX, toY: toCellY,
-                ignoring: obj,
-                speedType: obj.cachedSpeedType
-            )
-            if path.isEmpty {
-                obj.moveTargetX = nil
-                obj.moveTargetY = nil
-                return false
-            }
-            obj.movePath = path
+            // Move toward waypoint
+            let moveX = (dx / dist) * speed
+            let moveY = (dy / dist) * speed
+            worldX += moveX
+            worldY += moveY
         }
     }
 
-    // Determine the next waypoint
-    let nextX: Double
-    let nextY: Double
-
-    if !obj.movePath.isEmpty {
-        let nextCell = obj.movePath[0]
-        nextX = Double(nextCell.cellX * 24) + 12.0
-        nextY = Double(nextCell.cellY * 24) + 12.0
-    } else {
-        nextX = targetX
-        nextY = targetY
-    }
-
-    let dx = nextX - obj.worldX
-    let dy = nextY - obj.worldY
-    let dist = sqrt(dx * dx + dy * dy)
-
-    if dist > 0.5 {
-        obj.facing = directionToFacing(dx: dx, dy: dy)
-    }
-
-    if dist <= obj.speed {
-        obj.worldX = nextX
-        obj.worldY = nextY
-
-        if !obj.movePath.isEmpty {
-            obj.movePath.removeFirst()
-            if obj.movePath.isEmpty {
-                let finalDx = targetX - obj.worldX
-                let finalDy = targetY - obj.worldY
-                let finalDist = sqrt(finalDx * finalDx + finalDy * finalDy)
-                if finalDist < 2.0 {
-                    obj.moveTargetX = nil
-                    obj.moveTargetY = nil
-                    return false
-                }
-            }
-        } else {
-            obj.moveTargetX = nil
-            obj.moveTargetY = nil
+    /// Move one step toward current target without changing mission.
+    /// Returns true if still moving.
+    @discardableResult
+    func moveOneStep() -> Bool {
+        guard let targetX = moveTargetX, let targetY = moveTargetY else {
             return false
         }
-    } else {
-        let moveX = (dx / dist) * obj.speed
-        let moveY = (dy / dist) * obj.speed
-        obj.worldX += moveX
-        obj.worldY += moveY
+
+        // If we have no path, compute one via A*
+        if movePath.isEmpty {
+            let fromCellX = cellX
+            let fromCellY = cellY
+            let toCellX = Int(targetX) / 24
+            let toCellY = Int(targetY) / 24
+
+            if fromCellX != toCellX || fromCellY != toCellY {
+                let path = findPath(
+                    fromX: fromCellX, fromY: fromCellY,
+                    toX: toCellX, toY: toCellY,
+                    ignoring: self,
+                    speedType: cachedSpeedType
+                )
+                if path.isEmpty {
+                    moveTargetX = nil
+                    moveTargetY = nil
+                    return false
+                }
+                movePath = path
+            }
+        }
+
+        // Determine the next waypoint
+        let nextX: Double
+        let nextY: Double
+
+        if !movePath.isEmpty {
+            let nextCell = movePath[0]
+            nextX = Double(nextCell.cellX * 24) + 12.0
+            nextY = Double(nextCell.cellY * 24) + 12.0
+        } else {
+            nextX = targetX
+            nextY = targetY
+        }
+
+        let dx = nextX - worldX
+        let dy = nextY - worldY
+        let dist = sqrt(dx * dx + dy * dy)
+
+        if dist > 0.5 {
+            facing = directionToFacing(dx: dx, dy: dy)
+        }
+
+        if dist <= speed {
+            worldX = nextX
+            worldY = nextY
+
+            if !movePath.isEmpty {
+                movePath.removeFirst()
+                if movePath.isEmpty {
+                    let finalDx = targetX - worldX
+                    let finalDy = targetY - worldY
+                    let finalDist = sqrt(finalDx * finalDx + finalDy * finalDy)
+                    if finalDist < 2.0 {
+                        moveTargetX = nil
+                        moveTargetY = nil
+                        return false
+                    }
+                }
+            } else {
+                moveTargetX = nil
+                moveTargetY = nil
+                return false
+            }
+        } else {
+            let moveX = (dx / dist) * speed
+            let moveY = (dy / dist) * speed
+            worldX += moveX
+            worldY += moveY
+        }
+        return true
     }
-    return true
 }
 
 // MARK: - Facing Calculation

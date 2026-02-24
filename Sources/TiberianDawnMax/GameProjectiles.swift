@@ -57,10 +57,10 @@ func spawnProjectile(bulletType: BulletType, from attacker: GameObject,
 
     // Invisible projectiles (sniper, bullets, laser) apply damage immediately
     if bData.isInvisible {
-        let died = applyDamage(target, amount: damage, warhead: warhead)
+        let died = target.applyDamage(amount: damage, warhead: warhead)
         spawnImpactEffect(at: target.worldX, worldY: target.worldY, warhead: warhead)
         if died {
-            spawnDeathEffects(target)
+            target.spawnDeathEffects()
             if target.kind == .infantry {
                 soundEffect(infantryDeathScream(), worldX: target.worldX, worldY: target.worldY)
             } else {
@@ -152,11 +152,11 @@ func tickProjectiles() {
             if let tid = proj.targetId,
                let target = world.findObject(id: tid), target.strength > 0 {
                 target.lastWhoHurtMe = proj.sourceHouse
-                let died = applyDamage(target, amount: proj.damage, warhead: proj.warhead)
+                let died = target.applyDamage(amount: proj.damage, warhead: proj.warhead)
                 spawnImpactEffect(at: target.worldX, worldY: target.worldY, warhead: proj.warhead)
 
                 if died {
-                    spawnDeathEffects(target)
+                    target.spawnDeathEffects()
                     if target.kind == .infantry {
                         soundEffect(infantryDeathScream(), worldX: target.worldX, worldY: target.worldY)
                     } else {

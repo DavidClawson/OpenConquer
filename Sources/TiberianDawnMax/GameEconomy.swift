@@ -69,7 +69,7 @@ func tickHarvest(_ obj: GameObject) {
                         speedType: .harvester
                     )
                 }
-                let _ = moveOneStep(obj)
+                let _ = obj.moveOneStep()
             }
         } else {
             // No refinery — just sit
@@ -98,7 +98,7 @@ func tickHarvest(_ obj: GameObject) {
                 let dy = my - targetPy
                 if sqrt(dx * dx + dy * dy) < 2.0 {
                     // Already heading there
-                    let _ = moveOneStep(obj)
+                    let _ = obj.moveOneStep()
                     return
                 }
             }
@@ -111,7 +111,7 @@ func tickHarvest(_ obj: GameObject) {
                 ignoring: obj,
                 speedType: .harvester
             )
-            let _ = moveOneStep(obj)
+            let _ = obj.moveOneStep()
         } else {
             // No tiberium left — return to refinery if carrying anything
             if obj.tiberiumLoad > 0 {
