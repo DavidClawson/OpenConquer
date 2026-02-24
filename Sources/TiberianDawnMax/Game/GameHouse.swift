@@ -29,6 +29,12 @@ class HouseState {
     // AI production queues (separate from player's)
     var aiUnitQueue = ProductionQueue()
     var aiInfantryQueue = ProductionQueue()
+    var aiStructureQueue = ProductionQueue()
+
+    // AI base building state
+    var aiBuildCycleCount: Int = 0       // Number of buildings placed (for defense scheduling)
+    var aiLastAttackTick: Int = -9999    // Last tick an attack wave was sent
+    var aiLastBuildCheckTick: Int = 0    // Last tick building priorities were evaluated
 
     init(type: House, credits: Int, isHuman: Bool) {
         self.type = type

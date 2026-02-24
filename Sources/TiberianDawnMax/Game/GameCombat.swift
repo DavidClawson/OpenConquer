@@ -99,8 +99,12 @@ func findObjectById(_ id: Int) -> GameObject? {
 
 extension GameObject {
     /// Apply damage using warhead/armor calculation. Returns true if killed.
+    /// `attackerId` is the object ID of the attacker, used for veterancy kill credit.
     @discardableResult
-    func applyDamage(amount: Int, warhead: WarheadType? = nil, attackerHouse: House? = nil) -> Bool {
+    func applyDamage(amount: Int, warhead: WarheadType? = nil, attackerHouse: House? = nil, attackerId: Int? = nil) -> Bool {
+        // Overkill prevention: don't apply damage to already-dead objects
+        guard strength > 0 else { return false }
+
         let finalDamage: Int
         if let wh = warhead {
             // Use authentic damage model: warhead modifier vs armor type
@@ -109,13 +113,23 @@ extension GameObject {
             finalDamage = max(1, amount)
         }
 
-        strength -= finalDamage
+        // Elite defense bonus: incoming damage reduced by 25% for elite units
+        var adjustedDamage = finalDamage
+        if veteranLevel >= 2 {
+            adjustedDamage = max(1, adjustedDamage * 3 / 4)
+        }
+
+        strength -= adjustedDamage
         if let world = session.world {
             lastDamagedTick = world.tickCount
             lastWhoHurtMe = attackerHouse
         }
         if strength <= 0 {
             strength = 0
+            // Credit kill to attacker for veterancy
+            if let aId = attackerId, let attacker = findObjectById(aId) {
+                attacker.killCount += 1
+            }
             return true
         }
 
@@ -130,7 +144,7 @@ extension GameObject {
 
         // Infantry fear: taking damage increases fear
         if kind == .infantry {
-            let fearIncrease = min(255 - Int(fear), finalDamage * 3)
+            let fearIncrease = min(255 - Int(fear), adjustedDamage * 3)
             fear = UInt8(min(255, Int(fear) + fearIncrease))
         }
 
@@ -253,7 +267,7 @@ extension GameObject {
             movePath = []
 
             if reloadTimer <= 0, let resolved = resolved {
-                reloadTimer = resolved.reloadTicks
+                reloadTimer = effectiveReloadTicks(resolved.reloadTicks)
                 lastFireTick = world.tickCount
 
                 // Spawn muzzle flash animation at barrel position
@@ -294,8 +308,9 @@ extension GameObject {
                 // Invisible bullets (sniper, rifle, laser) apply damage immediately
                 // inside spawnProjectile; visible ones (missiles, shells) fly first.
                 let bulletType = weaponTypeData[resolved.weaponType]?.fires ?? .bullet
+                let effectiveDamage = Int(Double(resolved.damage) * crateBuff.firepowerMultiplier)
                 spawnProjectile(bulletType: bulletType, from: self, to: target,
-                               damage: resolved.damage, warhead: resolved.warhead)
+                               damage: effectiveDamage, warhead: resolved.warhead)
             }
         } else {
             // Out of range — move closer (without touching mission)
@@ -325,7 +340,7 @@ extension GameObject {
 
     /// Auto-target enemies in guard range
     func tickGuardScan() {
-        // Use sight range for detection — units should engage anything they can see
+        // Use sight range for detection (includes veterancy bonus)
         let sightPixels = Double(sightRange) * 24.0
         let resolved = resolveWeapon()
         let weaponRange = resolved?.range ?? 96.0
@@ -404,6 +419,117 @@ extension GameObject {
                     mission = .retreat
                 }
             }
+        }
+    }
+}
+
+// MARK: - Splash Damage System
+
+/// Get splash radius in pixels for a warhead type
+func splashRadius(for warhead: WarheadType) -> Double {
+    switch warhead {
+    case .he:
+        return 48.0   // 2-cell radius
+    case .fire:
+        return 36.0   // 1.5-cell radius
+    case .ap:
+        return 12.0   // 0.5-cell radius (small splash)
+    default:
+        return 0.0    // No splash (SA, laser, fist, etc.)
+    }
+}
+
+/// Apply splash damage at a world position. Damages all objects within the warhead's
+/// splash radius, with linear falloff from 100% at center to 25% at edge.
+/// - Parameters:
+///   - worldX/worldY: Impact point
+///   - warhead: Warhead type (determines splash radius)
+///   - baseDamage: Base damage before armor modifiers
+///   - attackerHouse: House of the attacker (to avoid full friendly fire)
+///   - attackerId: Object ID of the attacker (for kill credit)
+///   - primaryTargetId: The direct target (already took full damage, skip in splash)
+func applySplashDamage(at worldX: Double, worldY: Double, warhead: WarheadType,
+                       baseDamage: Int, attackerHouse: House, attackerId: Int? = nil,
+                       primaryTargetId: Int? = nil) {
+    guard let world = session.world else { return }
+    let radius = splashRadius(for: warhead)
+    guard radius > 0 else { return }
+
+    for obj in world.objects {
+        if obj.strength <= 0 { continue }
+        // Skip the primary target (already received full damage)
+        if let primaryId = primaryTargetId, obj.id == primaryId { continue }
+
+        let dx = obj.worldX - worldX
+        let dy = obj.worldY - worldY
+        let dist = sqrt(dx * dx + dy * dy)
+        guard dist <= radius else { continue }
+
+        // Friendly fire: skip friendly units entirely
+        if obj.house == attackerHouse { continue }
+
+        // Linear falloff: 100% at center, 25% at edge
+        let falloff = 1.0 - 0.75 * (dist / radius)
+        var splashDmg = Int(Double(baseDamage) * falloff)
+
+        // Infantry in the open take 1.5x splash damage
+        if obj.kind == .infantry && !obj.isProne {
+            splashDmg = splashDmg * 3 / 2
+        }
+
+        guard splashDmg > 0 else { continue }
+
+        let died = obj.applyDamage(amount: splashDmg, warhead: warhead,
+                                   attackerHouse: attackerHouse, attackerId: attackerId)
+        if died {
+            obj.spawnDeathEffects()
+            if obj.kind == .infantry {
+                audioManager.play(audioManager.infantryDeathScream(), worldX: obj.worldX, worldY: obj.worldY)
+            } else {
+                audioManager.play(audioManager.explosionSound(warhead), worldX: obj.worldX, worldY: obj.worldY)
+            }
+            session.campaign.trackKill(victimHouse: obj.house, victimKind: obj.kind)
+            let attackerState = getHouseState(attackerHouse)
+            let victimState = getHouseState(obj.house)
+            if obj.kind == .structure {
+                attackerState.buildingsKilled += 1
+                victimState.buildingsLost += 1
+            } else {
+                attackerState.unitsKilled += 1
+                victimState.unitsLost += 1
+            }
+        }
+    }
+}
+
+// MARK: - Veterancy Bonuses
+
+extension GameObject {
+    /// Get the effective fire delay, reduced by veterancy
+    func effectiveReloadTicks(_ base: Int) -> Int {
+        switch veteranLevel {
+        case 2: return max(1, base / 2)       // Elite: 50% faster
+        case 1: return max(1, base * 3 / 4)   // Veteran: 25% faster
+        default: return base
+        }
+    }
+
+    /// Get the effective sight range, increased by veterancy
+    var effectiveSightRange: Int {
+        switch veteranLevel {
+        case 2: return cachedSightRange + 4   // Elite: +4 cells
+        case 1: return cachedSightRange + 2   // Veteran: +2 cells
+        default: return cachedSightRange
+        }
+    }
+
+    /// Tick elite self-heal: 1 HP per 30 ticks (0.5 HP/sec at 15 FPS)
+    func tickEliteHeal() {
+        guard veteranLevel >= 2 else { return }
+        guard strength > 0 && strength < cachedMaxStrength else { return }
+        guard let world = session.world else { return }
+        if world.tickCount % 30 == 0 {
+            strength = min(cachedMaxStrength, strength + 1)
         }
     }
 }

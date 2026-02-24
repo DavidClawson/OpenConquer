@@ -379,6 +379,9 @@ func handleStructurePlacement(_ x: Int32, _ y: Int32) {
         }
     }
 
+    // Fire "Built It" triggers for this structure type
+    springTriggerBuiltIt(structureType: pType)
+
     // Clear placement mode
     session.isPlacingStructure = false
     session.placementType = nil

@@ -69,6 +69,21 @@ class RenderState {
     // MARK: - Animation Frame Counter
     var animationFrame: Int = 0
 
+    // MARK: - Screen Effects
+    var screenFlashAlpha: UInt8 = 0       // Full-screen white flash (fades each frame)
+    var screenFlashR: UInt8 = 255
+    var screenFlashG: UInt8 = 255
+    var screenFlashB: UInt8 = 255
+    var screenShakeOffsetX: Int32 = 0     // Camera shake offset (pixels)
+    var screenShakeOffsetY: Int32 = 0
+    var screenShakeDuration: Int = 0      // Remaining shake ticks
+    var screenShakeIntensity: Double = 0  // Max offset in pixels
+
+    // Ion cannon beam effect
+    var ionBeamWorldX: Double = 0         // Target world position
+    var ionBeamWorldY: Double = 0
+    var ionBeamTimer: Int = 0             // Remaining ticks for beam visual (0 = inactive)
+
     // MARK: - Debug Overlay Flags
     var showGrid: Bool = false
     var showInfoPanel: Bool = false

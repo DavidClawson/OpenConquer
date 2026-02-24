@@ -22,6 +22,7 @@ class Projectile {
     let damage: Int
     let warhead: WarheadType
     let sourceHouse: House
+    let sourceObjectId: Int?        // Attacker's object ID (for kill credit)
     let sourceX: Double             // Attacker's position at fire time (for fog reveal)
     let sourceY: Double
     var age: Int = 0                // Ticks since launch
@@ -31,7 +32,7 @@ class Projectile {
     init(id: Int, bulletType: BulletType, data: BulletTypeData,
          startX: Double, startY: Double, targetX: Double, targetY: Double,
          targetId: Int?, facing: Int, damage: Int, warhead: WarheadType,
-         sourceHouse: House) {
+         sourceHouse: House, sourceObjectId: Int? = nil) {
         self.id = id
         self.bulletType = bulletType
         self.bulletData = data
@@ -44,6 +45,7 @@ class Projectile {
         self.damage = damage
         self.warhead = warhead
         self.sourceHouse = sourceHouse
+        self.sourceObjectId = sourceObjectId
         self.sourceX = startX
         self.sourceY = startY
         // Convert MPH speed to pixels/tick
@@ -67,7 +69,8 @@ func spawnProjectile(bulletType: BulletType, from attacker: GameObject,
         if let world = session.world, target.house == world.playerHouse {
             revealFogAroundPosition(worldX: attacker.worldX, worldY: attacker.worldY)
         }
-        let died = target.applyDamage(amount: damage, warhead: warhead, attackerHouse: attacker.house)
+        let died = target.applyDamage(amount: damage, warhead: warhead,
+                                       attackerHouse: attacker.house, attackerId: attacker.id)
         spawnImpactEffect(at: target.worldX, worldY: target.worldY, warhead: warhead)
         if died {
             target.spawnDeathEffects()
@@ -87,6 +90,10 @@ func spawnProjectile(bulletType: BulletType, from attacker: GameObject,
                 victimState.unitsLost += 1
             }
         }
+        // Splash damage for instant-hit weapons (only for explosive warheads)
+        applySplashDamage(at: target.worldX, worldY: target.worldY, warhead: warhead,
+                          baseDamage: damage, attackerHouse: attacker.house,
+                          attackerId: attacker.id, primaryTargetId: target.id)
         return
     }
 
@@ -111,7 +118,8 @@ func spawnProjectile(bulletType: BulletType, from attacker: GameObject,
         facing: facing,
         damage: damage,
         warhead: warhead,
-        sourceHouse: attacker.house
+        sourceHouse: attacker.house,
+        sourceObjectId: attacker.id
     )
     session.nextProjectileId += 1
     session.activeProjectiles.append(proj)
@@ -166,7 +174,9 @@ func tickProjectiles() {
                 if target.house == world.playerHouse {
                     revealFogAroundPosition(worldX: proj.sourceX, worldY: proj.sourceY)
                 }
-                let died = target.applyDamage(amount: proj.damage, warhead: proj.warhead, attackerHouse: proj.sourceHouse)
+                let died = target.applyDamage(amount: proj.damage, warhead: proj.warhead,
+                                               attackerHouse: proj.sourceHouse,
+                                               attackerId: proj.sourceObjectId)
                 spawnImpactEffect(at: target.worldX, worldY: target.worldY, warhead: proj.warhead)
 
                 if died {
@@ -187,9 +197,20 @@ func tickProjectiles() {
                         victimState.unitsLost += 1
                     }
                 }
+                // Splash damage around impact point
+                applySplashDamage(at: target.worldX, worldY: target.worldY,
+                                  warhead: proj.warhead, baseDamage: proj.damage,
+                                  attackerHouse: proj.sourceHouse,
+                                  attackerId: proj.sourceObjectId,
+                                  primaryTargetId: tid)
             } else {
                 // Target gone — explode at last known position
                 spawnImpactEffect(at: proj.targetX, worldY: proj.targetY, warhead: proj.warhead)
+                // Still apply splash damage at impact point even if primary target is gone
+                applySplashDamage(at: proj.targetX, worldY: proj.targetY,
+                                  warhead: proj.warhead, baseDamage: proj.damage,
+                                  attackerHouse: proj.sourceHouse,
+                                  attackerId: proj.sourceObjectId)
             }
         } else {
             // Fly toward target

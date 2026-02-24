@@ -43,6 +43,21 @@ func tickAI() {
     // Tick AI production every tick (queues advance by 1 per tick)
     tickAIProduction()
 
+    // Tick AI structure building every tick (queue advances by 1 per tick)
+    tickAIStructureProduction()
+
+    // AI attack coordination every 30 ticks
+    if session.aiTickCounter % 30 == 0 {
+        tickAIAttackWaves(world: world)
+        tickAIDamagedRetreat(world: world)
+    }
+
+    // AI building priority evaluation every 60 ticks (~4 seconds)
+    if session.aiTickCounter % 60 == 0 {
+        tickAIBuilding()
+        tickAIHarvesterManagement()
+    }
+
     // AI behavioral scan every 30 ticks (~2 seconds)
     guard session.aiTickCounter % 30 == 0 else { return }
 
@@ -484,5 +499,543 @@ private func spawnAIUnit(_ typeName: String, house: House, world: GameWorld) {
     )
     world.addObject(obj)
     print("AI: \(house.rawValue) produced \(typeName)")
+}
+
+// MARK: - AI Structure Production System
+
+/// Tick AI structure production queues — advances build progress each tick.
+func tickAIStructureProduction() {
+    guard let world = session.world else { return }
+
+    for (house, state) in session.houseStates {
+        if house == world.playerHouse || house == .neutral { continue }
+        if !state.productionEnabled { continue }
+
+        // Must have a construction yard to build structures
+        let owned = state.ownedBuildingTypes()
+        guard owned.contains("FACT") else { continue }
+
+        // Advance structure build queue
+        if state.aiStructureQueue.item != nil {
+            let completed = state.aiStructureQueue.tick(hasPower: state.hasPower, worldTickCount: world.tickCount)
+            if completed {
+                let typeName = state.aiStructureQueue.item!.typeName
+                placeAIStructure(typeName, house: house, world: world)
+                state.aiStructureQueue.clear()
+                state.aiBuildCycleCount += 1
+            }
+        }
+    }
+}
+
+/// Evaluate building priorities and start structure production for AI houses.
+/// Called every 60 ticks (~4 seconds).
+func tickAIBuilding() {
+    guard let world = session.world else { return }
+
+    for (house, state) in session.houseStates {
+        if house == world.playerHouse || house == .neutral { continue }
+        if !state.productionEnabled { continue }
+
+        let owned = state.ownedBuildingTypes()
+        guard owned.contains("FACT") else { continue }
+
+        // Don't start a new build if one is in progress
+        guard state.aiStructureQueue.item == nil else { continue }
+
+        let isNod = (houseToHousesType(house) == .bad)
+        let costMult = aiCostMultiplier()
+
+        // Count existing structures for this house
+        var refineryCount = 0
+        var harvesterCount = 0
+        for obj in world.objects {
+            guard obj.house == house && obj.strength > 0 else { continue }
+            let upper = obj.typeName.uppercased()
+            if upper == "PROC" { refineryCount += 1 }
+            if upper == "HARV" { harvesterCount += 1 }
+        }
+
+        // Pick a structure to build based on priority
+        if let choice = aiPickStructure(
+            house: house, houseState: state, owned: owned,
+            isNod: isNod, costMultiplier: costMult,
+            refineryCount: refineryCount, harvesterCount: harvesterCount
+        ) {
+            if state.spendCredits(choice.cost) {
+                state.aiStructureQueue.start(typeName: choice.typeName, cost: choice.cost, buildTime: choice.buildTime)
+                print("AI: \(house.rawValue) started building \(choice.typeName) ($\(choice.cost))")
+            }
+        }
+    }
+}
+
+/// Pick the highest-priority structure for the AI to build.
+private func aiPickStructure(
+    house: House,
+    houseState: HouseState,
+    owned: Set<String>,
+    isNod: Bool,
+    costMultiplier: Double,
+    refineryCount: Int,
+    harvesterCount: Int
+) -> (typeName: String, cost: Int, buildTime: Int)? {
+
+    // Helper to create a build choice from building data
+    func choice(_ iniName: String) -> (typeName: String, cost: Int, buildTime: Int)? {
+        guard let data = getBuildingTypeDataByName(iniName) else { return nil }
+        guard houseState.canBuildStructure(data) else { return nil }
+        let cost = Int(Double(data.cost) * costMultiplier)
+        guard houseState.credits >= cost else { return nil }
+        let ticks = max(30, cost / 5)
+        return (typeName: iniName, cost: cost, buildTime: ticks)
+    }
+
+    // Priority 1: Power Plant when power deficit or no power at all
+    if !houseState.hasPower || houseState.powerOutput == 0 {
+        // Prefer Advanced Power Plant if we already have one regular and enough credits
+        if owned.contains("NUKE") && houseState.credits > 1500 {
+            if let c = choice("NUK2") { return c }
+        }
+        if let c = choice("NUKE") { return c }
+    }
+
+    // Priority 2: Refinery when fewer than 2
+    if refineryCount < 2 {
+        if let c = choice("PROC") { return c }
+    }
+
+    // Priority 3: Barracks if none exists
+    let barracksType = isNod ? "HAND" : "PYLE"
+    if !owned.contains("PYLE") && !owned.contains("HAND") {
+        if let c = choice(barracksType) { return c }
+    }
+
+    // Priority 4: War Factory / Airstrip if none exists
+    if isNod {
+        if !owned.contains("AFLD") && !owned.contains("WEAP") {
+            if let c = choice("AFLD") { return c }
+        }
+    } else {
+        if !owned.contains("WEAP") {
+            if let c = choice("WEAP") { return c }
+        }
+    }
+
+    // Priority 5: Defense structures every 3rd building cycle
+    if houseState.aiBuildCycleCount % 3 == 2 {
+        if isNod {
+            // Nod: Gun Turret first, then Obelisk if HQ is built
+            if owned.contains("HQ") {
+                if let c = choice("OBLI") { return c }
+            }
+            if let c = choice("GUN") { return c }
+        } else {
+            // GDI: Guard Tower first, then Advanced Guard Tower if HQ is built
+            if owned.contains("HQ") {
+                if let c = choice("ATWR") { return c }
+            }
+            if let c = choice("GTWR") { return c }
+        }
+    }
+
+    // Priority 6: Tiberium Silo when storage nearly full
+    if houseState.capacity > 0 && houseState.tiberium > houseState.capacity * 3 / 4 {
+        if let c = choice("SILO") { return c }
+    }
+
+    // Priority 7: Communications Center (HQ)
+    if !owned.contains("HQ") && (owned.contains("PROC")) {
+        if let c = choice("HQ") { return c }
+    }
+
+    // Priority 8: Advanced structures when economy is strong
+    if houseState.credits > 2000 {
+        if isNod {
+            if !owned.contains("AFLD") {
+                if let c = choice("AFLD") { return c }
+            }
+            if !owned.contains("SAM") {
+                if let c = choice("SAM") { return c }
+            }
+            if !owned.contains("TMPL") && owned.contains("HQ") {
+                if let c = choice("TMPL") { return c }
+            }
+        } else {
+            if !owned.contains("HPAD") {
+                if let c = choice("HPAD") { return c }
+            }
+            if !owned.contains("ATWR") && owned.contains("HQ") {
+                if let c = choice("ATWR") { return c }
+            }
+            if !owned.contains("EYE") && owned.contains("HQ") {
+                if let c = choice("EYE") { return c }
+            }
+        }
+        // Repair Bay for both factions
+        if !owned.contains("FIX") {
+            if let c = choice("FIX") { return c }
+        }
+    }
+
+    // Priority 9: Additional power if close to deficit
+    if houseState.powerOutput < houseState.powerDrain + 50 {
+        if houseState.credits > 800 {
+            if let c = choice("NUK2") { return c }
+        }
+        if let c = choice("NUKE") { return c }
+    }
+
+    // Priority 10: Additional refinery for extra income
+    if refineryCount < 3 && houseState.credits > 3000 {
+        if let c = choice("PROC") { return c }
+    }
+
+    return nil
+}
+
+// MARK: - AI Building Placement
+
+/// Find a valid cell for the AI to place a building near its base.
+/// Returns the top-left cell index, or nil if no valid placement found.
+func findAIBuildLocation(typeName: String, house: House) -> Int? {
+    guard let world = session.world else { return nil }
+    let size = buildingSize(typeName)
+    let upper = typeName.uppercased()
+
+    // Determine if this is a defense structure (prefer base edges)
+    let isDefense = (upper == "GTWR" || upper == "ATWR" || upper == "OBLI" ||
+                     upper == "GUN" || upper == "SAM")
+    // Power plants prefer interior positions
+    let isPower = (upper == "NUKE" || upper == "NUK2")
+
+    // Collect all existing buildings for this AI house
+    var ownedBuildings: [(cellX: Int, cellY: Int, w: Int, h: Int)] = []
+    var baseCenterX = 0.0
+    var baseCenterY = 0.0
+    var buildingCount = 0
+
+    for obj in world.objects {
+        guard obj.house == house && obj.kind == .structure && obj.strength > 0 else { continue }
+        let bSize = buildingSize(obj.typeName)
+        // Calculate top-left cell of the building from its center world position
+        let topLeftX = Int(obj.worldX - Double(bSize.w * 24) / 2.0) / 24
+        let topLeftY = Int(obj.worldY - Double(bSize.h * 24) / 2.0) / 24
+        ownedBuildings.append((cellX: topLeftX, cellY: topLeftY, w: bSize.w, h: bSize.h))
+        baseCenterX += obj.worldX
+        baseCenterY += obj.worldY
+        buildingCount += 1
+    }
+
+    guard buildingCount > 0 else { return nil }
+    baseCenterX /= Double(buildingCount)
+    baseCenterY /= Double(buildingCount)
+    let baseCellX = Int(baseCenterX) / 24
+    let baseCellY = Int(baseCenterY) / 24
+
+    // Candidate cells: scan area around existing buildings (within 5 cells)
+    var bestCell: Int? = nil
+    var bestScore = -Double.infinity
+
+    // Build a set of cells occupied by existing buildings for quick lookup
+    var occupiedCells = Set<Int>()
+    for b in ownedBuildings {
+        for dy in 0..<b.h {
+            for dx in 0..<b.w {
+                let c = (b.cellY + dy) * 64 + (b.cellX + dx)
+                if c >= 0 && c < 4096 {
+                    occupiedCells.insert(c)
+                }
+            }
+        }
+    }
+
+    for b in ownedBuildings {
+        // Search in a ring around each existing building
+        let searchRadius = 4
+        let minX = max(2, b.cellX - searchRadius)
+        let maxX = min(62 - size.w, b.cellX + b.w + searchRadius)
+        let minY = max(2, b.cellY - searchRadius)
+        let maxY = min(62 - size.h, b.cellY + b.h + searchRadius)
+
+        for cy in minY...maxY {
+            for cx in minX...maxX {
+                // Check if all footprint cells are passable and not occupied
+                var valid = true
+                for dy in 0..<size.h {
+                    for dx in 0..<size.w {
+                        let checkCell = (cy + dy) * 64 + (cx + dx)
+                        if checkCell < 0 || checkCell >= 4096 {
+                            valid = false
+                            break
+                        }
+                        if !staticPassability[checkCell] {
+                            valid = false
+                            break
+                        }
+                        if occupiedCells.contains(checkCell) {
+                            valid = false
+                            break
+                        }
+                    }
+                    if !valid { break }
+                }
+                if !valid { continue }
+
+                // Check adjacency: at least one cell of the footprint must be
+                // adjacent to an existing owned building
+                var isAdjacent = false
+                for existingB in ownedBuildings {
+                    for dy in -1...size.h {
+                        for dx in -1...size.w {
+                            let checkX = cx + dx
+                            let checkY = cy + dy
+                            if checkX >= existingB.cellX && checkX < existingB.cellX + existingB.w &&
+                               checkY >= existingB.cellY && checkY < existingB.cellY + existingB.h {
+                                isAdjacent = true
+                                break
+                            }
+                        }
+                        if isAdjacent { break }
+                    }
+                    if isAdjacent { break }
+                }
+                if !isAdjacent { continue }
+
+                // Score this position
+                let centerX = Double(cx) + Double(size.w) / 2.0
+                let centerY = Double(cy) + Double(size.h) / 2.0
+                let distFromBase = sqrt(pow(centerX - Double(baseCellX), 2) +
+                                       pow(centerY - Double(baseCellY), 2))
+
+                var score = 0.0
+
+                if isDefense {
+                    // Defenses prefer base edges (farther from center)
+                    score = distFromBase * 2.0
+                } else if isPower {
+                    // Power plants prefer interior (closer to center)
+                    score = -distFromBase * 2.0
+                } else {
+                    // Other buildings: moderate distance, slight outward expansion
+                    score = distFromBase * 0.5
+                }
+
+                // Small random factor to avoid always placing in same spot
+                score += Double.random(in: 0.0...2.0)
+
+                if score > bestScore {
+                    bestScore = score
+                    bestCell = cy * 64 + cx
+                }
+            }
+        }
+    }
+
+    return bestCell
+}
+
+/// Place a completed AI structure on the map.
+private func placeAIStructure(_ typeName: String, house: House, world: GameWorld) {
+    guard let cell = findAIBuildLocation(typeName: typeName, house: house) else {
+        print("AI: \(house.rawValue) could not find placement for \(typeName)")
+        return
+    }
+
+    let pos = cellToPixel(cell)
+    let size = buildingSize(typeName)
+    let cx = Double(pos.px) + Double(size.w * 24) / 2.0
+    let cy = Double(pos.py) + Double(size.h * 24) / 2.0
+
+    let obj = GameObject(
+        id: world.allocateId(),
+        typeName: typeName,
+        house: house,
+        kind: .structure,
+        worldX: cx, worldY: cy,
+        facing: 0,
+        strength: resolveStrength(typeName: typeName, kind: .structure, scenarioStrength: 256),
+        mission: .construction,
+        speed: 0.0
+    )
+    // Start build-up animation
+    obj.buildUpFrame = 0
+    obj.buildUpDelay = 0
+    world.addObject(obj)
+
+    // Mark footprint as impassable
+    let cellXY = cellToXY(cell)
+    for dy in 0..<size.h {
+        for dx in 0..<size.w {
+            let c = (cellXY.y + dy) * 64 + (cellXY.x + dx)
+            if c >= 0 && c < 4096 {
+                staticPassability[c] = false
+            }
+        }
+    }
+
+    // Recalculate power for all houses
+    recalculateAllHousePower()
+
+    print("AI: \(house.rawValue) placed \(typeName) at cell \(cell)")
+}
+
+// MARK: - AI Attack Coordination
+
+/// Minimum ticks between attack waves, scaled by difficulty
+func aiAttackInterval() -> Int {
+    switch session.campaignState.difficulty {
+    case 0:  return 15 * 90   // Easy — 90 seconds
+    case 2:  return 15 * 60   // Hard — 60 seconds
+    default: return 15 * 75   // Normal — 75 seconds
+    }
+}
+
+/// Idle unit threshold for launching an attack wave, scaled by difficulty
+func aiAttackThreshold() -> Int {
+    switch session.campaignState.difficulty {
+    case 0:  return 5    // Easy — needs more units before attacking
+    case 2:  return 4    // Hard — attacks sooner with fewer units
+    default: return 6    // Normal
+    }
+}
+
+/// Check for idle combat units and launch attack waves.
+func tickAIAttackWaves(world: GameWorld) {
+    let attackInterval = aiAttackInterval()
+    let threshold = aiAttackThreshold()
+
+    for (house, state) in session.houseStates {
+        if house == world.playerHouse || house == .neutral { continue }
+        if !state.productionEnabled { continue }
+
+        // Enforce minimum interval between attacks
+        let ticksSinceLastAttack = session.aiTickCounter - state.aiLastAttackTick
+        guard ticksSinceLastAttack >= attackInterval else { continue }
+
+        // Gather idle combat units (on guard or stop)
+        var idleUnits: [GameObject] = []
+        for obj in world.objects {
+            guard obj.house == house && obj.strength > 0 else { continue }
+            guard obj.kind == .unit || obj.kind == .infantry else { continue }
+            let upper = obj.typeName.uppercased()
+            if upper == "HARV" || upper == "MCV" { continue }
+            guard obj.mission == .guard_ || obj.mission == .stop else { continue }
+            guard obj.isArmed else { continue }
+            idleUnits.append(obj)
+        }
+
+        guard idleUnits.count >= threshold else { continue }
+
+        // Find a target: nearest player structure, or nearest player harvester
+        var target: GameObject? = nil
+        var targetDist = Double.infinity
+
+        // Calculate AI base center for distance measurement
+        guard let aiBase = findHouseBase(house: house, world: world) else { continue }
+
+        // Prefer player structures
+        for obj in world.objects {
+            guard obj.house == world.playerHouse && obj.strength > 0 else { continue }
+            guard obj.kind == .structure || obj.typeName.uppercased() == "HARV" else { continue }
+            let dx = obj.worldX - aiBase.x
+            let dy = obj.worldY - aiBase.y
+            let dist = sqrt(dx * dx + dy * dy)
+            if dist < targetDist {
+                target = obj
+                targetDist = dist
+            }
+        }
+
+        guard let attackTarget = target else { continue }
+
+        // Send all idle combat units to attack
+        for unit in idleUnits {
+            unit.attackTarget = attackTarget.id
+            unit.mission = .attack
+            unit.movePath = []
+            // Add slight offset so units don't all stack
+            let offsetX = Double.random(in: -36...36)
+            let offsetY = Double.random(in: -36...36)
+            unit.moveTargetX = attackTarget.worldX + offsetX
+            unit.moveTargetY = attackTarget.worldY + offsetY
+        }
+
+        state.aiLastAttackTick = session.aiTickCounter
+        print("AI: \(house.rawValue) launched attack wave with \(idleUnits.count) units")
+    }
+}
+
+/// Retreat damaged AI units below 30% health to their base.
+func tickAIDamagedRetreat(world: GameWorld) {
+    for obj in world.objects {
+        if obj.house == world.playerHouse || obj.house == .neutral { continue }
+        if obj.kind == .structure { continue }
+        if obj.strength <= 0 { continue }
+        let upper = obj.typeName.uppercased()
+        if upper == "HARV" || upper == "MCV" { continue }
+
+        // Only retreat units that are in combat (attacking) and badly hurt
+        guard obj.mission == .attack else { continue }
+        guard obj.healthFraction < 0.3 else { continue }
+
+        // Retreat to nearest friendly building
+        obj.attackTarget = nil
+        obj.mission = .retreat
+        obj.movePath = []
+    }
+}
+
+/// Find the average position of a specific house's structures.
+func findHouseBase(house: House, world: GameWorld) -> (x: Double, y: Double)? {
+    var totalX = 0.0
+    var totalY = 0.0
+    var count = 0
+
+    for obj in world.objects {
+        if obj.kind == .structure && obj.house == house && obj.strength > 0 {
+            totalX += obj.worldX
+            totalY += obj.worldY
+            count += 1
+        }
+    }
+
+    guard count > 0 else { return nil }
+    return (x: totalX / Double(count), y: totalY / Double(count))
+}
+
+// MARK: - AI Harvester Management
+
+/// Ensure AI houses have harvesters and refineries.
+func tickAIHarvesterManagement() {
+    guard let world = session.world else { return }
+
+    for (house, state) in session.houseStates {
+        if house == world.playerHouse || house == .neutral { continue }
+        if !state.productionEnabled { continue }
+
+        let owned = state.ownedBuildingTypes()
+        guard owned.contains("PROC") else { continue }
+
+        // Count harvesters
+        var harvesterCount = 0
+        for obj in world.objects {
+            guard obj.house == house && obj.strength > 0 else { continue }
+            if obj.typeName.uppercased() == "HARV" { harvesterCount += 1 }
+        }
+
+        // If no harvesters and unit queue is idle, prioritize building one
+        if harvesterCount == 0 && state.aiUnitQueue.item == nil {
+            // Check if the unit queue isn't already building a harvester
+            if let data = getUnitTypeDataByName("HARV") {
+                let cost = Int(Double(data.cost) * aiCostMultiplier())
+                if state.spendCredits(cost) {
+                    let ticks = max(30, cost / 5)
+                    state.aiUnitQueue.start(typeName: "HARV", cost: cost, buildTime: ticks)
+                    print("AI: \(house.rawValue) emergency harvester build")
+                }
+            }
+        }
+    }
 }
 

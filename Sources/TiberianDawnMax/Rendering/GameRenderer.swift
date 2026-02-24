@@ -22,8 +22,8 @@ func renderGame(_ renderer: OpaquePointer?) {
 
     let visibleWidth = Int(Double(gameViewportWidth) / renderState.gameZoomLevel)
     let visibleHeight = Int(Double(renderState.windowHeight) / renderState.gameZoomLevel)
-    let camX = Int(renderState.gameCameraX)
-    let camY = Int(renderState.gameCameraY)
+    let camX = Int(renderState.gameCameraX) - Int(renderState.screenShakeOffsetX)
+    let camY = Int(renderState.gameCameraY) - Int(renderState.screenShakeOffsetY)
 
     let startCellX = max(0, camX / tileSize)
     let startCellY = max(0, camY / tileSize)
@@ -159,6 +159,9 @@ func renderGame(_ renderer: OpaquePointer?) {
             SDL_RenderFillRect(renderer, &rect)
         }
     }
+
+    // === Pass 3.75: Crates ===
+    renderCrates(renderer, camX: camX, camY: camY, vw: vw, vh: vh)
 
     // === Pass 4: Game objects sorted by Y (structures first, then units/infantry by Y) ===
     // Separate structures from mobile units for proper draw order
@@ -454,6 +457,9 @@ func renderGame(_ renderer: OpaquePointer?) {
     // === Pass 4b: In-flight projectiles (missiles, shells, grenades) ===
     renderProjectiles(renderer, camX: camX, camY: camY, vw: vw, vh: vh)
 
+    // === Pass 4c: Ion Cannon Beam Effect ===
+    renderIonBeam(renderer, camX: camX, camY: camY)
+
     // === Pass 5: Selection highlights ===
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
     for obj in world.objects {
@@ -485,6 +491,21 @@ func renderGame(_ renderer: OpaquePointer?) {
             let sy = screenY - boxSize / 2
             renderSelectionBox(renderer, x: sx, y: sy, w: boxSize, h: boxSize, healthFraction: obj.healthFraction)
         }
+    }
+
+    // === Pass 5a2: Veterancy chevrons above veteran/elite units ===
+    for obj in world.objects {
+        guard obj.strength > 0 && obj.veteranLevel > 0 else { continue }
+        guard obj.kind == .unit || obj.kind == .infantry else { continue }
+
+        let screenX = Int32(obj.worldX - Double(camX))
+        let screenY = Int32(obj.worldY - Double(camY))
+
+        // Cull off-screen
+        if screenX < -20 || screenY < -20 || screenX > vw + 20 || screenY > vh + 20 { continue }
+
+        let chevronY = screenY - (obj.kind == .unit ? 14 : 10)
+        renderVeterancyChevrons(renderer, cx: screenX, cy: chevronY, level: obj.veteranLevel)
     }
 
     // === Pass 5b: Repair wrench indicator on buildings actively being repaired ===
@@ -587,6 +608,18 @@ func renderGame(_ renderer: OpaquePointer?) {
 
     drawText(renderer, "RClick: Move/Attack  F3: Perf  F5: Save  F9: Load  Esc: Menu",
              centerX: gameViewportCenter, centerY: renderState.windowHeight - 15, color: .gray, scale: 1)
+
+    // === Screen Flash Overlay ===
+    if renderState.screenFlashAlpha > 0 {
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
+        SDL_SetRenderDrawColor(renderer,
+                               renderState.screenFlashR,
+                               renderState.screenFlashG,
+                               renderState.screenFlashB,
+                               renderState.screenFlashAlpha)
+        var flashRect = SDL_Rect(x: 0, y: 0, w: renderState.windowWidth, h: renderState.windowHeight)
+        SDL_RenderFillRect(renderer, &flashRect)
+    }
 
     // === Custom Cursor Rendering ===
     renderGameCursor(renderer, world: world)
@@ -836,6 +869,57 @@ func renderProceduralExplosion(_ renderer: OpaquePointer?, anim: GameAnimation, 
     }
 }
 
+// MARK: - Ion Cannon Beam Effect
+
+/// Render procedural ion cannon beam from top of screen to target
+func renderIonBeam(_ renderer: OpaquePointer?, camX: Int, camY: Int) {
+    guard renderState.ionBeamTimer > 0 else { return }
+
+    let screenX = Int32(renderState.ionBeamWorldX) - Int32(camX)
+    let screenY = Int32(renderState.ionBeamWorldY) - Int32(camY)
+
+    // Beam fades over time
+    let progress = Double(renderState.ionBeamTimer) / 30.0
+    let alpha = UInt8(max(0, min(255, Int(255.0 * progress))))
+
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
+
+    // Wide outer glow
+    let outerWidth: Int32 = Int32(12.0 * progress)
+    SDL_SetRenderDrawColor(renderer, 80, 120, 255, alpha / 4)
+    for dx in -outerWidth...outerWidth {
+        SDL_RenderDrawLine(renderer, screenX + dx, -100, screenX + dx, screenY)
+    }
+
+    // Medium blue beam
+    let midWidth: Int32 = Int32(6.0 * progress)
+    SDL_SetRenderDrawColor(renderer, 120, 180, 255, alpha / 2)
+    for dx in -midWidth...midWidth {
+        SDL_RenderDrawLine(renderer, screenX + dx, -100, screenX + dx, screenY)
+    }
+
+    // Inner bright white-blue core
+    let coreWidth: Int32 = Int32(2.0 * progress)
+    SDL_SetRenderDrawColor(renderer, 200, 230, 255, alpha)
+    for dx in -coreWidth...coreWidth {
+        SDL_RenderDrawLine(renderer, screenX + dx, -100, screenX + dx, screenY)
+    }
+
+    // Impact glow at target
+    let glowRadius = Int32(20.0 * progress)
+    SDL_SetRenderDrawColor(renderer, 180, 220, 255, alpha / 3)
+    var glowRect = SDL_Rect(x: screenX - glowRadius, y: screenY - glowRadius,
+                           w: glowRadius * 2, h: glowRadius * 2)
+    SDL_RenderFillRect(renderer, &glowRect)
+
+    // Bright center flash at impact
+    let flashR = Int32(8.0 * progress)
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, alpha)
+    var flashRect = SDL_Rect(x: screenX - flashR, y: screenY - flashR,
+                            w: flashR * 2, h: flashR * 2)
+    SDL_RenderFillRect(renderer, &flashRect)
+}
+
 // MARK: - Game Minimap
 
 func renderGameMinimap(_ renderer: OpaquePointer?, world: GameWorld) {
@@ -919,14 +1003,31 @@ func renderGameMinimap(_ renderer: OpaquePointer?, world: GameWorld) {
             if let house = structureCells[cellIndex] {
                 let hc = house.displayColor
                 r = hc.r; g = hc.g; b = hc.b
+            } else if world.map.tiberiumCells.contains(cellIndex) {
+                // Tiberium: bright green/yellow
+                r = 80; g = 200; b = 40
             } else {
                 let cell = mapCells[cellIndex]
                 let templateType = Int(cell.templateType)
                 if templateType != 0xFF && templateType < templateTable.count {
                     let name = templateTable[templateType].icnName.uppercased()
-                    if name.hasPrefix("W") || name.contains("WATER") || name.hasPrefix("SH") || name.hasPrefix("FALLS") || name.hasPrefix("RIVER") || name.hasPrefix("FORD") || name.hasPrefix("BRIDGE") {
-                        r = 20; g = 30; b = 80
+                    if name == "W1" || name == "W2" {
+                        // Deep water: dark blue
+                        r = 15; g = 20; b = 80
+                    } else if name.hasPrefix("SH") || name.hasPrefix("FALLS") || name.hasPrefix("FORD") {
+                        // Shore/falls: medium blue-green
+                        r = 20; g = 40; b = 60
+                    } else if name.hasPrefix("RV") || name.hasPrefix("RIVER") || name.hasPrefix("BRIDGE") {
+                        // River/bridge: medium blue
+                        r = 20; g = 30; b = 70
+                    } else if name.hasPrefix("D") || name.hasPrefix("ROCK") || name.hasPrefix("CLIFF") {
+                        // Rock/desert: dark gray
+                        r = 40; g = 40; b = 35
                     }
+                }
+                // Impassable land (not water): dark gray
+                if !landPassability[cellIndex] && r == 20 && g == 60 && b == 20 {
+                    r = 35; g = 35; b = 30
                 }
             }
 
@@ -955,6 +1056,19 @@ func renderGameMinimap(_ renderer: OpaquePointer?, world: GameWorld) {
         SDL_SetRenderDrawColor(renderer, UInt8(min(255, UInt16(hc.r) + 50)), UInt8(min(255, UInt16(hc.g) + 50)), UInt8(min(255, UInt16(hc.b) + 50)), 255)
         var dot = SDL_Rect(x: px, y: py, w: minimapCellSize, h: minimapCellSize)
         SDL_RenderFillRect(renderer, &dot)
+    }
+
+    // Draw crates on minimap as bright white dots (only if visible)
+    for crate in world.crateState.crates {
+        guard !crate.isCollected else { continue }
+        guard world.map.fogState[crate.cell] != .unexplored else { continue }
+        let px = minimapX + Int32(crate.worldX / Double(tileSize)) * minimapCellSize
+        let py = minimapY + Int32(crate.worldY / Double(tileSize)) * minimapCellSize
+        // Blink effect: alternate brightness
+        let bright = (world.tickCount / 8) % 2 == 0
+        SDL_SetRenderDrawColor(renderer, bright ? 255 : 180, bright ? 255 : 180, bright ? 255 : 180, 255)
+        var cdot = SDL_Rect(x: px, y: py, w: minimapCellSize, h: minimapCellSize)
+        SDL_RenderFillRect(renderer, &cdot)
     }
 
     // Darken outside map bounds

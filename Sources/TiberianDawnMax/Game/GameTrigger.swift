@@ -128,6 +128,8 @@ class GameTrigger {
     let dataCopy: Int           // Original data value for resetting
     var attachCount: Int = 0
     var isActive: Bool = true
+    /// Tracks which houses have already fired this trigger (for semi-persistent per-side)
+    var firedForHouses: Set<House> = []
 
     init(name: String, event: TriggerEvent, action: TriggerAction,
          house: House, teamName: String?, persistence: TriggerPersistence, data: Int) {
@@ -155,6 +157,16 @@ enum TriggerWinState {
     case playing
     case won
     case lost
+}
+
+// MARK: - Waypoint Helpers
+
+/// Convert a waypoint index to world coordinates (center of the cell).
+/// Returns nil if the waypoint is not defined in the scenario.
+func waypointWorldPos(_ wp: Int) -> (x: Double, y: Double)? {
+    guard let cell = session.scenarioWaypoints[wp] else { return nil }
+    let pos = cellToPixel(cell)
+    return (x: Double(pos.px) + 12.0, y: Double(pos.py) + 12.0)
 }
 
 /// Parse triggers from scenario INI data
@@ -262,27 +274,94 @@ func tickTriggers() {
             // All buildings of the specified house destroyed
             let house = trigger.house
             let hasBuildings = world.objects.contains { $0.house == house && $0.strength > 0 && $0.kind == .structure }
-            if !hasBuildings {
+            if !hasBuildings && world.tickCount > 30 {
                 fireTrigger(trigger)
             }
 
         case .noFactories:
-            // No factories left for house
+            // No factories left for house (WEAP, FACT/Construction Yard, AFLD, HAND, PYLE)
             let house = trigger.house
             let hasFactory = world.objects.contains { $0.house == house && $0.strength > 0 &&
                 $0.kind == .structure && ["WEAP", "FACT", "AFLD", "HAND", "PYLE"].contains($0.typeName.uppercased()) }
-            if !hasFactory {
+            if !hasFactory && world.tickCount > 30 {
                 fireTrigger(trigger)
             }
 
         case .credits:
-            // Credits threshold reached
-            if session.sidebarCredits >= trigger.data {
+            // Credits threshold reached for the trigger's house
+            let creditsToCheck: Int
+            if trigger.house == world.playerHouse {
+                creditsToCheck = session.sidebarCredits
+            } else {
+                creditsToCheck = getHouseState(trigger.house).credits
+            }
+            if creditsToCheck >= trigger.data {
                 fireTrigger(trigger)
             }
 
-        default:
-            break  // Object/cell events are handled by springTrigger calls
+        case .nBuildingsDestroyed:
+            // N buildings of the specified house have been destroyed
+            // data field holds the count threshold; we decrement it each time a building dies
+            // (decrement is done in springTrigger when .destroyed fires for buildings)
+            // Alternatively, check the house state's buildingsLost counter
+            let houseState = getHouseState(trigger.house)
+            if houseState.buildingsLost >= trigger.data && trigger.data > 0 {
+                fireTrigger(trigger)
+            }
+
+        case .nUnitsDestroyed:
+            // N units of the specified house have been destroyed
+            let houseState = getHouseState(trigger.house)
+            if houseState.unitsLost >= trigger.data && trigger.data > 0 {
+                fireTrigger(trigger)
+            }
+
+        case .houseDiscovered:
+            // Fire when any object of the trigger's house is discovered by the player
+            // (visible in the fog of war). Check every ~1 second for performance.
+            if world.tickCount % 15 == 0 {
+                let house = trigger.house
+                let playerDiscovered = world.objects.contains { obj in
+                    obj.house == house && obj.strength > 0 && !obj.isInLimbo &&
+                    isCellVisible(obj.cell)
+                }
+                if playerDiscovered {
+                    fireTrigger(trigger)
+                }
+            }
+
+        case .civEvacuated:
+            // Civilians evacuated: check if any civilian (neutral house) infantry
+            // has reached waypoint 25 (WAYPT_REINF, the standard evac waypoint).
+            // In original C&C, this fires when the civilian enters the evacuation point.
+            if world.tickCount % 8 == 0 {
+                if let evacPos = waypointWorldPos(25) {
+                    let evacuated = world.objects.contains { obj in
+                        obj.house == .neutral && obj.kind == .infantry &&
+                        obj.strength > 0 && !obj.isInLimbo &&
+                        abs(obj.worldX - evacPos.x) < 24.0 && abs(obj.worldY - evacPos.y) < 24.0
+                    }
+                    if evacuated {
+                        fireTrigger(trigger)
+                    }
+                }
+            }
+
+        case .builtIt:
+            // Handled externally by springTriggerBuiltIt() when a structure is placed
+            break
+
+        case .discovered:
+            // Object-level discovered: handled by springTrigger from fog checks
+            // (when an attached object becomes visible to the player)
+            break
+
+        case .playerEntered, .attacked, .destroyed, .any:
+            // These are object/cell events handled by springTrigger calls
+            break
+
+        case .none:
+            break
         }
     }
 }
@@ -307,14 +386,66 @@ func springTrigger(named triggerName: String, event: TriggerEvent) {
     }
 }
 
-/// Spring a cell trigger when a player unit enters a cell
+/// Spring a cell trigger when a unit enters a cell.
+/// Player units fire .playerEntered; any unit fires triggers with .any event.
 func checkCellTriggers(cell: Int, enteringObject: GameObject) {
     guard let scenario = scenarioData else { return }
-    guard enteringObject.house == session.world?.playerHouse else { return }
+    let isPlayer = enteringObject.house == session.world?.playerHouse
 
     for ct in scenario.cellTriggers {
         if ct.cell == cell {
-            springTrigger(named: ct.triggerName, event: .playerEntered)
+            if isPlayer {
+                springTrigger(named: ct.triggerName, event: .playerEntered)
+            }
+            // Also check for triggers that respond to any unit entering
+            for trigger in session.gameTriggers {
+                guard trigger.isActive else { continue }
+                guard trigger.name.caseInsensitiveCompare(ct.triggerName) == .orderedSame else { continue }
+                guard trigger.event == .any else { continue }
+
+                if trigger.persistence == .semiPersistent {
+                    trigger.attachCount -= 1
+                    if trigger.attachCount <= 0 {
+                        fireTrigger(trigger)
+                    }
+                } else if !isPlayer {
+                    // Only fire for non-player if we didn't already fire via springTrigger above
+                    fireTrigger(trigger)
+                }
+            }
+        }
+    }
+}
+
+/// Check if any attached object just became visible to the player (discovered trigger).
+/// Called from the game loop after fog updates.
+func checkDiscoveredTriggers() {
+    guard let world = session.world else { return }
+    guard session.triggerWinState == .playing else { return }
+
+    for obj in world.objects {
+        guard obj.strength > 0 && !obj.isInLimbo else { continue }
+        guard let trigName = obj.triggerName else { continue }
+        guard obj.house != world.playerHouse else { continue }
+        // Fire discovered trigger if the object's cell is now visible
+        if isCellVisible(obj.cell) {
+            springTrigger(named: trigName, event: .discovered)
+        }
+    }
+}
+
+/// Called when the player builds/places a structure type.
+/// Fires any "Built It" triggers attached to that structure type.
+func springTriggerBuiltIt(structureType: String) {
+    guard session.triggerWinState == .playing else { return }
+
+    for trigger in session.gameTriggers {
+        guard trigger.isActive else { continue }
+        guard trigger.event == .builtIt else { continue }
+        // In original C&C, "Built It" fires for the player's house when any structure is built.
+        // The trigger is not attached to a specific type; it fires whenever any structure is placed.
+        if let world = session.world, trigger.house == world.playerHouse {
+            fireTrigger(trigger)
         }
     }
 }
@@ -326,9 +457,18 @@ func fireTrigger(_ trigger: GameTrigger) {
 
     print("Trigger '\(trigger.name)' fired: action=\(trigger.action)")
 
-    // Deactivate volatile triggers
-    if trigger.persistence == .volatile {
+    // Handle persistence modes
+    switch trigger.persistence {
+    case .volatile:
+        // Fire once, then deactivate
         trigger.isActive = false
+    case .semiPersistent:
+        // Already handled by attachCount decrement in springTrigger;
+        // deactivate after firing
+        trigger.isActive = false
+    case .persistent:
+        // Never auto-remove; stays active for re-firing
+        break
     }
 
     switch trigger.action {
@@ -402,10 +542,23 @@ func fireTrigger(_ trigger: GameTrigger) {
         destroyTriggerNamed("ZZZZ")
 
     case .autocreate:
-        print("Trigger: Autocreate enabled")
+        // Enable autocreate AI mode: the AI will periodically create teams
+        // from TeamTypes that have isAutocreate = true
+        if let world = session.world {
+            for (house, state) in session.houseStates {
+                if house != world.playerHouse && house != .neutral {
+                    state.productionEnabled = true
+                }
+            }
+        }
+        // Immediately try to create an autocreate team
+        tryAutocreateTeam()
+        print("Trigger: Autocreate enabled — AI will auto-create teams")
 
     case .winLose:
-        // Cap=Win/Des=Lose — handled via object events
+        // Cap=Win/Des=Lose — handled via object events (capture = win, destroy = lose)
+        // This is set up by the trigger being attached to a building;
+        // when captured, the player wins; when destroyed, the player loses.
         print("Trigger: Win/Lose condition set")
 
     case .allowWin:
@@ -413,7 +566,14 @@ func fireTrigger(_ trigger: GameTrigger) {
         print("Trigger: Allow win flag set")
 
     case .dz:
-        print("Trigger: Drop zone flare")
+        // Drop zone at waypoint 'Z' (waypoint 25) — reveal fog around the drop zone
+        // In original C&C, this places a smoke flare at waypoint 25
+        if let dzPos = waypointWorldPos(25) {
+            revealFogAroundPosition(worldX: dzPos.x, worldY: dzPos.y, radius: 4)
+            print("Trigger: Drop zone flare at waypoint 25 (\(Int(dzPos.x)), \(Int(dzPos.y)))")
+        } else {
+            print("Trigger: Drop zone flare — waypoint 25 not defined")
+        }
 
     case .none:
         break
@@ -426,6 +586,16 @@ func destroyTriggerNamed(_ name: String) {
         if trigger.name.caseInsensitiveCompare(name) == .orderedSame {
             trigger.isActive = false
             print("Trigger '\(name)' destroyed by another trigger")
+        }
+    }
+}
+
+/// Force-activate a trigger by name (used by "Force Trigger" actions in some scenarios)
+func forceTriggerNamed(_ name: String) {
+    for trigger in session.gameTriggers {
+        guard trigger.isActive else { continue }
+        if trigger.name.caseInsensitiveCompare(name) == .orderedSame {
+            fireTrigger(trigger)
         }
     }
 }

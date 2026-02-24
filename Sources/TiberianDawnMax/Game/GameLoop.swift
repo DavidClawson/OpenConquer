@@ -59,6 +59,9 @@ func gameTick() {
     // Tick super weapons
     tickSuperWeapons()
 
+    // Tick screen effects (flash, shake, beam)
+    tickScreenEffects()
+
     // Tick AI
     tickAI()
     tickAISuperWeapons()
@@ -74,6 +77,9 @@ func gameTick() {
 
     // Tick tiberium growth and spread
     world.map.tickTiberiumGrowth()
+
+    // Tick crate spawning and pickup
+    tickCrates()
 
     // Update each object by mission
     for obj in world.objects {
@@ -185,6 +191,13 @@ func gameTick() {
         }
     }
 
+    // Tick elite self-heal (1 HP per 30 ticks for elite units)
+    for obj in world.objects {
+        if obj.veteranLevel >= 2 && obj.strength > 0 {
+            obj.tickEliteHeal()
+        }
+    }
+
     // Tick SAM site deploy/retract animation
     for obj in world.objects {
         if obj.kind == .structure && obj.hasTurret {
@@ -221,11 +234,17 @@ func gameTick() {
         }
     }
 
-    // Check cell triggers for player units that may have moved
+    // Check cell triggers for units that may have moved
     for obj in world.objects {
-        if obj.house == world.playerHouse && obj.strength > 0 {
+        if obj.strength > 0 && !obj.isInLimbo && (obj.kind == .unit || obj.kind == .infantry) {
             checkCellTriggers(cell: obj.cell, enteringObject: obj)
         }
+    }
+
+    // Check discovered triggers (objects becoming visible to the player)
+    // Only check every 15 ticks (~1 second) for performance
+    if world.tickCount % 15 == 0 {
+        checkDiscoveredTriggers()
     }
 
     // Tick projectiles in flight
@@ -378,7 +397,8 @@ extension GameObject {
             facing = directionToFacing(dx: dx, dy: dy)
         }
 
-        if dist <= speed {
+        let moveSpeed = effectiveSpeed
+        if dist <= moveSpeed {
             // Arrived at waypoint
             worldX = nextX
             worldY = nextY
@@ -406,8 +426,8 @@ extension GameObject {
             }
         } else {
             // Move toward waypoint
-            let moveX = (dx / dist) * speed
-            let moveY = (dy / dist) * speed
+            let moveX = (dx / dist) * moveSpeed
+            let moveY = (dy / dist) * moveSpeed
             worldX += moveX
             worldY += moveY
             return .moving

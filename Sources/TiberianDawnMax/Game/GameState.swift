@@ -109,6 +109,15 @@ class GameObject {
     var lastDamagedTick: Int = 0    // Tick when unit last took damage (for damage flash)
     var ammo: Int = -1              // -1 = unlimited
 
+    // Veterancy system
+    var killCount: Int = 0          // Total kills scored by this unit
+    /// Veteran level: 0=Regular, 1=Veteran (3 kills), 2=Elite (7 kills)
+    var veteranLevel: Int {
+        if killCount >= 7 { return 2 }
+        if killCount >= 3 { return 1 }
+        return 0
+    }
+
     // Harvesting (units only)
     var tiberiumLoad: Int = 0
 
@@ -144,6 +153,9 @@ class GameObject {
 
     // Trigger
     var triggerName: String? = nil  // Attached trigger ID
+
+    // Crate buff (temporary speed/firepower bonus from crate pickup)
+    var crateBuff: CrateBuff = CrateBuff()
 
     // Computed cell position
     var cellX: Int { Int(worldX) / 24 }
@@ -224,7 +236,8 @@ class GameObject {
     var primaryWeapon: WeaponType? { cachedPrimaryWeapon }
     var secondaryWeapon: WeaponType? { cachedSecondaryWeapon }
     var armorType: ArmorType { cachedArmor }
-    var sightRange: Int { cachedSightRange }
+    var sightRange: Int { effectiveSightRange }
+    var baseSightRange: Int { cachedSightRange }
     var maxStrength: Int { cachedMaxStrength }
     var cost: Int { cachedCost }
     var hasTurret: Bool { cachedHasTurret }
@@ -237,6 +250,9 @@ class GameObject {
         guard cachedMaxStrength > 0 else { return 0.0 }
         return Double(strength) / Double(cachedMaxStrength)
     }
+
+    /// Effective movement speed including crate buff multiplier
+    var effectiveSpeed: Double { speed * crateBuff.speedMultiplier }
 
     /// True if this object is armed (has a weapon)
     var isArmed: Bool { cachedPrimaryWeapon != nil }
@@ -305,6 +321,7 @@ class GameWorld {
     var occupiedPads: Set<Int> = []  // object IDs of helipads/airstrips currently occupied by a landing/landed aircraft
     var playerHouse: House = .goodGuy
     var map: GameMap = GameMap()
+    var crateState: CrateState = CrateState()
 
     // Control groups (0-9), each can hold multiple object IDs
     var controlGroups: [[Int]] = Array(repeating: [], count: 10)

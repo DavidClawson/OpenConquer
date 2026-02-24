@@ -22,6 +22,7 @@ let cursorEnter     = CursorDef(startFrame: 119, frameCount: 3,  hotX: 15, hotY:
 let cursorAreaGuard = CursorDef(startFrame: 153, frameCount: 1,  hotX: 15, hotY: 12)
 let cursorRepair    = CursorDef(startFrame: 200, frameCount: 12, hotX: 15, hotY: 12)
 let cursorSell      = CursorDef(startFrame: 210, frameCount: 1,  hotX: 15, hotY: 12)
+let cursorNuke      = CursorDef(startFrame: 220, frameCount: 1,  hotX: 15, hotY: 12)
 
 func renderGameCursor(_ renderer: OpaquePointer?, world: GameWorld) {
     // Hide system cursor when playing
@@ -39,6 +40,11 @@ func renderGameCursor(_ renderer: OpaquePointer?, world: GameWorld) {
 
     // Determine cursor type based on what's under the mouse
     var cursor = cursorNormal
+
+    // Super weapon targeting mode overrides cursor
+    if session.superWeaponTargeting != nil {
+        cursor = cursorNuke
+    }
 
     // Attack-move mode overrides cursor
     if session.isAttackMoveMode {
@@ -172,6 +178,8 @@ func drawProceduralCursor(_ renderer: OpaquePointer?, cursor: CursorDef) {
         drawCursorRepair(renderer, mx: mx, my: my)
     } else if cursor.startFrame == cursorSell.startFrame {
         drawCursorSell(renderer, mx: mx, my: my)
+    } else if cursor.startFrame == cursorNuke.startFrame {
+        drawCursorSuperWeapon(renderer, mx: mx, my: my)
     } else {
         drawCursorNormal(renderer, mx: mx, my: my)
     }
@@ -388,6 +396,60 @@ private func drawCursorNormal(_ renderer: OpaquePointer?, mx: Int32, my: Int32) 
     }
 }
 
+private func drawCursorSuperWeapon(_ renderer: OpaquePointer?, mx: Int32, my: Int32) {
+    // Large animated crosshair for super weapon targeting
+    let phase = Double(renderState.cursorAnimFrame % 30) / 30.0
+    let pulse = Int32(sin(phase * 2.0 * Double.pi) * 3.0)
+    let sz: Int32 = 14 + pulse
+
+    // Determine color based on weapon type
+    let r: UInt8, g: UInt8, b: UInt8
+    switch session.superWeaponTargeting {
+    case .ionCannon:
+        r = 100; g = 180; b = 255  // Blue
+    case .nuclearStrike:
+        r = 255; g = 60; b = 60    // Red
+    case .airStrike:
+        r = 255; g = 220; b = 60   // Yellow
+    default:
+        r = 255; g = 255; b = 255
+    }
+
+    // Outer circle-like crosshair
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 200)
+    SDL_RenderDrawLine(renderer, mx - sz - 1, my + 1, mx - 4, my + 1)
+    SDL_RenderDrawLine(renderer, mx + 4, my + 1, mx + sz + 1, my + 1)
+    SDL_RenderDrawLine(renderer, mx + 1, my - sz - 1, mx + 1, my - 4)
+    SDL_RenderDrawLine(renderer, mx + 1, my + 4, mx + 1, my + sz + 1)
+
+    SDL_SetRenderDrawColor(renderer, r, g, b, 255)
+    // Crosshair lines with gap in center
+    SDL_RenderDrawLine(renderer, mx - sz, my, mx - 4, my)
+    SDL_RenderDrawLine(renderer, mx + 4, my, mx + sz, my)
+    SDL_RenderDrawLine(renderer, mx, my - sz, mx, my - 4)
+    SDL_RenderDrawLine(renderer, mx, my + 4, mx, my + sz)
+    // Thicker lines
+    SDL_RenderDrawLine(renderer, mx - sz, my - 1, mx - 4, my - 1)
+    SDL_RenderDrawLine(renderer, mx + 4, my - 1, mx + sz, my - 1)
+    SDL_RenderDrawLine(renderer, mx - 1, my - sz, mx - 1, my - 4)
+    SDL_RenderDrawLine(renderer, mx - 1, my + 4, mx - 1, my + sz)
+
+    // Center dot
+    var dot = SDL_Rect(x: mx - 1, y: my - 1, w: 3, h: 3)
+    SDL_RenderFillRect(renderer, &dot)
+
+    // Corner brackets
+    let corner: Int32 = 4
+    SDL_RenderDrawLine(renderer, mx - sz, my - sz, mx - sz + corner, my - sz)
+    SDL_RenderDrawLine(renderer, mx - sz, my - sz, mx - sz, my - sz + corner)
+    SDL_RenderDrawLine(renderer, mx + sz, my - sz, mx + sz - corner, my - sz)
+    SDL_RenderDrawLine(renderer, mx + sz, my - sz, mx + sz, my - sz + corner)
+    SDL_RenderDrawLine(renderer, mx - sz, my + sz, mx - sz + corner, my + sz)
+    SDL_RenderDrawLine(renderer, mx - sz, my + sz, mx - sz, my + sz - corner)
+    SDL_RenderDrawLine(renderer, mx + sz, my + sz, mx + sz - corner, my + sz)
+    SDL_RenderDrawLine(renderer, mx + sz, my + sz, mx + sz, my + sz - corner)
+}
+
 // MARK: - Spinning Wrench for Building Repair Indicator
 
 func renderRepairWrench(_ renderer: OpaquePointer?, cx: Int32, cy: Int32, tickCount: Int) {
@@ -417,4 +479,32 @@ func renderRepairWrench(_ renderer: OpaquePointer?, cx: Int32, cy: Int32, tickCo
     SDL_RenderDrawLine(renderer, hx1, hy1, hx2, hy2)
     SDL_RenderDrawLine(renderer, hx1 + Int32(perpX), hy1 + Int32(perpY), hx2 + Int32(perpX), hy2 + Int32(perpY))
     SDL_RenderDrawLine(renderer, whx1, why1, whx2, why2)
+}
+
+/// Render veterancy chevrons above a unit
+/// - level 1 (Veteran): one yellow chevron
+/// - level 2 (Elite): two yellow chevrons (or a star)
+func renderVeterancyChevrons(_ renderer: OpaquePointer?, cx: Int32, cy: Int32, level: Int) {
+    guard level > 0 else { return }
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
+
+    // Draw chevron(s) — small "V" shape(s) in yellow
+    let chevronW: Int32 = 3
+    let chevronH: Int32 = 2
+
+    if level >= 2 {
+        // Elite: draw a star (two overlapping triangles)
+        SDL_SetRenderDrawColor(renderer, 255, 255, 0, 255)
+        // Upper chevron
+        SDL_RenderDrawLine(renderer, cx - chevronW, cy, cx, cy - chevronH)
+        SDL_RenderDrawLine(renderer, cx, cy - chevronH, cx + chevronW, cy)
+        // Lower chevron
+        SDL_RenderDrawLine(renderer, cx - chevronW, cy - 3, cx, cy - 3 - chevronH)
+        SDL_RenderDrawLine(renderer, cx, cy - 3 - chevronH, cx + chevronW, cy - 3)
+    } else {
+        // Veteran: single chevron
+        SDL_SetRenderDrawColor(renderer, 255, 220, 0, 230)
+        SDL_RenderDrawLine(renderer, cx - chevronW, cy, cx, cy - chevronH)
+        SDL_RenderDrawLine(renderer, cx, cy - chevronH, cx + chevronW, cy)
+    }
 }

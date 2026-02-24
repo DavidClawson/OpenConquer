@@ -546,7 +546,9 @@ class PlayingScreen: MenuScreen {
 
     func handleKeyDown(_ key: Int32) {
         if key == Int32(SDLK_ESCAPE.rawValue) {
-            if session.isAttackMoveMode {
+            if session.superWeaponTargeting != nil {
+                session.superWeaponTargeting = nil
+            } else if session.isAttackMoveMode {
                 session.isAttackMoveMode = false
             } else if session.isPlacingStructure {
                 session.isPlacingStructure = false

@@ -248,6 +248,20 @@ func deployIonCannon(worldX: Double, worldY: Double) {
 
     print("SuperWeapon: ION CANNON deployed at (\(Int(worldX)), \(Int(worldY)))")
 
+    // Play ion cannon sound
+    audioManager.play(.ionCannon, worldX: worldX, worldY: worldY)
+
+    // Screen flash (white-blue)
+    renderState.screenFlashAlpha = 200
+    renderState.screenFlashR = 180
+    renderState.screenFlashG = 220
+    renderState.screenFlashB = 255
+
+    // Ion beam visual effect
+    renderState.ionBeamWorldX = worldX
+    renderState.ionBeamWorldY = worldY
+    renderState.ionBeamTimer = 30  // ~2 seconds at 15 FPS
+
     // Spawn ion cannon animation
     spawnAnimation(.ionCannon, worldX: worldX, worldY: worldY)
 
@@ -287,6 +301,17 @@ func deployNuclearStrike(worldX: Double, worldY: Double) {
 
     print("SuperWeapon: NUCLEAR STRIKE deployed at (\(Int(worldX)), \(Int(worldY)))")
     audioManager.speak(.nukeLaunched)
+    audioManager.play(.nukeExplode, worldX: worldX, worldY: worldY)
+
+    // Screen flash (bright white)
+    renderState.screenFlashAlpha = 255
+    renderState.screenFlashR = 255
+    renderState.screenFlashG = 255
+    renderState.screenFlashB = 240
+
+    // Screen shake
+    renderState.screenShakeDuration = 45  // ~3 seconds
+    renderState.screenShakeIntensity = 8.0
 
     // Spawn nuclear explosion animation
     spawnAnimation(.atomBlast, worldX: worldX, worldY: worldY)
@@ -352,6 +377,7 @@ func deployAirStrike(worldX: Double, worldY: Double) {
     guard let world = session.world else { return }
 
     print("SuperWeapon: AIRSTRIKE deployed at (\(Int(worldX)), \(Int(worldY)))")
+    session.speakEVA(.enemyPlanes)
 
     // Determine number of A-10s (1-3 based on scenario difficulty)
     let numPlanes = min(3, max(1, 2))  // Default 2 planes
@@ -400,6 +426,38 @@ func deployAirStrike(worldX: Double, worldY: Double) {
         }
 
         world.addObject(a10)
+    }
+}
+
+// MARK: - Screen Effects Tick
+
+/// Tick screen flash and shake effects (call each game tick)
+func tickScreenEffects() {
+    // Fade screen flash
+    if renderState.screenFlashAlpha > 0 {
+        let decay: UInt8 = 12
+        if renderState.screenFlashAlpha > decay {
+            renderState.screenFlashAlpha -= decay
+        } else {
+            renderState.screenFlashAlpha = 0
+        }
+    }
+
+    // Tick screen shake
+    if renderState.screenShakeDuration > 0 {
+        renderState.screenShakeDuration -= 1
+        let progress = Double(renderState.screenShakeDuration) / 45.0
+        let intensity = renderState.screenShakeIntensity * progress
+        renderState.screenShakeOffsetX = Int32(Double.random(in: -intensity...intensity))
+        renderState.screenShakeOffsetY = Int32(Double.random(in: -intensity...intensity))
+    } else {
+        renderState.screenShakeOffsetX = 0
+        renderState.screenShakeOffsetY = 0
+    }
+
+    // Tick ion beam visual
+    if renderState.ionBeamTimer > 0 {
+        renderState.ionBeamTimer -= 1
     }
 }
 
@@ -467,6 +525,16 @@ func deployAIIonCannon(worldX: Double, worldY: Double, house: House) {
     guard let world = session.world else { return }
     print("AI SuperWeapon: Ion Cannon fired by \(house.rawValue) at (\(Int(worldX)), \(Int(worldY)))")
     session.speakEVA(.incomingMissile)
+    audioManager.play(.ionCannon, worldX: worldX, worldY: worldY)
+
+    // Screen effects
+    renderState.screenFlashAlpha = 200
+    renderState.screenFlashR = 180
+    renderState.screenFlashG = 220
+    renderState.screenFlashB = 255
+    renderState.ionBeamWorldX = worldX
+    renderState.ionBeamWorldY = worldY
+    renderState.ionBeamTimer = 30
 
     spawnAnimation(.ionCannon, worldX: worldX, worldY: worldY)
 
@@ -493,6 +561,15 @@ func deployAINukeStrike(worldX: Double, worldY: Double, house: House) {
     guard let world = session.world else { return }
     print("AI SuperWeapon: Nuclear Strike fired by \(house.rawValue) at (\(Int(worldX)), \(Int(worldY)))")
     session.speakEVA(.incomingNuke)
+    audioManager.play(.nukeExplode, worldX: worldX, worldY: worldY)
+
+    // Screen effects
+    renderState.screenFlashAlpha = 255
+    renderState.screenFlashR = 255
+    renderState.screenFlashG = 255
+    renderState.screenFlashB = 240
+    renderState.screenShakeDuration = 45
+    renderState.screenShakeIntensity = 8.0
 
     spawnAnimation(.atomBlast, worldX: worldX, worldY: worldY)
 
