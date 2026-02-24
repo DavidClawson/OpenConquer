@@ -118,6 +118,10 @@ class GameObject {
     var isLanding: Bool = false     // In landing sequence
     var isTakingOff: Bool = false   // In takeoff sequence
 
+    // Cargo (VC CargoClass) — passengers carried by transports (APC, TRAN, C17)
+    var passengers: [Int] = []      // Object IDs of loaded passengers
+    var isALoaner: Bool = false     // Transport is a loaner (auto-removed after delivery)
+
     // Flags (VC TechnoClass/ObjectClass)
     var isInLimbo: Bool = false     // In transport or off-map
     var isTethered: Bool = false    // Loosely attached to unit (docking)

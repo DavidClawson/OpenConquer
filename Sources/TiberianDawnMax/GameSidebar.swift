@@ -214,16 +214,9 @@ func renderSidebar(_ renderer: OpaquePointer?) {
     SDL_SetRenderDrawColor(renderer, 80, 80, 80, 255)
     SDL_RenderDrawLine(renderer, sx, 0, sx, renderState.windowHeight)
 
-    // Credits display
-    // Animate credits counter toward actual value
-    if session.displayedCredits < session.sidebarCredits {
-        session.displayedCredits = min(session.sidebarCredits, session.displayedCredits + max(1, (session.sidebarCredits - session.displayedCredits) / 8))
-    } else if session.displayedCredits > session.sidebarCredits {
-        session.displayedCredits = max(session.sidebarCredits, session.displayedCredits - max(1, (session.displayedCredits - session.sidebarCredits) / 8))
-    }
-
+    // Credits display (ticker animation driven by GameSession.tickCreditsDisplay)
     drawText(renderer, "CREDITS", centerX: sx + sidebarWidth / 2, centerY: 10, color: .amber, scale: 1)
-    drawText(renderer, "$\(session.displayedCredits)", centerX: sx + sidebarWidth / 2, centerY: 24, color: .green, scale: 2)
+    drawText(renderer, "\(session.displayedCredits)", centerX: sx + sidebarWidth / 2, centerY: 24, color: .green, scale: 2)
 
     // Power bar
     renderPowerBar(renderer, sx: sx)
@@ -469,9 +462,16 @@ func handleSidebarClick(_ x: Int32, _ y: Int32) {
 func tickProduction() {
     guard let world = session.world else { return }
 
+    // Low power slows production: skip every other tick when power is insufficient.
+    // Matches original C&C behavior where low power doubles build time.
+    let houseState = getHouseState(world.playerHouse)
+    let lowPowerSkip = !houseState.hasPower && (world.tickCount % 2 == 0)
+
     // Advance unit production
     if var queue = session.unitBuildQueue {
-        queue.progress += 1
+        if !lowPowerSkip {
+            queue.progress += 1
+        }
         if queue.progress >= queue.totalTicks {
             // Unit complete — spawn it
             spawnProducedUnit(queue.typeName, world: world)
@@ -486,7 +486,9 @@ func tickProduction() {
     // Advance structure production
     if var queue = session.structureBuildQueue {
         if queue.progress < queue.totalTicks {
-            queue.progress += 1
+            if !lowPowerSkip {
+                queue.progress += 1
+            }
             session.structureBuildQueue = queue
             if queue.progress >= queue.totalTicks {
                 speak(.construction)
@@ -621,9 +623,9 @@ func renderPowerBar(_ renderer: OpaquePointer?, sx: Int32) {
     let houseState = getHouseState(playerHouse)
 
     let barX = sx + 4
-    let barY: Int32 = 36
+    let barY: Int32 = 30
     let barW: Int32 = sidebarWidth - 8
-    let barH: Int32 = 12
+    let barH: Int32 = 10
 
     // Background
     SDL_SetRenderDrawColor(renderer, 20, 20, 20, 255)
@@ -635,16 +637,27 @@ func renderPowerBar(_ renderer: OpaquePointer?, sx: Int32) {
     let outputFrac = min(1.0, Double(houseState.powerOutput) / Double(maxVal))
     let drainFrac = min(1.0, Double(houseState.powerDrain) / Double(maxVal))
 
-    // Green bar = power output
+    // Determine bar color based on power ratio (matches original C&C logic)
+    // Green = surplus, Yellow = drain > output, Red = drain > 2x output
+    let barColor: (r: UInt8, g: UInt8, b: UInt8)
+    if houseState.powerDrain > houseState.powerOutput * 2 {
+        barColor = (200, 40, 0)       // Red: critically low
+    } else if houseState.powerDrain > houseState.powerOutput {
+        barColor = (180, 180, 0)      // Yellow: deficit
+    } else {
+        barColor = (0, 180, 0)        // Green: surplus
+    }
+
+    // Power output bar (top half)
     let greenW = Int32(Double(barW) * outputFrac)
-    SDL_SetRenderDrawColor(renderer, 0, 180, 0, 255)
+    SDL_SetRenderDrawColor(renderer, barColor.r, barColor.g, barColor.b, 255)
     var greenRect = SDL_Rect(x: barX, y: barY, w: greenW, h: barH / 2)
     SDL_RenderFillRect(renderer, &greenRect)
 
-    // Yellow/red bar = power drain
+    // Power drain bar (bottom half)
     let drainW = Int32(Double(barW) * drainFrac)
-    let drainColor: (r: UInt8, g: UInt8, b: UInt8) = houseState.hasPower ? (180, 180, 0) : (200, 40, 0)
-    SDL_SetRenderDrawColor(renderer, drainColor.r, drainColor.g, drainColor.b, 255)
+    let drainBarColor: (r: UInt8, g: UInt8, b: UInt8) = houseState.hasPower ? (140, 140, 0) : (180, 30, 0)
+    SDL_SetRenderDrawColor(renderer, drainBarColor.r, drainBarColor.g, drainBarColor.b, 255)
     var drainRect = SDL_Rect(x: barX, y: barY + barH / 2, w: drainW, h: barH / 2)
     SDL_RenderFillRect(renderer, &drainRect)
 
@@ -652,10 +665,15 @@ func renderPowerBar(_ renderer: OpaquePointer?, sx: Int32) {
     SDL_SetRenderDrawColor(renderer, 80, 80, 80, 255)
     SDL_RenderDrawRect(renderer, &bgRect)
 
-    // Label
-    let powerLabel = houseState.isLowPower ? "LOW PWR" : "POWER"
-    let powerColor: Color = houseState.isLowPower ? .red : .green
-    drawText(renderer, powerLabel, centerX: sx + sidebarWidth / 2, centerY: barY + barH / 2, color: powerColor, scale: 1)
+    // Numerical power values
+    let powerColor: Color = houseState.isLowPower ? .red : (houseState.hasPower ? .green : .amber)
+    let powerText = "\(houseState.powerOutput)/\(houseState.powerDrain)"
+    drawText(renderer, powerText, centerX: sx + sidebarWidth / 2, centerY: barY + barH / 2, color: powerColor, scale: 1)
+
+    // Low power warning label below the bar
+    if houseState.isLowPower {
+        drawText(renderer, "LOW POWER", centerX: sx + sidebarWidth / 2, centerY: barY + barH + 5, color: .red, scale: 1)
+    }
 }
 
 // MARK: - Repair / Sell Mode

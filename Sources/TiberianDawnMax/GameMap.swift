@@ -18,6 +18,21 @@ class GameMap {
     /// Set of cell indices that contain tiberium overlays
     var tiberiumCells: Set<Int> = Set()
 
+    /// Tiberium density per cell (1-12, matching TI1-TI12 overlay types)
+    var tiberiumDensity: [Int: Int] = [:]
+
+    /// Scan position for tiberium growth/spread (VC TiberiumScan)
+    var tiberiumScan: Int = 0
+
+    /// Alternating scan direction (VC IsForwardScan)
+    var isForwardScan: Bool = true
+
+    /// Accumulated growth candidates during current scan cycle (VC TiberiumGrowth[])
+    var tiberiumGrowthCandidates: [Int] = []
+
+    /// Accumulated spread candidates during current scan cycle (VC TiberiumSpread[])
+    var tiberiumSpreadCandidates: [Int] = []
+
     /// Persistent ground smudges (craters, scorch marks)
     var smudges: [Smudge] = []
 

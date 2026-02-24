@@ -14,6 +14,7 @@ let tiberiumValue: Int = 25
 func initTiberiumCells() {
     guard let map = session.world?.map else { return }
     map.tiberiumCells.removeAll()
+    map.tiberiumDensity.removeAll()
     guard let scenario = scenarioData else { return }
     for overlay in scenario.overlays {
         let upper = overlay.typeName.uppercased()
@@ -22,6 +23,32 @@ func initTiberiumCells() {
             let numPart = upper.dropFirst(2)
             if let num = Int(numPart), num >= 1 && num <= 12 {
                 map.tiberiumCells.insert(overlay.cell)
+                // Count adjacent tiberium cells to set initial density (VC Tiberium_Adjust)
+                let adjTable = [0, 1, 3, 4, 6, 7, 8, 10, 11]
+                var adjCount = 0
+                let cx = overlay.cell % 64
+                let cy = overlay.cell / 64
+                for dy in -1...1 {
+                    for dx in -1...1 {
+                        if dx == 0 && dy == 0 { continue }
+                        let nx = cx + dx
+                        let ny = cy + dy
+                        if nx < 0 || nx >= 64 || ny < 0 || ny >= 64 { continue }
+                        let adjCell = ny * 64 + nx
+                        // Check if any other overlay is tiberium at this cell
+                        for other in scenario.overlays {
+                            if other.cell == adjCell {
+                                let ou = other.typeName.uppercased()
+                                if ou.hasPrefix("TI"), let on = Int(ou.dropFirst(2)), on >= 1 && on <= 12 {
+                                    adjCount += 1
+                                    break
+                                }
+                            }
+                        }
+                    }
+                }
+                let density = adjTable[min(adjCount, adjTable.count - 1)] + 1
+                map.tiberiumDensity[overlay.cell] = min(density, 12)
             }
         }
     }
@@ -84,9 +111,15 @@ extension GameObject {
             // Harvest one unit every few ticks
             if world.tickCount % 4 == 0 {
                 tiberiumLoad += 1
-                // Deplete tiberium after multiple harvests
+                // Reduce density; remove cell when depleted
                 if tiberiumLoad % 5 == 0 {
-                    world.map.tiberiumCells.remove(cell)
+                    let density = world.map.tiberiumDensity[cell] ?? 1
+                    if density <= 1 {
+                        world.map.tiberiumCells.remove(cell)
+                        world.map.tiberiumDensity.removeValue(forKey: cell)
+                    } else {
+                        world.map.tiberiumDensity[cell] = density - 1
+                    }
                 }
             }
         } else {
@@ -165,5 +198,127 @@ extension GameObject {
             }
         }
         return nearest
+    }
+}
+
+// MARK: - Tiberium Growth & Spread
+
+extension GameMap {
+
+    /// Number of cells scanned per tick (VC scans MAP_CELL_TOTAL over ~136 ticks)
+    private static let scanBlockSize = 4096 / 136  // ~30 cells per tick
+
+    /// Maximum entries in growth/spread candidate lists (VC uses MAP_CELL_W/2 = 32)
+    private static let maxCandidates = 32
+
+    /// 8-directional adjacency offsets (dx, dy)
+    private static let adjacentOffsets: [(dx: Int, dy: Int)] = [
+        (0, -1), (1, -1), (1, 0), (1, 1),
+        (0, 1), (-1, 1), (-1, 0), (-1, -1)
+    ]
+
+    /// Tick tiberium growth and spread.
+    /// Faithfully ports VC MapClass::Logic() — scans a block of cells each tick,
+    /// accumulates growth/spread candidates across multiple ticks, then processes
+    /// them all when a full scan cycle completes.
+    func tickTiberiumGrowth() {
+        // Scan a block of cells this tick, accumulating candidates
+        var remaining = GameMap.scanBlockSize
+        var index = tiberiumScan
+
+        while index < 4096 && remaining > 0 {
+            let cell = isForwardScan ? index : (4095 - index)
+
+            if tiberiumCells.contains(cell) {
+                let density = tiberiumDensity[cell] ?? 1
+
+                // Growth: cells with density < 12 can grow
+                if density < 12 {
+                    if tiberiumGrowthCandidates.count < GameMap.maxCandidates {
+                        tiberiumGrowthCandidates.append(cell)
+                    } else {
+                        // Reservoir sampling — replace a random existing entry
+                        tiberiumGrowthCandidates[Int.random(in: 0..<tiberiumGrowthCandidates.count)] = cell
+                    }
+                }
+
+                // Spread: cells with density > 6 can spread (VC: OverlayData > 6)
+                if density > 6 {
+                    if tiberiumSpreadCandidates.count < GameMap.maxCandidates {
+                        tiberiumSpreadCandidates.append(cell)
+                    } else {
+                        tiberiumSpreadCandidates[Int.random(in: 0..<tiberiumSpreadCandidates.count)] = cell
+                    }
+                }
+            }
+
+            index += 1
+            remaining -= 1
+        }
+
+        tiberiumScan = index
+
+        // Only process candidates when a full scan cycle completes
+        guard tiberiumScan >= 4096 else { return }
+
+        // Reset scan for next cycle
+        tiberiumScan = 0
+        isForwardScan.toggle()
+
+        // Growth: pick a random candidate and increase its density
+        if !tiberiumGrowthCandidates.isEmpty {
+            let pick = Int.random(in: 0..<tiberiumGrowthCandidates.count)
+            let cell = tiberiumGrowthCandidates[pick]
+            if tiberiumCells.contains(cell) {
+                let current = tiberiumDensity[cell] ?? 1
+                if current < 12 {
+                    tiberiumDensity[cell] = current + 1
+                }
+            }
+        }
+
+        // Spread: pick a random candidate and try to spread to an adjacent empty cell
+        if !tiberiumSpreadCandidates.isEmpty {
+            let pick = Int.random(in: 0..<tiberiumSpreadCandidates.count)
+            let cell = tiberiumSpreadCandidates[pick]
+            let cx = cell % 64
+            let cy = cell / 64
+
+            // Start from a random direction and try all 8 adjacent cells
+            let startDir = Int.random(in: 0..<8)
+            for i in 0..<8 {
+                let dir = (startDir + i) % 8
+                let offset = GameMap.adjacentOffsets[dir]
+                let nx = cx + offset.dx
+                let ny = cy + offset.dy
+
+                guard nx >= 0 && nx < 64 && ny >= 0 && ny < 64 else { continue }
+                let adjCell = ny * 64 + nx
+
+                // Only spread to passable land cells without existing tiberium
+                guard !tiberiumCells.contains(adjCell) else { continue }
+                guard adjCell < landPassability.count && landPassability[adjCell] else { continue }
+
+                // Don't spread onto water
+                guard adjCell < waterPassability.count && !waterPassability[adjCell] else { continue }
+
+                // Don't spread onto cells occupied by structures
+                if let world = session.world {
+                    let occupied = world.objects.contains { obj in
+                        obj.kind == .structure && obj.strength > 0 && obj.cell == adjCell
+                    }
+                    if occupied { continue }
+                }
+
+                // Spread tiberium to this cell
+                tiberiumCells.insert(adjCell)
+                tiberiumDensity[adjCell] = 1
+                break
+            }
+        }
+
+        // Clear candidate lists for next scan cycle
+        tiberiumGrowthCandidates.removeAll(keepingCapacity: true)
+        tiberiumSpreadCandidates.removeAll(keepingCapacity: true)
     }
 }

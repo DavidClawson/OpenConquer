@@ -70,8 +70,32 @@ class GameSession {
     // MARK: - AI
     var aiTickCounter: Int = 0
 
+    // MARK: - Reinforcements
+    var pendingReinforcements: [PendingReinforcement] = []
+
     // MARK: - House States
     var houseStates: [House: HouseState] = [:]
+
+    // MARK: - Credits Ticker
+
+    /// Animate displayedCredits toward sidebarCredits each game tick.
+    /// Ported from Vanilla Conquer credits.cpp CreditClass::AI.
+    /// The adder is |delta| >> 5, clamped to [1, 143], matching the original.
+    func tickCreditsDisplay() {
+        if displayedCredits == sidebarCredits { return }
+
+        let delta = sidebarCredits - displayedCredits
+        var adder = abs(delta) >> 5
+        adder = max(1, min(adder, 143))
+        if delta < 0 { adder = -adder }
+        displayedCredits += adder
+
+        // Snap if we overshot
+        if (adder > 0 && displayedCredits > sidebarCredits) ||
+           (adder < 0 && displayedCredits < sidebarCredits) {
+            displayedCredits = sidebarCredits
+        }
+    }
 }
 
 // MARK: - Global Session Instance

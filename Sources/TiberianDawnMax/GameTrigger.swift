@@ -419,54 +419,8 @@ func destroyTriggerNamed(_ name: String) {
 
 // MARK: - Reinforcements
 
-/// Spawn reinforcements for a team type — creates units at map edge or waypoint
+/// Spawn reinforcements for a team type — delegates to the full reinforcement system.
+/// Supports C17 cargo plane fly-in delivery, APC transport, or direct ground spawning.
 func spawnReinforcements(teamName: String) {
-    guard let world = session.world else { return }
-
-    // Find the team type
-    guard let teamType = session.teamTypes.first(where: { $0.name == teamName }) else {
-        print("Reinforcements: Unknown team type '\(teamName)'")
-        return
-    }
-
-    // Find spawn location: waypoint 25 (VC WAYPT_REINF) or map edge
-    let spawnX: Double
-    let spawnY: Double
-
-    if let reinfCell = session.scenarioWaypoints[25] {
-        let pos = cellToPixel(reinfCell)
-        spawnX = Double(pos.px) + 12.0
-        spawnY = Double(pos.py) + 12.0
-    } else if let bounds = world.mapBounds {
-        // Spawn at top edge of map
-        spawnX = Double(bounds.x * 24 + bounds.width * 12)
-        spawnY = Double(bounds.y * 24) + 12.0
-    } else {
-        spawnX = 12.0
-        spawnY = 12.0
-    }
-
-    print("Reinforcements: Spawning team '\(teamName)' at (\(Int(spawnX)), \(Int(spawnY)))")
-
-    for slot in teamType.classSlots {
-        for i in 0..<slot.desiredCount {
-            let offset = Double(i) * 12.0
-            let kind = slot.kind
-            let speed = resolveSpeed(typeName: slot.typeName, kind: kind)
-            let hp = resolveStrength(typeName: slot.typeName, kind: kind, scenarioStrength: 256)
-
-            let obj = GameObject(
-                id: world.allocateId(),
-                typeName: slot.typeName,
-                house: teamType.house,
-                kind: kind,
-                worldX: spawnX + offset, worldY: spawnY,
-                facing: 128,  // Face south
-                strength: hp,
-                mission: .guard_,
-                speed: speed
-            )
-            world.addObject(obj)
-        }
-    }
+    doReinforcements(teamName: teamName)
 }

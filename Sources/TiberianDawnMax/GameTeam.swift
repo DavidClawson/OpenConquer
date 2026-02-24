@@ -504,8 +504,23 @@ extension ActiveTeam {
 
     /// Coordinate unload: all transport members unload passengers
     func coordinateUnload() {
-        // Simplified: just advance to next mission since transport cargo not fully implemented
-        isNextMission = true
+        guard let world = session.world else {
+            isNextMission = true
+            return
+        }
+
+        var anyUnloading = false
+        for id in members {
+            guard let obj = world.findObject(id: id), obj.strength > 0 else { continue }
+            if obj.isTransporter && obj.hasCargo {
+                obj.mission = .unload
+                anyUnloading = true
+            }
+        }
+
+        if !anyUnloading {
+            isNextMission = true
+        }
     }
 
     // MARK: - Team Target Finding

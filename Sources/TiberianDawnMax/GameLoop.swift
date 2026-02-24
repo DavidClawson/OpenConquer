@@ -50,6 +50,9 @@ func gameTick() {
     // Update fog of war
     updateFog()
 
+    // Tick credits display animation
+    session.tickCreditsDisplay()
+
     // Tick production
     tickProduction()
 
@@ -63,8 +66,14 @@ func gameTick() {
     // Tick team AI (coordinated squads)
     tickTeams()
 
+    // Tick reinforcement deliveries (C17 fly-in)
+    tickReinforcements()
+
     // Tick triggers (win/lose conditions, timed events)
     tickTriggers()
+
+    // Tick tiberium growth and spread
+    world.map.tickTiberiumGrowth()
 
     // Update each object by mission
     for obj in world.objects {
@@ -88,6 +97,20 @@ func gameTick() {
             case .hunt, .timedHunt:
                 obj.tickAircraftGuard()
                 if obj.mission == .guard_ { obj.mission = .hunt }
+            case .unload:
+                // Aircraft transport unloading (C17/TRAN) — handled by tickReinforcements
+                // for pending deliveries; direct unload for already-arrived transports
+                if obj.hasCargo && obj.moveTargetX == nil {
+                    obj.tickAPCUnload()
+                } else if obj.moveTargetX != nil {
+                    // Still flying to drop zone
+                    let arrived = !obj.flyToward()
+                    if arrived {
+                        obj.tickAPCUnload()
+                    }
+                } else {
+                    obj.mission = .guard_
+                }
             default:
                 break
             }

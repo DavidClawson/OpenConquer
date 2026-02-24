@@ -272,13 +272,13 @@ extension GameObject {
 
     // MARK: - Unload (Transport disembark / MCV deploy)
 
-    /// Unload: MCV deploys into construction yard, APC disembarks passengers
+    /// Unload: MCV deploys into construction yard, transports disembark passengers
     func tickUnload() {
         let upper = typeName.uppercased()
 
         if upper == "MCV" {
             tickMCVDeploy()
-        } else if upper == "APC" {
+        } else if isTransporter {
             tickAPCUnload()
         } else {
             mission = .guard_
@@ -357,11 +357,7 @@ extension GameObject {
         }
     }
 
-    /// APC unloading: eject passengers (stub — transport system not yet implemented)
-    func tickAPCUnload() {
-        // For now, just switch to guard since we don't have cargo system yet
-        mission = .guard_
-    }
+    // tickAPCUnload is defined in GameReinforcements.swift with full cargo support
 
     // MARK: - Building Repair
 
