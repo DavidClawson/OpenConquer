@@ -5,6 +5,7 @@ import Foundation
 
 struct BuildableItem {
     let name: String
+    let displayName: String
     let cost: Int
     let buildTicks: Int
     let prerequisite: String?
@@ -14,6 +15,7 @@ struct BuildableItem {
 
 struct BuildableStructure {
     let name: String
+    let displayName: String
     let cost: Int
     let buildTicks: Int
     let faction: String?
@@ -45,7 +47,7 @@ func generateBuildableUnits() -> [BuildableItem] {
             prereq = faction == "NOD" ? "HAND" : (faction == "GDI" ? "PYLE" : nil)
         }
         let ticks = max(20, data.cost / 5)
-        items.append(BuildableItem(name: data.iniName, cost: data.cost,
+        items.append(BuildableItem(name: data.iniName, displayName: data.fullName, cost: data.cost,
                                    buildTicks: ticks, prerequisite: prereq, faction: faction,
                                    buildLevel: data.buildLevel))
     }
@@ -73,7 +75,7 @@ func generateBuildableUnits() -> [BuildableItem] {
             prereq = "WEAP"
         }
         let ticks = max(30, data.cost / 5)
-        items.append(BuildableItem(name: data.iniName, cost: data.cost,
+        items.append(BuildableItem(name: data.iniName, displayName: data.fullName, cost: data.cost,
                                    buildTicks: ticks, prerequisite: prereq, faction: faction,
                                    buildLevel: data.buildLevel))
     }
@@ -94,7 +96,7 @@ func generateBuildableUnits() -> [BuildableItem] {
         // Aircraft need HPAD or AFLD
         let prereq: String = faction == "NOD" ? "AFLD" : "HPAD"
         let ticks = max(30, data.cost / 5)
-        items.append(BuildableItem(name: data.iniName, cost: data.cost,
+        items.append(BuildableItem(name: data.iniName, displayName: data.fullName, cost: data.cost,
                                    buildTicks: ticks, prerequisite: prereq, faction: faction,
                                    buildLevel: data.buildLevel))
     }
@@ -121,7 +123,7 @@ func generateBuildableStructures() -> [BuildableStructure] {
             continue
         }
         let ticks = max(30, data.cost / 5)
-        items.append(BuildableStructure(name: data.iniName, cost: data.cost,
+        items.append(BuildableStructure(name: data.iniName, displayName: data.fullName, cost: data.cost,
                                         buildTicks: ticks, faction: faction,
                                         buildLevel: data.buildLevel))
     }

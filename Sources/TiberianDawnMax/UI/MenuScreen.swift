@@ -237,6 +237,41 @@ class LoadMissionFactionScreen: MenuScreen {
 
 // MARK: - Load Mission: Mission List
 
+// Mission names from the original C&C manual/campaign
+let gdiMissionNames: [Int: String] = [
+    1: "X16-Y42",
+    2: "Knock Out That Refinery",
+    3: "Air Supremacy",
+    4: "Reinforce Bialystok",
+    5: "Evacuate Nikoomba",
+    6: "Destroy the Airstrip",
+    7: "Infiltrate Nod Base",
+    8: "Remove SAM Sites",
+    9: "Locate the Prison",
+    10: "Rescue Mobius",
+    11: "Code Name Delphi",
+    12: "Saving Doctor Wong",
+    13: "Retrieve the Detonator",
+    14: "Destroy Nod Factory",
+    15: "Temple Strike",
+]
+
+let nodMissionNames: [Int: String] = [
+    1: "Silencing Nikoomba",
+    2: "Liberation of Egypt",
+    3: "Friends of the Brotherhood",
+    4: "Convoy Interception",
+    5: "Grounded",
+    6: "Extract Detonator",
+    7: "Sick and Dying",
+    8: "New Construction Options",
+    9: "No Mercy",
+    10: "Doctor Wong",
+    11: "Deceit",
+    12: "Cradle of My Temple",
+    13: "Deadly Reunion",
+]
+
 class LoadMissionListScreen: MenuScreen {
     let faction: String  // "GDI" or "NOD"
     let missions: [String]  // scenario names like "SCG01EA"
@@ -283,7 +318,11 @@ class LoadMissionListScreen: MenuScreen {
             // Parse mission number and variant for display
             let missionNum = String(name.dropFirst(3).prefix(2))
             let variant = String(name.suffix(2))
-            let label = "Mission \(missionNum) (\(variant)) — \(name)"
+            let missionInt = Int(missionNum) ?? 0
+            let nameTable = faction == "GDI" ? gdiMissionNames : nodMissionNames
+            let missionTitle = nameTable[missionInt] ?? name
+            let variantSuffix = variant == "EA" ? "" : " (\(variant))"
+            let label = "M\(missionNum): \(missionTitle)\(variantSuffix)"
 
             let highlighted = input.mouseX >= bx && input.mouseX < bx + bw &&
                               input.mouseY >= y && input.mouseY < y + rowHeight

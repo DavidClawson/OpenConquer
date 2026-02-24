@@ -93,7 +93,7 @@ func renderSidebar(_ renderer: OpaquePointer?) {
 
             // Label (offset right to make room for icon)
             let textColor: Color = canAfford ? .green : .red
-            drawText(renderer, item.name, centerX: sx + iconSize + 20, centerY: by + buttonH / 2 - 6, color: textColor, scale: 1)
+            drawText(renderer, item.displayName.uppercased(), centerX: sx + iconSize + 20, centerY: by + buttonH / 2 - 6, color: textColor, scale: 1)
             drawText(renderer, "$\(item.cost)", centerX: sx + iconSize + 20, centerY: by + buttonH / 2 + 8, color: .gray, scale: 1)
 
             // Progress bar
@@ -153,7 +153,7 @@ func renderSidebar(_ renderer: OpaquePointer?) {
 
             // Label (offset right to make room for icon)
             let textColor: Color = isReady ? .amber : (canAfford ? .green : .red)
-            let label = isReady ? "\(item.name) READY" : item.name
+            let label = isReady ? "\(item.displayName.uppercased()) READY" : item.displayName.uppercased()
             drawText(renderer, label, centerX: sx + iconSize + 20, centerY: by + buttonH / 2 - 6, color: textColor, scale: 1)
             if !isReady {
                 drawText(renderer, "$\(item.cost)", centerX: sx + iconSize + 20, centerY: by + buttonH / 2 + 8, color: .gray, scale: 1)

@@ -139,7 +139,9 @@ func renderMissionBriefing(_ renderer: OpaquePointer?) {
     // Title
     let factionColor: Color = faction == "GDI" ? .amber : .red
     drawText(renderer, "\(faction) Campaign", centerX: cx, centerY: 50, color: factionColor, scale: 3)
-    drawText(renderer, "Mission \(missionNum)", centerX: cx, centerY: 100, color: .green, scale: 3)
+    let nameTable: [Int: String] = faction == "GDI" ? gdiMissionNames : nodMissionNames
+    let missionTitle = nameTable[missionNum] ?? "Mission \(missionNum)"
+    drawText(renderer, "Mission \(missionNum): \(missionTitle)", centerX: cx, centerY: 100, color: .green, scale: 2)
 
     // Briefing text
     let briefing = session.campaign.briefingText(scenarioName: scenName)
