@@ -24,6 +24,11 @@ class HouseState {
     // AI state
     var isAlerted: Bool = false     // Under attack alert
     var alertTimer: Int = 0
+    var productionEnabled: Bool = false  // Set by beginProduction trigger
+
+    // AI production queues (separate from player's)
+    var aiUnitQueue = ProductionQueue()
+    var aiInfantryQueue = ProductionQueue()
 
     init(type: House, credits: Int, isHuman: Bool) {
         self.type = type
@@ -47,6 +52,8 @@ class HouseState {
     func spendCredits(_ amount: Int) -> Bool {
         if credits >= amount {
             credits -= amount
+            // Reduce stored tiberium proportionally (spending draws from storage)
+            tiberium = max(0, tiberium - amount)
             return true
         }
         return false
@@ -144,7 +151,6 @@ class HouseState {
         default: break
         }
         guard bldData.isBuildable else { return false }
-        if bldData.isWall { return false }  // Walls not sidebar-buildable
         return hasPrerequisites(bldData.prerequisite)
     }
 }
@@ -222,5 +228,15 @@ func initHouseStates() {
 func recalculateAllHousePower() {
     for (_, state) in session.houseStates {
         state.recalculatePower()
+    }
+
+    // EVA low-power announcement (edge-triggered: only when transitioning to low power)
+    if let world = session.world {
+        let playerState = getHouseState(world.playerHouse)
+        let isLow = !playerState.hasPower && playerState.powerDrain > 0
+        if isLow && !session.wasLowPower {
+            session.speakEVA(.lowPower, cooldownTicks: 150)
+        }
+        session.wasLowPower = isLow
     }
 }

@@ -111,6 +111,15 @@ class SuperWeapon {
         if chargeRemaining <= 0 {
             isReady = true
             print("SuperWeapon: \(type) fully charged!")
+            // EVA announcement for player super weapons
+            switch type {
+            case .ionCannon:
+                session.speakEVA(.ionReady)
+            case .nuclearStrike:
+                session.speakEVA(.nukeAvailable)
+            case .airStrike:
+                session.speakEVA(.airstrikeReady)
+            }
         }
     }
 }
@@ -208,6 +217,7 @@ func startSuperWeaponTargeting(_ type: SpecialWeaponType) {
         return
     }
     session.superWeaponTargeting = type
+    audioManager.speak(.selectTarget)
     print("SuperWeapon: Targeting mode for \(type)")
 }
 
@@ -252,14 +262,14 @@ func deployIonCannon(worldX: Double, worldY: Double) {
 
         // Central cell: full damage
         if objCellX == targetCellX && objCellY == targetCellY {
-            let died = obj.applyDamage(amount: 600, warhead: .pb)
+            let died = obj.applyDamage(amount: 600, warhead: .pb, attackerHouse: world.playerHouse)
             if died {
                 obj.spawnDeathEffects()
             }
         }
         // Adjacent cells: half damage
         else if abs(objCellX - targetCellX) <= 1 && abs(objCellY - targetCellY) <= 1 {
-            let died = obj.applyDamage(amount: 300, warhead: .pb)
+            let died = obj.applyDamage(amount: 300, warhead: .pb, attackerHouse: world.playerHouse)
             if died {
                 obj.spawnDeathEffects()
             }
@@ -276,6 +286,7 @@ func deployNuclearStrike(worldX: Double, worldY: Double) {
     guard let world = session.world else { return }
 
     print("SuperWeapon: NUCLEAR STRIKE deployed at (\(Int(worldX)), \(Int(worldY)))")
+    audioManager.speak(.nukeLaunched)
 
     // Spawn nuclear explosion animation
     spawnAnimation(.atomBlast, worldX: worldX, worldY: worldY)
@@ -309,7 +320,7 @@ func deployNuclearStrike(worldX: Double, worldY: Double) {
                 damage = centerDamage / (cellDist + 1)
             }
 
-            let died = obj.applyDamage(amount: damage, warhead: .fire)
+            let died = obj.applyDamage(amount: damage, warhead: .fire, attackerHouse: world.playerHouse)
             if died {
                 obj.spawnDeathEffects()
             }
@@ -455,6 +466,7 @@ func findBestAITarget(house: House) -> GameObject? {
 func deployAIIonCannon(worldX: Double, worldY: Double, house: House) {
     guard let world = session.world else { return }
     print("AI SuperWeapon: Ion Cannon fired by \(house.rawValue) at (\(Int(worldX)), \(Int(worldY)))")
+    session.speakEVA(.incomingMissile)
 
     spawnAnimation(.ionCannon, worldX: worldX, worldY: worldY)
 
@@ -467,10 +479,10 @@ func deployAIIonCannon(worldX: Double, worldY: Double, house: House) {
         let dy = abs(obj.cellY - targetCellY)
 
         if dx == 0 && dy == 0 {
-            let died = obj.applyDamage(amount: 600, warhead: .pb)
+            let died = obj.applyDamage(amount: 600, warhead: .pb, attackerHouse: house)
             if died { obj.spawnDeathEffects() }
         } else if dx <= 1 && dy <= 1 {
-            let died = obj.applyDamage(amount: 300, warhead: .pb)
+            let died = obj.applyDamage(amount: 300, warhead: .pb, attackerHouse: house)
             if died { obj.spawnDeathEffects() }
         }
     }
@@ -480,6 +492,7 @@ func deployAIIonCannon(worldX: Double, worldY: Double, house: House) {
 func deployAINukeStrike(worldX: Double, worldY: Double, house: House) {
     guard let world = session.world else { return }
     print("AI SuperWeapon: Nuclear Strike fired by \(house.rawValue) at (\(Int(worldX)), \(Int(worldY)))")
+    session.speakEVA(.incomingNuke)
 
     spawnAnimation(.atomBlast, worldX: worldX, worldY: worldY)
 
@@ -496,7 +509,7 @@ func deployAINukeStrike(worldX: Double, worldY: Double, house: House) {
 
         if cellDist <= radius {
             let damage = cellDist == 0 ? centerDamage : centerDamage / (cellDist + 1)
-            let died = obj.applyDamage(amount: damage, warhead: .fire)
+            let died = obj.applyDamage(amount: damage, warhead: .fire, attackerHouse: house)
             if died { obj.spawnDeathEffects() }
         }
     }

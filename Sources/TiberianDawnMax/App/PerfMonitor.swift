@@ -64,8 +64,8 @@ struct PerfMonitor {
         if !frameTimesUs.isEmpty {
             let sum = frameTimesUs.reduce(0, +)
             avgFrameTimeMs = Double(sum) / Double(frameTimesUs.count) / 1000.0
-            maxFrameTimeMs = Double(frameTimesUs.max()!) / 1000.0
-            minFrameTimeMs = Double(frameTimesUs.min()!) / 1000.0
+            maxFrameTimeMs = Double(frameTimesUs.max() ?? 0) / 1000.0
+            minFrameTimeMs = Double(frameTimesUs.min() ?? 0) / 1000.0
         }
     }
 

@@ -165,7 +165,7 @@ let unitTypeDataTable: [UnitType: UnitTypeData] = [
     ),
 
     .jeep: UnitTypeData(
-        type: .jeep, iniName: "HMMV", fullName: "Humm-Vee",
+        type: .jeep, iniName: "JEEP", fullName: "Humm-Vee",
         buildLevel: 2, prerequisite: .none, cost: 400, scenario: 3, ownable: .gdiAll,
         strength: 150, armor: .aluminum, primaryWeapon: .m60mg, secondaryWeapon: nil,
         sightRange: 4, ammo: -1,
@@ -230,7 +230,7 @@ let unitTypeDataTable: [UnitType: UnitTypeData] = [
     ),
 
     .hover: UnitTypeData(
-        type: .hover, iniName: "HOVER", fullName: "Hovercraft",
+        type: .hover, iniName: "LST", fullName: "Hovercraft",
         buildLevel: 99, prerequisite: .none, cost: 1000, scenario: 99, ownable: .bothAll,
         strength: 200, armor: .aluminum, primaryWeapon: .m60mg, secondaryWeapon: nil,
         sightRange: 5, ammo: -1,

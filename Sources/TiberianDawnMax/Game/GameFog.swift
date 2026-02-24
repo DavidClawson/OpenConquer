@@ -30,11 +30,12 @@ func updateFog() {
     }
 
     // For each friendly unit/structure, reveal cells within sight range
+    // Uses actual sight range from type data tables (matches original C&C behavior)
     for obj in world.objects {
         if obj.house != world.playerHouse { continue }
         if obj.strength <= 0 { continue }
 
-        let sight = max(1, obj.sightRange)
+        let sight = max(2, obj.sightRange)
         let cx = obj.cellX
         let cy = obj.cellY
 
@@ -72,4 +73,24 @@ func initFog() {
     guard let map = session.world?.map else { return }
     map.fogState = Array(repeating: .unexplored, count: 4096)
     updateFog()
+}
+
+/// Temporarily reveal fog around a world position (e.g., when an enemy fires at the player).
+/// Reveals a small area (2-cell radius) so the player can see who's shooting them.
+func revealFogAroundPosition(worldX: Double, worldY: Double, radius: Int = 2) {
+    guard let map = session.world?.map else { return }
+    let cx = Int(worldX) / 24
+    let cy = Int(worldY) / 24
+
+    for dy in -radius...radius {
+        for dx in -radius...radius {
+            let nx = cx + dx
+            let ny = cy + dy
+            if nx < 0 || nx >= 64 || ny < 0 || ny >= 64 { continue }
+            if dx * dx + dy * dy <= radius * radius {
+                let cell = ny * 64 + nx
+                map.fogState[cell] = .visible
+            }
+        }
+    }
 }

@@ -56,16 +56,27 @@ func isEnemy(_ a: GameObject, _ b: GameObject) -> Bool {
     return true
 }
 
+/// True if the object's primary weapon can only target aircraft (e.g. SAM site)
+func isAntiAirOnly(_ obj: GameObject) -> Bool {
+    guard let weapon = obj.primaryWeapon,
+          let wData = weaponTypeData[weapon],
+          let bData = bulletTypeData[wData.fires] else { return false }
+    return bData.isAntiAircraft
+}
+
 /// Find the nearest enemy within range of an object
 func findNearestEnemy(_ obj: GameObject, range: Double) -> GameObject? {
     guard let world = session.world else { return nil }
     var nearest: GameObject? = nil
     var nearestDist = Double.infinity
+    let aaOnly = isAntiAirOnly(obj)
 
     for other in world.objects {
         if other.id == obj.id { continue }
         if other.strength <= 0 { continue }
         if !isEnemy(obj, other) { continue }
+        // Anti-aircraft weapons (SAM) can only target aircraft
+        if aaOnly && !other.isAircraft { continue }
 
         let dx = other.worldX - obj.worldX
         let dy = other.worldY - obj.worldY
@@ -78,10 +89,10 @@ func findNearestEnemy(_ obj: GameObject, range: Double) -> GameObject? {
     return nearest
 }
 
-/// Find a game object by ID
+/// Find a game object by ID — O(1) via indexed lookup
 func findObjectById(_ id: Int) -> GameObject? {
     guard let world = session.world else { return nil }
-    return world.objects.first { $0.id == id }
+    return world.findObject(id: id)
 }
 
 // MARK: - Combat Extensions
@@ -89,7 +100,7 @@ func findObjectById(_ id: Int) -> GameObject? {
 extension GameObject {
     /// Apply damage using warhead/armor calculation. Returns true if killed.
     @discardableResult
-    func applyDamage(amount: Int, warhead: WarheadType? = nil) -> Bool {
+    func applyDamage(amount: Int, warhead: WarheadType? = nil, attackerHouse: House? = nil) -> Bool {
         let finalDamage: Int
         if let wh = warhead {
             // Use authentic damage model: warhead modifier vs armor type
@@ -101,11 +112,20 @@ extension GameObject {
         strength -= finalDamage
         if let world = session.world {
             lastDamagedTick = world.tickCount
-            lastWhoHurtMe = nil  // Could set to attacker's house
+            lastWhoHurtMe = attackerHouse
         }
         if strength <= 0 {
             strength = 0
             return true
+        }
+
+        // EVA warnings for player objects taking damage
+        if let world = session.world, house == world.playerHouse {
+            if kind == .structure {
+                session.speakEVA(.baseUnderAttack, cooldownTicks: 90)
+            } else if typeName.uppercased() == "HARV" {
+                session.speakEVA(.baseUnderAttack, cooldownTicks: 90)
+            }
         }
 
         // Infantry fear: taking damage increases fear
@@ -148,9 +168,28 @@ extension GameObject {
         return newDiff < rotateSpeed || newDiff > (256 - rotateSpeed)
     }
 
+    /// True if this object is a defensive structure (turrets, SAMs, guard towers, obelisk)
+    var isDefenseStructure: Bool {
+        guard kind == .structure else { return false }
+        let upper = typeName.uppercased()
+        return upper == "GUN" || upper == "GTWR" || upper == "SAM" ||
+               upper == "ATWR" || upper == "OBLI"
+    }
+
     /// Tick the attack mission
     func tickAttack() {
         guard let world = session.world else { return }
+
+        // Power gating: defensive structures fire at half rate when house has low power
+        if isDefenseStructure {
+            let houseState = getHouseState(house)
+            if !houseState.hasPower && houseState.powerDrain > 0 {
+                // No power: skip every other tick (simulates degraded performance)
+                if world.tickCount % 2 == 0 {
+                    return
+                }
+            }
+        }
 
         // Decrement reload timer
         if reloadTimer > 0 {
@@ -160,18 +199,25 @@ extension GameObject {
         // Find our target
         guard let targetId = attackTarget,
               let target = findObjectById(targetId),
-              target.strength > 0 else {
-            // Target gone or dead — return to previous mission
+              target.strength > 0,
+              !(isAntiAirOnly(self) && !target.isAircraft) else {
+            // Target gone, dead, or invalid (e.g. SAM vs ground) — find new target or return to guard
             attackTarget = nil
             if let suspended = suspendedMission {
                 mission = suspended
                 suspendedMission = nil
                 missionStatus = 0
+                // Recalculate path when resuming suspended move
+                movePath = []
             } else {
+                // Immediately scan for a new target before going idle
                 mission = .guard_
+                moveTargetX = nil
+                moveTargetY = nil
+                if isArmed {
+                    tickGuardScan()
+                }
             }
-            moveTargetX = nil
-            moveTargetY = nil
             return
         }
 
@@ -212,15 +258,20 @@ extension GameObject {
 
                 // Spawn muzzle flash animation at barrel position
                 // Use weapon-appropriate flash: small piff for small arms, GUNFIRE for cannons
-                let faceRad = Double(facing) / 256.0 * 2.0 * Double.pi
+                let fireFacing = hasTurret ? turretFacing : facing
+                let faceRad = Double(fireFacing) / 256.0 * 2.0 * Double.pi
                 let flashDist = (kind == .infantry) ? 6.0 : 10.0
                 let mfx = worldX + sin(faceRad) * flashDist
                 let mfy = worldY - cos(faceRad) * flashDist
                 if let weapon = cachedPrimaryWeapon {
                     switch weapon {
                     case .m60mg, .m16, .chainGun, .pistol, .rifle:
-                        // Small arms: quick small flash
-                        spawnAnimation(.piff, worldX: mfx, worldY: mfy)
+                        // Small arms: use muzzle flash for structures (more visible), piff for infantry/units
+                        if kind == .structure {
+                            spawnAnimation(.muzzleFlash, worldX: mfx, worldY: mfy)
+                        } else {
+                            spawnAnimation(.piff, worldX: mfx, worldY: mfy)
+                        }
                     case .flamethrower, .flameTongue, .chemspray:
                         break  // Flame weapons don't need a separate muzzle flash
                     default:
@@ -249,8 +300,11 @@ extension GameObject {
         } else {
             // Out of range — move closer (without touching mission)
             if kind != .structure {
-                moveTargetX = target.worldX
-                moveTargetY = target.worldY
+                // Add small random offset so multiple units don't all converge on exact same point
+                let jitterX = Double.random(in: -12.0...12.0)
+                let jitterY = Double.random(in: -12.0...12.0)
+                moveTargetX = target.worldX + jitterX
+                moveTargetY = target.worldY + jitterY
                 if movePath.isEmpty {
                     let path = findPath(
                         fromX: cellX, fromY: cellY,
@@ -271,13 +325,45 @@ extension GameObject {
 
     /// Auto-target enemies in guard range
     func tickGuardScan() {
+        // Use sight range for detection — units should engage anything they can see
+        let sightPixels = Double(sightRange) * 24.0
         let resolved = resolveWeapon()
-        // Guard range is slightly larger than weapon range
-        let guardRange = (resolved?.range ?? 96.0) * 1.5
+        let weaponRange = resolved?.range ?? 96.0
+        // Scan at whichever is larger: sight range or weapon range
+        let guardRange = max(sightPixels, weaponRange * 1.5)
 
         if let enemy = findNearestEnemy(self, range: guardRange) {
             attackTarget = enemy.id
             mission = .attack
+        }
+    }
+
+    /// Tick SAM site deploy/retract animation.
+    /// In original C&C, SAM sites retract into their silo when no aircraft target is present.
+    /// Frame 0 = retracted, frames 1-31 = deployed turret rotation.
+    func tickSAMDeploy() {
+        guard kind == .structure else { return }
+        guard typeName.uppercased() == "SAM" else { return }
+
+        let hasTarget = attackTarget != nil && mission == .attack
+
+        if hasTarget {
+            // Deploying/deployed — animate toward target facing frame
+            let targetFacingIdx = facing32[min(255, max(0, turretFacing))]
+            let targetFrame = bodyShape[targetFacingIdx]
+            if samDeployState == 0 {
+                // Start deploying — go to frame 1
+                samDeployState = 1
+            } else if samDeployState < targetFrame {
+                samDeployState = min(samDeployState + 2, targetFrame)
+            } else if samDeployState > targetFrame {
+                samDeployState = max(samDeployState - 2, targetFrame)
+            }
+        } else {
+            // No target — retract back to frame 0
+            if samDeployState > 0 {
+                samDeployState = max(0, samDeployState - 2)
+            }
         }
     }
 
@@ -332,10 +418,41 @@ let fearMaximum: UInt8 = 255
 
 // MARK: - Cleanup
 
-/// Remove dead objects from the world
+/// Remove dead objects from the world using two-phase mark/sweep.
+/// Phase 1 (mark): Dead objects already identified by strength <= 0.
+/// Phase 2 (sweep): Remove from array + index, log for debugging.
 func removeDeadObjects() {
     guard let world = session.world else { return }
-    world.objects.removeAll { $0.strength <= 0 }
+    // Release any landing pad reservations held by dying aircraft
+    for obj in world.objects where obj.strength <= 0 {
+        if let padId = obj.landingPadId {
+            world.occupiedPads.remove(padId)
+            obj.landingPadId = nil
+        }
+    }
+
+    // EVA announcements for player losses (before removal)
+    for obj in world.objects where obj.strength <= 0 {
+        guard obj.house == world.playerHouse else { continue }
+        guard obj.mission != .selling && obj.mission != .deconstruction else { continue }  // Selling is voluntary, not a loss
+        switch obj.kind {
+        case .unit, .infantry:
+            session.speakEVA(.unitLost, cooldownTicks: 45)
+        case .structure:
+            session.speakEVA(.structureLost, cooldownTicks: 45)
+        }
+    }
+
+    let removed = world.removeDeadAndIndex()
+    #if DEBUG
+    for obj in removed {
+        // Log unexpected removals — objects that died without being damaged this tick
+        // (could indicate a bug where strength was set to 0 without proper combat flow)
+        if obj.lastDamagedTick != world.tickCount && obj.mission != .selling && obj.mission != .deconstruction {
+            print("DEBUG removeDeadObjects: \(obj.typeName)#\(obj.id) (\(obj.kind)) died without combat damage this tick (lastDamaged=\(obj.lastDamagedTick), currentTick=\(world.tickCount))")
+        }
+    }
+    #endif
 }
 
 /// Check if an object at a screen position is an enemy of the current player

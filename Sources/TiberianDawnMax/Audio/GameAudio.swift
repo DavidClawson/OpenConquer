@@ -479,7 +479,7 @@ class AudioManager {
 
     // Active sound mixing
     var activeSounds: [ActiveSound] = []
-    let maxActiveSounds = 8
+    let maxActiveSounds = 24
     let outputSampleRate = 22050
 
     // EVA speech queue
@@ -594,18 +594,20 @@ class AudioManager {
         var pan: Float = 0.0
 
         if let wx = worldX, let wy = worldY {
-            // Distance from camera center
-            let vpWidth = Double(renderState.windowWidth - sidebarWidth)
-            let vpHeight = Double(renderState.windowHeight)
-            let camCenterX = renderState.gameCameraX + vpWidth / 2.0
-            let camCenterY = renderState.gameCameraY + vpHeight / 2.0
+            // Distance from camera center (in world coordinates)
+            let zoom = max(1.0, renderState.gameZoomLevel)
+            let visibleWorldW = Double(renderState.windowWidth - sidebarWidth) / zoom
+            let visibleWorldH = Double(renderState.windowHeight) / zoom
+            let camCenterX = renderState.gameCameraX + visibleWorldW / 2.0
+            let camCenterY = renderState.gameCameraY + visibleWorldH / 2.0
             let dx = wx - camCenterX
             let dy = wy - camCenterY
             let dist = sqrt(dx * dx + dy * dy)
 
-            // Attenuate by distance: full volume within 5 cells, fade to 0 at 20 cells
-            let maxDist: Double = 20.0 * 24.0
-            let minDist: Double = 5.0 * 24.0
+            // Viewport-based attenuation in world coordinates
+            let viewRadius = sqrt(visibleWorldW * visibleWorldW + visibleWorldH * visibleWorldH) / 2.0
+            let minDist = viewRadius        // Full volume within the viewport
+            let maxDist = viewRadius * 2.0  // Fade to zero at 2x viewport radius
             if dist > maxDist {
                 return  // Too far, don't play
             } else if dist > minDist {
@@ -613,10 +615,9 @@ class AudioManager {
                 volume *= falloff
             }
 
-            // Stereo panning
-            let viewWidth = vpWidth
-            if viewWidth > 0 {
-                pan = Float(dx / (viewWidth / 2.0))
+            // Stereo panning (in world coordinates)
+            if visibleWorldW > 0 {
+                pan = Float(dx / (visibleWorldW / 2.0))
                 pan = max(-1.0, min(1.0, pan))
             }
         }

@@ -41,9 +41,10 @@ extension GameObject {
             return
         }
 
-        // When near home, scan for enemies
+        // When near home, scan for enemies (use sight range for wider detection)
         if isArmed {
-            let scanRange = weaponRange * 1.5
+            let sightPixels = Double(sightRange) * 24.0
+            let scanRange = max(sightPixels, weaponRange * 1.5)
             if let enemy = findNearestEnemy(self, range: scanRange) {
                 attackTarget = enemy.id
                 mission = .attack
@@ -55,21 +56,199 @@ extension GameObject {
 
         // If idle near home and no enemies, do random patrol
         if moveTargetX == nil && kind != .structure {
-            let patrolRadius = 5  // cells
-            let nx = homeCellX + Int.random(in: -patrolRadius...patrolRadius)
-            let ny = homeCellY + Int.random(in: -patrolRadius...patrolRadius)
-            let clampedX = max(0, min(63, nx))
-            let clampedY = max(0, min(63, ny))
-            if isCellPassable(cellX: clampedX, cellY: clampedY, speedType: cachedSpeedType) {
-                moveTargetX = Double(clampedX * 24) + 12.0
-                moveTargetY = Double(clampedY * 24) + 12.0
-                movePath = []
+            if cachedSpeedType == .float_ {
+                // Boats: patrol left/right along initial row (matching VC gunboat behavior)
+                let patrolDist = 10  // cells left/right
+                let targetCellX: Int
+                // Alternate direction: go left if we're right of home, go right if left
+                if cellX >= homeCellX {
+                    targetCellX = max(0, homeCellX - patrolDist)
+                } else {
+                    targetCellX = min(63, homeCellX + patrolDist)
+                }
+                let targetCellY = homeCellY
+                if isCellPassable(cellX: targetCellX, cellY: targetCellY, speedType: .float_) {
+                    moveTargetX = Double(targetCellX * 24) + 12.0
+                    moveTargetY = Double(targetCellY * 24) + 12.0
+                    movePath = []
+                } else {
+                    // Find nearest water cell along the row
+                    for offset in 1...patrolDist {
+                        let leftX = max(0, homeCellX - offset)
+                        let rightX = min(63, homeCellX + offset)
+                        let tryX = (cellX >= homeCellX) ? leftX : rightX
+                        if isCellPassable(cellX: tryX, cellY: targetCellY, speedType: .float_) {
+                            moveTargetX = Double(tryX * 24) + 12.0
+                            moveTargetY = Double(targetCellY * 24) + 12.0
+                            movePath = []
+                            break
+                        }
+                    }
+                }
+            } else {
+                let patrolRadius = 5  // cells
+                let nx = homeCellX + Int.random(in: -patrolRadius...patrolRadius)
+                let ny = homeCellY + Int.random(in: -patrolRadius...patrolRadius)
+                let clampedX = max(0, min(63, nx))
+                let clampedY = max(0, min(63, ny))
+                if isCellPassable(cellX: clampedX, cellY: clampedY, speedType: cachedSpeedType) {
+                    moveTargetX = Double(clampedX * 24) + 12.0
+                    moveTargetY = Double(clampedY * 24) + 12.0
+                    movePath = []
+                }
             }
         }
 
         // Keep moving if we have a target
         if moveTargetX != nil {
             moveOneStep()
+        }
+    }
+
+    // MARK: - Gunboat Hunt (VC-authentic edge-bounce patrol)
+
+    /// Gunboat hunt: sail back and forth across the map, shooting at enemies in range.
+    /// Ported from VC unit.cpp — gunboat always hunts, bounces at map edges,
+    /// fires at enemies in range while moving, and cannot be player-controlled.
+    func tickGunboatHunt() {
+        guard let world = session.world else { return }
+
+        // Ensure gunboat is always a loaner and at full speed
+        isALoaner = true
+
+        // If no destination, assign one based on current facing
+        if moveTargetX == nil {
+            let boatRow = cellY
+            if let bounds = world.mapBounds {
+                if facing >= 128 {
+                    // Facing west — go to west edge (stay within bounds)
+                    let westCellX = bounds.x
+                    moveTargetX = Double(westCellX * 24) + 12.0
+                } else {
+                    // Facing east — go to east edge (stay within bounds)
+                    let eastCellX = bounds.x + bounds.width - 1
+                    moveTargetX = Double(eastCellX * 24) + 12.0
+                }
+                moveTargetY = Double(boatRow * 24) + 12.0
+            }
+            movePath = []
+        }
+
+        // Edge-bounce: when reaching a map edge, reverse direction
+        if let bounds = world.mapBounds {
+            let boatRow = cellY
+            if cellX <= bounds.x + 1 {
+                // At west edge — reverse to east
+                facing = 64  // DIR_E
+                turretFacing = 64
+                let eastCellX = bounds.x + bounds.width - 1
+                moveTargetX = Double(eastCellX * 24) + 12.0
+                moveTargetY = Double(boatRow * 24) + 12.0
+                movePath = []
+            } else if cellX >= bounds.x + bounds.width - 2 {
+                // At east edge — reverse to west
+                facing = 192  // DIR_W
+                turretFacing = 192
+                let westCellX = bounds.x
+                moveTargetX = Double(westCellX * 24) + 12.0
+                moveTargetY = Double(boatRow * 24) + 12.0
+                movePath = []
+            }
+        }
+
+        // Scan for enemies in weapon range and fire while moving
+        if isArmed {
+            let resolved = resolveWeapon()
+            let range = resolved?.range ?? 96.0
+
+            // Check current attack target
+            if let targetId = attackTarget,
+               let target = findObjectById(targetId),
+               target.strength > 0 {
+                let dx = target.worldX - worldX
+                let dy = target.worldY - worldY
+                let dist = sqrt(dx * dx + dy * dy)
+
+                if dist <= range {
+                    // In range — rotate turret and fire without stopping
+                    let tgtFacing = directionToFacing(dx: dx, dy: dy)
+                    let aligned = rotateTurretToward(targetFacing: tgtFacing)
+
+                    if aligned && reloadTimer <= 0, let resolved = resolved {
+                        reloadTimer = resolved.reloadTicks
+                        lastFireTick = world.tickCount
+
+                        let fireFacing = hasTurret ? turretFacing : facing
+                        let faceRad = Double(fireFacing) / 256.0 * 2.0 * Double.pi
+                        let flashDist = 10.0
+                        let mfx = worldX + sin(faceRad) * flashDist
+                        let mfy = worldY - cos(faceRad) * flashDist
+                        spawnAnimation(.muzzleFlash, worldX: mfx, worldY: mfy)
+
+                        if let weapon = cachedPrimaryWeapon {
+                            audioManager.play(audioManager.weaponFireSound(weapon), worldX: worldX, worldY: worldY)
+                        }
+
+                        let bulletType = weaponTypeData[resolved.weaponType]?.fires ?? .bullet
+                        spawnProjectile(bulletType: bulletType, from: self, to: target,
+                                       damage: resolved.damage, warhead: resolved.warhead)
+                    }
+                } else {
+                    // Out of range — drop target
+                    attackTarget = nil
+                }
+            } else {
+                // No current target — scan for new one
+                attackTarget = nil
+                if let enemy = findNearestEnemy(self, range: range) {
+                    attackTarget = enemy.id
+                } else {
+                    // No enemy in range — align turret with body direction
+                    turretFacing = facing
+                }
+            }
+
+            if reloadTimer > 0 {
+                reloadTimer -= 1
+            }
+        }
+
+        // Keep moving toward destination — gunboat moves directly, bypassing A* pathfinding
+        // Validate that movement stays on water cells
+        if let targetX = moveTargetX, let targetY = moveTargetY {
+            let dx = targetX - worldX
+            let dy = targetY - worldY
+            let dist = sqrt(dx * dx + dy * dy)
+
+            if dist > 0.5 {
+                facing = directionToFacing(dx: dx, dy: dy)
+            }
+
+            if dist <= speed {
+                // Validate target cell is water before moving
+                let tCellX = Int(targetX) / 24
+                let tCellY = Int(targetY) / 24
+                if isCellPassable(cellX: tCellX, cellY: tCellY, ignoring: self, speedType: .float_) {
+                    worldX = targetX
+                    worldY = targetY
+                }
+                moveTargetX = nil
+                moveTargetY = nil
+            } else if dist > 0 {
+                let newX = worldX + (dx / dist) * speed
+                let newY = worldY + (dy / dist) * speed
+                // Check next cell is water before moving
+                let nextCellX = Int(newX) / 24
+                let nextCellY = Int(newY) / 24
+                if isCellPassable(cellX: nextCellX, cellY: nextCellY, ignoring: self, speedType: .float_) {
+                    worldX = newX
+                    worldY = newY
+                } else {
+                    // Hit non-water cell — reverse direction
+                    moveTargetX = nil
+                    moveTargetY = nil
+                }
+            }
         }
     }
 
@@ -238,10 +417,23 @@ extension GameObject {
             if let it = InfantryType.from(iniName: upper), let data = infantryTypeDataTable[it] {
                 if data.canCapture {
                     // Capture the building: change ownership
+                    let previousOwner = target.house
                     target.house = house
 
                     // Recalculate power for both houses
                     recalculateAllHousePower()
+
+                    // EVA announcement
+                    if let world = session.world {
+                        if house == world.playerHouse {
+                            // Player captured an enemy building
+                            let vox: VoxType = previousOwner == .badGuy ? .nodCaptured : .gdiCaptured
+                            session.speakEVA(vox)
+                        } else if previousOwner == world.playerHouse {
+                            // Enemy captured player's building
+                            session.speakEVA(.structureLost, cooldownTicks: 45)
+                        }
+                    }
 
                     // Remove the engineer (consumed)
                     strength = 0
@@ -270,6 +462,93 @@ extension GameObject {
         }
     }
 
+    // MARK: - Sabotage (Commando C4 on buildings)
+
+    /// Sabotage: commando moves to and destroys enemy building with C4
+    func tickSabotage() {
+        guard let world = session.world else { return }
+
+        // Only infantry (commando) can sabotage
+        guard kind == .infantry else {
+            mission = .guard_
+            return
+        }
+
+        // Check if we have an attack target (the building to sabotage)
+        guard let targetId = attackTarget,
+              let target = findObjectById(targetId),
+              target.strength > 0,
+              target.kind == .structure else {
+            // No valid target — go back to guard
+            attackTarget = nil
+            mission = .guard_
+            return
+        }
+
+        let dx = target.worldX - worldX
+        let dy = target.worldY - worldY
+        let dist = sqrt(dx * dx + dy * dy)
+
+        // Face the target
+        if dist > 0.5 {
+            facing = directionToFacing(dx: dx, dy: dy)
+        }
+
+        // Check if adjacent to building (within ~24px)
+        if dist < 24.0 {
+            // Plant C4: destroy the building instantly
+            target.strength = 0
+            target.lastDamagedTick = world.tickCount
+            target.lastWhoHurtMe = house
+
+            // Spawn large explosion
+            spawnAnimation(.fball1, worldX: target.worldX, worldY: target.worldY)
+            spawnAnimation(.fball1, worldX: target.worldX - 12, worldY: target.worldY - 12)
+            spawnAnimation(.fball1, worldX: target.worldX + 12, worldY: target.worldY + 12)
+
+            // Clear building footprint from passability
+            let size = buildingSize(target.typeName)
+            let topLeftX = Int(target.worldX - Double(size.w * 24) / 2.0) / 24
+            let topLeftY = Int(target.worldY - Double(size.h * 24) / 2.0) / 24
+            for fdy in 0..<size.h {
+                for fdx in 0..<size.w {
+                    let c = (topLeftY + fdy) * 64 + (topLeftX + fdx)
+                    if c >= 0 && c < 4096 {
+                        staticPassability[c] = true
+                    }
+                }
+            }
+
+            // Recalculate power
+            recalculateAllHousePower()
+
+            // Track kill
+            session.campaign.trackKill(victimHouse: target.house, victimKind: target.kind)
+            let attackerState = getHouseState(house)
+            let victimState = getHouseState(target.house)
+            victimState.buildingsLost += 1
+            attackerState.buildingsKilled += 1
+
+            // Commando survives — return to guard
+            attackTarget = nil
+            mission = .guard_
+            return
+        } else {
+            // Move toward the building
+            moveTargetX = target.worldX
+            moveTargetY = target.worldY
+            if movePath.isEmpty {
+                movePath = findPath(
+                    fromX: cellX, fromY: cellY,
+                    toX: target.cellX, toY: target.cellY,
+                    ignoring: self,
+                    speedType: .foot
+                )
+            }
+            moveOneStep()
+        }
+    }
+
     // MARK: - Unload (Transport disembark / MCV deploy)
 
     /// Unload: MCV deploys into construction yard, transports disembark passengers
@@ -279,6 +558,13 @@ extension GameObject {
         if upper == "MCV" {
             tickMCVDeploy()
         } else if isTransporter {
+            // If transport still has a move target, move there first before unloading
+            if hasCargo && moveTargetX != nil {
+                let arrived = !moveOneStep()
+                if !arrived {
+                    return  // Still moving to drop-off point
+                }
+            }
             tickAPCUnload()
         } else {
             mission = .guard_
@@ -331,10 +617,14 @@ extension GameObject {
                 worldX: cx, worldY: cy,
                 facing: 0,
                 strength: resolveStrength(typeName: "FACT", kind: .structure, scenarioStrength: 256),
-                mission: .guard_,
+                mission: .construction,
                 speed: 0.0
             )
+            // Start build-up animation
+            building.buildUpFrame = 0
+            building.buildUpDelay = 0
             world.addObject(building)
+            audioManager.play(.construction)
 
             // Mark footprint as impassable
             for dy in 0..<factSize.h {
@@ -358,6 +648,100 @@ extension GameObject {
     }
 
     // tickAPCUnload is defined in GameReinforcements.swift with full cargo support
+
+    // MARK: - Building Build-Up Animation
+
+    /// Animate building construction frame by frame.
+    /// buildUpTotalFrames is resolved by the renderer on first draw (since frame count
+    /// comes from sprite data which is only available in the rendering layer).
+    func tickBuildUp() {
+        guard kind == .structure else {
+            mission = .guard_
+            return
+        }
+
+        // Wait until renderer has resolved frame count
+        if buildUpTotalFrames == 0 {
+            return
+        }
+
+        // If only 1 frame, skip animation
+        if buildUpTotalFrames <= 1 {
+            buildUpFrame = -1
+            mission = .guard_
+            return
+        }
+
+        // Advance frame with delay (2 ticks per frame for smooth animation)
+        buildUpDelay += 1
+        if buildUpDelay >= 2 {
+            buildUpDelay = 0
+            buildUpFrame += 1
+
+            if buildUpFrame >= buildUpTotalFrames {
+                // Animation complete
+                buildUpFrame = -1
+                mission = .guard_
+                onBuildUpComplete()
+            }
+        }
+    }
+
+    /// Called when a building's build-up animation finishes.
+    /// Handles bonus units: refineries spawn a free harvester.
+    /// Also checks for newly unlocked build options (EVA "new construction options").
+    func onBuildUpComplete() {
+        guard let world = session.world else { return }
+        let upper = typeName.uppercased()
+
+        // Check if this building unlocks new build options for the player
+        if house == world.playerHouse {
+            let prevCount = session.previousBuildOptionCount
+            let newStructs = getAvailableStructures().count
+            let newUnits = getAvailableUnits().count
+            let newTotal = newStructs + newUnits
+            if newTotal > prevCount && prevCount > 0 {
+                session.speakEVA(.newConstruct, cooldownTicks: 30)
+            }
+            session.previousBuildOptionCount = newTotal
+        }
+
+        // Refinery: spawn a free harvester
+        if upper == "PROC" {
+            let harv = GameObject(
+                id: world.allocateId(),
+                typeName: "HARV",
+                house: house,
+                kind: .unit,
+                worldX: worldX,
+                worldY: worldY + 24.0,  // Spawn just below the refinery
+                facing: 128,  // Facing south
+                strength: resolveStrength(typeName: "HARV", kind: .unit, scenarioStrength: 256),
+                mission: .harvest,
+                speed: resolveSpeed(typeName: "HARV", kind: .unit)
+            )
+            world.addObject(harv)
+        }
+
+        // Helipad: spawn a free Orca (GDI) or Apache (Nod)
+        if upper == "HPAD" {
+            let aircraft = (house == .badGuy) ? "HELI" : "ORCA"
+            let heli = GameObject(
+                id: world.allocateId(),
+                typeName: aircraft,
+                house: house,
+                kind: .unit,
+                worldX: worldX,
+                worldY: worldY,
+                facing: 0,
+                strength: resolveStrength(typeName: aircraft, kind: .unit, scenarioStrength: 256),
+                mission: .guard_,
+                speed: resolveSpeed(typeName: aircraft, kind: .unit)
+            )
+            heli.isAircraft = true
+            world.addObject(heli)
+        }
+    }
 
     // MARK: - Building Repair
 
@@ -406,14 +790,60 @@ extension GameObject {
 
     // MARK: - Building Sell
 
-    /// Sell a building: deconstruct and refund partial cost
+    /// Sell a building: initiate deconstruction animation (build-up in reverse)
     func tickBuildingSell() {
         guard kind == .structure else {
             mission = .guard_
             return
         }
 
-        // Sell sequence: refund credits, spawn crew, destroy building
+        // Start deconstruction: play build-up animation in reverse
+        // Set buildUpFrame to the last frame; tickDeconstruction will count down
+        if buildUpTotalFrames > 1 {
+            buildUpFrame = buildUpTotalFrames - 1
+            buildUpDelay = 0
+            mission = .deconstruction
+        } else {
+            // No build-up frames available — complete sell immediately
+            completeSell()
+        }
+    }
+
+    // MARK: - Building Deconstruction Animation
+
+    /// Animate building sell: play build-up frames in reverse, then complete the sale
+    func tickDeconstruction() {
+        guard kind == .structure else {
+            mission = .guard_
+            return
+        }
+
+        // Wait until renderer has resolved frame count
+        if buildUpTotalFrames == 0 {
+            return
+        }
+
+        // If only 1 frame, skip animation and sell immediately
+        if buildUpTotalFrames <= 1 {
+            completeSell()
+            return
+        }
+
+        // Decrement frame with delay (2 ticks per frame, matching build-up speed)
+        buildUpDelay += 1
+        if buildUpDelay >= 2 {
+            buildUpDelay = 0
+            buildUpFrame -= 1
+
+            if buildUpFrame <= 0 {
+                // Animation complete — finalize the sale
+                completeSell()
+            }
+        }
+    }
+
+    /// Complete the sell: refund credits, spawn crew, clear footprint, remove building
+    private func completeSell() {
         let refundAmount = cost / 2  // 50% refund
 
         let houseState = getHouseState(house)
@@ -458,10 +888,8 @@ extension GameObject {
             }
         }
 
-        // Spawn destruction effects
-        spawnDeathEffects()
-
-        // Destroy the building
+        // Destroy the building (no death effects — it was sold, not destroyed)
+        buildUpFrame = -1
         strength = 0
 
         // Recalculate power

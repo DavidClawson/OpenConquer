@@ -25,6 +25,13 @@ class InputManager {
     var selectionBoxEndX: Int32? = nil
     var selectionBoxEndY: Int32? = nil
     var isDragging: Bool = false
+
+    // Control group double-tap tracking
+    var lastGroupKey: Int = -1
+    var lastGroupKeyTick: Int = 0
+
+    // Minimap drag state
+    var isDraggingMinimap: Bool = false
 }
 
 /// Global input manager instance

@@ -83,12 +83,15 @@ func renderGame(_ renderer: OpaquePointer?) {
     }
 
     for overlay in scenario.overlays {
+        let upper = overlay.typeName.uppercased()
+        // Skip tiberium overlays — rendered dynamically from world.map.tiberiumCells below
+        if upper.hasPrefix("TI") { continue }
+
         let pos = cellToPixel(overlay.cell)
         let screenX = Int32(pos.px - camX)
         let screenY = Int32(pos.py - camY)
         if screenX > vw || screenY > vh || screenX + 24 < 0 || screenY + 24 < 0 { continue }
 
-        let upper = overlay.typeName.uppercased()
         var frameIdx = 0
         if wallTypes.contains(upper) {
             let cell = overlay.cell
@@ -101,6 +104,27 @@ func renderGame(_ renderer: OpaquePointer?) {
         if let info = getObjectTexture(renderer, typeName: overlay.typeName, frame: frameIdx, house: .neutral, theater: theater) {
             var dstRect = SDL_Rect(x: screenX, y: screenY, w: Int32(info.width), h: Int32(info.height))
             SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
+        }
+    }
+
+    // === Pass 2b: Dynamic tiberium from world.map (grows/spreads, depleted by harvesting) ===
+    for cell in world.map.tiberiumCells {
+        let pos = cellToPixel(cell)
+        let screenX = Int32(pos.px - camX)
+        let screenY = Int32(pos.py - camY)
+        if screenX > vw || screenY > vh || screenX + 24 < 0 || screenY + 24 < 0 { continue }
+
+        let density = world.map.tiberiumDensity[cell] ?? 1
+        let tiName = "TI\(density)"
+
+        if let info = getObjectTexture(renderer, typeName: tiName, frame: 0, house: .neutral, theater: theater) {
+            var dstRect = SDL_Rect(x: screenX, y: screenY, w: Int32(info.width), h: Int32(info.height))
+            SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
+        } else {
+            // Fallback: bright green square to show tiberium location
+            SDL_SetRenderDrawColor(renderer, 0, 200, 0, 120)
+            var rect = SDL_Rect(x: screenX + 2, y: screenY + 2, w: 20, h: 20)
+            SDL_RenderFillRect(renderer, &rect)
         }
     }
 
@@ -152,21 +176,23 @@ func renderGame(_ renderer: OpaquePointer?) {
     // Sort mobile objects by Y for proper depth ordering
     mobileObjects.sort { $0.worldY < $1.worldY }
 
-    // Draw structures (using scenario data for proper bib/anchor rendering)
-    for structure in scenario.structures {
-        let pos = cellToPixel(structure.cell)
-        let size = buildingSize(structure.typeName)
+    // Pass 1: Render all building bibs FIRST so they never overlap building sprites
+    for obj in structures {
+        let size = buildingSize(obj.typeName)
         let pixW = Int32(size.w * 24)
         let pixH = Int32(size.h * 24)
-        let screenX = Int32(pos.px - camX)
-        let screenY = Int32(pos.py - camY)
+        let topLeftX = Int32(obj.worldX - Double(size.w * 24) / 2.0)
+        let topLeftY = Int32(obj.worldY - Double(size.h * 24) / 2.0)
+        let screenX = topLeftX - Int32(camX)
+        let screenY = topLeftY - Int32(camY)
 
         if screenX > vw || screenY > vh ||
            screenX + pixW < 0 || screenY + pixH < 0 { continue }
 
-        // Render bib
-        if let bib = buildingBibInfo(structure.typeName) {
-            let bibOriginCell = structure.cell + (size.h - 1) * 64
+        if let bib = buildingBibInfo(obj.typeName) {
+            let bibStartX = Int(topLeftX) / 24
+            let bibStartY = Int(topLeftY) / 24 + size.h - 1
+            let bibOriginCell = bibStartY * 64 + bibStartX
             for bibRow in 0..<bib.bibH {
                 for bibCol in 0..<bib.bibW {
                     let bibCell = bibOriginCell + bibRow * 64 + bibCol
@@ -181,14 +207,69 @@ func renderGame(_ renderer: OpaquePointer?) {
                 }
             }
         }
+    }
 
-        if let info = getObjectTexture(renderer, typeName: structure.typeName, frame: 0, house: structure.house, theater: theater) {
+    // Pass 2: Render building sprites on top of bibs
+    for obj in structures {
+        let size = buildingSize(obj.typeName)
+        let pixW = Int32(size.w * 24)
+        let pixH = Int32(size.h * 24)
+        let topLeftX = Int32(obj.worldX - Double(size.w * 24) / 2.0)
+        let topLeftY = Int32(obj.worldY - Double(size.h * 24) / 2.0)
+        let screenX = topLeftX - Int32(camX)
+        let screenY = topLeftY - Int32(camY)
+
+        if screenX > vw || screenY > vh ||
+           screenX + pixW < 0 || screenY + pixH < 0 { continue }
+
+        // Resolve build-up frame count on first render (SHP data lives in rendering layer)
+        if obj.buildUpFrame >= 0 && obj.buildUpTotalFrames == 0 {
+            let spriteName = obj.typeName.uppercased()
+            if let shp = renderState.objectSHPCache[spriteName] {
+                obj.buildUpTotalFrames = max(1, shp.frames.count)
+            } else {
+                // Try loading the SHP to populate the cache
+                if let _ = getObjectTexture(renderer, typeName: spriteName, frame: 0, house: obj.house, theater: theater) {
+                    if let shp = renderState.objectSHPCache[spriteName] {
+                        obj.buildUpTotalFrames = max(1, shp.frames.count)
+                    }
+                }
+                if obj.buildUpTotalFrames == 0 {
+                    obj.buildUpTotalFrames = 1  // Fallback: skip animation
+                }
+            }
+            // For turreted structures, only body frames count for build-up
+            if obj.hasTurret && obj.buildUpTotalFrames > 32 {
+                obj.buildUpTotalFrames = 32
+            }
+        }
+
+        // Determine frame for structures
+        let structFrame: Int
+        if obj.buildUpFrame >= 0 {
+            // Build-up animation in progress — show construction frame
+            structFrame = obj.buildUpFrame
+        } else if obj.hasTurret {
+            let upper = obj.typeName.uppercased()
+            if upper == "SAM" {
+                // SAM sites use deploy state: 0=retracted, >0=deployed rotation frame
+                structFrame = obj.samDeployState
+            } else {
+                // Other turreted structures (GUN) rotate their full sprite
+                let facingIdx = facing32[min(255, max(0, obj.turretFacing))]
+                structFrame = bodyShape[facingIdx]
+            }
+        } else {
+            structFrame = 0
+        }
+
+        if let info = getObjectTexture(renderer, typeName: obj.typeName, frame: structFrame, house: obj.house, theater: theater) {
             let spriteX = screenX
             let spriteY = screenY + pixH - Int32(info.height)
             var dstRect = SDL_Rect(x: spriteX, y: spriteY, w: Int32(info.width), h: Int32(info.height))
             SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
         } else {
-            let hc = structure.house.displayColor
+            let hc = obj.house.displayColor
             SDL_SetRenderDrawColor(renderer, hc.r, hc.g, hc.b, 160)
             var rect = SDL_Rect(x: screenX + 1, y: screenY + 1, w: pixW - 2, h: pixH - 2)
             SDL_RenderFillRect(renderer, &rect)
@@ -213,13 +294,31 @@ func renderGame(_ renderer: OpaquePointer?) {
         if obj.kind == .unit {
             let facingIdx = facing32[min(255, max(0, obj.facing))]
             var frameIdx = bodyShape[facingIdx]
+            var bodyFlip = SDL_FLIP_NONE
 
-            // Clamp frame index for units whose SHP has fewer than 32 body frames
-            // (e.g. hovercraft has very few orientations)
+            // Handle sprites with fewer than 32 body frames by mirroring
             let unitSpriteName = spriteNameOverrides[obj.typeName.uppercased()] ?? obj.typeName.uppercased()
-            if let shp = renderState.objectSHPCache[unitSpriteName],
-               frameIdx >= shp.frames.count && shp.frames.count > 0 {
-                frameIdx = (facingIdx * shp.frames.count) / 32
+            let bodyFrameCount: Int
+            if let shp = renderState.objectSHPCache[unitSpriteName], shp.frames.count > 0 {
+                bodyFrameCount = obj.hasTurret ? min(32, shp.frames.count / 2) : min(32, shp.frames.count)
+                if frameIdx >= bodyFrameCount {
+                    let mirrorFrame = bodyFrameCount * 2 - frameIdx
+                    frameIdx = max(0, min(bodyFrameCount - 1, mirrorFrame))
+                    bodyFlip = SDL_FLIP_HORIZONTAL
+                }
+            } else {
+                bodyFrameCount = 32
+            }
+
+            // BOAT special case: the hull sprite only visually differs for east vs west.
+            // Use the east-facing body frame and flip horizontally when traveling west.
+            let upperType = obj.typeName.uppercased()
+            if upperType == "BOAT" {
+                // Always use the east-facing body frame (facingIdx 8 → bodyShape = 24)
+                let eastFacingIdx = 8
+                frameIdx = bodyShape[eastFacingIdx]
+                // Flip horizontally when traveling west (facing 129-255)
+                bodyFlip = obj.facing > 128 ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE
             }
 
             // Aircraft: draw shadow at ground level, sprite offset upward by altitude
@@ -241,7 +340,7 @@ func renderGame(_ renderer: OpaquePointer?) {
                     let drawX = screenX - Int32(info.width) / 2
                     let drawY = elevatedY - Int32(info.height) / 2
                     var dstRect = SDL_Rect(x: drawX, y: drawY, w: Int32(info.width), h: Int32(info.height))
-                    SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
+                    SDL_RenderCopyEx(renderer, info.texture, nil, &dstRect, 0, nil, bodyFlip)
                 } else {
                     // Procedural aircraft: diamond shape
                     let hc = obj.house.displayColor
@@ -266,17 +365,25 @@ func renderGame(_ renderer: OpaquePointer?) {
                 if drawX > vw || drawY > vh ||
                    drawX + Int32(info.width) < 0 || drawY + Int32(info.height) < 0 { continue }
                 var dstRect = SDL_Rect(x: drawX, y: drawY, w: Int32(info.width), h: Int32(info.height))
-                SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
+                SDL_RenderCopyEx(renderer, info.texture, nil, &dstRect, 0, nil, bodyFlip)
 
                 // Render turret overlay for turreted units (frame 32 + turretFacing)
                 if obj.hasTurret {
                     let turretFacingIdx = facing32[min(255, max(0, obj.turretFacing))]
-                    let turretFrameIdx = 32 + bodyShape[turretFacingIdx]
+                    var turretFrameIdx = bodyShape[turretFacingIdx]
+                    var turretFlip = SDL_FLIP_NONE
+                    // Mirror turret too if needed
+                    if turretFrameIdx >= bodyFrameCount {
+                        let mirrorFrame = bodyFrameCount * 2 - turretFrameIdx
+                        turretFrameIdx = max(0, min(bodyFrameCount - 1, mirrorFrame))
+                        turretFlip = SDL_FLIP_HORIZONTAL
+                    }
+                    turretFrameIdx += (obj.hasTurret ? bodyFrameCount : 32)
                     if let turretInfo = getObjectTexture(renderer, typeName: obj.typeName, frame: turretFrameIdx, house: obj.house) {
                         let tDrawX = screenX - Int32(turretInfo.width) / 2
                         let tDrawY = screenY - Int32(turretInfo.height) / 2
                         var tDstRect = SDL_Rect(x: tDrawX, y: tDrawY, w: Int32(turretInfo.width), h: Int32(turretInfo.height))
-                        SDL_RenderCopy(renderer, turretInfo.texture, nil, &tDstRect)
+                        SDL_RenderCopyEx(renderer, turretInfo.texture, nil, &tDstRect, 0, nil, turretFlip)
                     }
                 }
             } else {
@@ -380,6 +487,17 @@ func renderGame(_ renderer: OpaquePointer?) {
         }
     }
 
+    // === Pass 5b: Repair wrench indicator on damaged player buildings ===
+    for obj in world.objects {
+        guard obj.kind == .structure && obj.house == world.playerHouse &&
+              obj.strength > 0 && obj.strength < obj.maxStrength else { continue }
+        let screenX = Int32(obj.worldX - Double(camX))
+        let screenY = Int32(obj.worldY - Double(camY))
+        let size = buildingSize(obj.typeName)
+        let topY = screenY - Int32(size.h * 24) / 2
+        renderRepairWrench(renderer, cx: screenX, cy: topY - 8, tickCount: world.tickCount)
+    }
+
     // === Pass 6: Drag-select rectangle (in world space since we have zoom scaling active) ===
     if input.isDragging, let sx = input.selectionBoxStartX, let sy = input.selectionBoxStartY,
        let ex = input.selectionBoxEndX, let ey = input.selectionBoxEndY {
@@ -474,99 +592,9 @@ func renderGame(_ renderer: OpaquePointer?) {
     renderGameCursor(renderer, world: world)
 }
 
-// MARK: - Game Cursor Rendering
+// Cursor rendering moved to GameCursor.swift
 
-/// Cursor type with VC-authentic frame mapping from mouse.cpp MouseControl[]
-struct CursorDef {
-    let startFrame: Int
-    let frameCount: Int
-    let hotX: Int32
-    let hotY: Int32
-}
-
-let cursorNormal    = CursorDef(startFrame: 0,   frameCount: 1,  hotX: 0,  hotY: 0)
-let cursorCanMove   = CursorDef(startFrame: 10,  frameCount: 1,  hotX: 15, hotY: 12)
-let cursorNoMove    = CursorDef(startFrame: 11,  frameCount: 1,  hotX: 15, hotY: 12)
-let cursorCanSelect = CursorDef(startFrame: 12,  frameCount: 6,  hotX: 15, hotY: 12)
-let cursorCanAttack = CursorDef(startFrame: 18,  frameCount: 8,  hotX: 15, hotY: 12)
-let cursorDeploy    = CursorDef(startFrame: 53,  frameCount: 9,  hotX: 15, hotY: 12)
-let cursorEnter     = CursorDef(startFrame: 119, frameCount: 3,  hotX: 15, hotY: 12)
-let cursorAreaGuard = CursorDef(startFrame: 153, frameCount: 1,  hotX: 15, hotY: 12)
-
-func renderGameCursor(_ renderer: OpaquePointer?, world: GameWorld) {
-    guard let shp = renderState.mouseSHP, !shp.frames.isEmpty else { return }
-
-    // Hide system cursor when playing
-    if !renderState.systemCursorHidden {
-        SDL_ShowCursor(SDL_DISABLE)
-        renderState.systemCursorHidden = true
-    }
-
-    // Animate cursor (cycle every ~66ms = 15 FPS like the game tick rate)
-    let now = SDL_GetTicks()
-    if now - renderState.cursorAnimTimer > 66 {
-        renderState.cursorAnimTimer = now
-        renderState.cursorAnimFrame += 1
-    }
-
-    // Determine cursor type based on what's under the mouse
-    var cursor = cursorNormal
-
-    // Only apply game cursor logic when mouse is in the game viewport
-    if input.mouseX < renderState.windowWidth - sidebarWidth {
-        let worldPos = gameScreenToWorld(input.mouseX, input.mouseY)
-        let selected = world.selectedObjects()
-
-        if !selected.isEmpty {
-            // Check for enemy under cursor → attack cursor
-            if let _ = findEnemyAtWorldPos(worldX: worldPos.worldX, worldY: worldPos.worldY) {
-                cursor = cursorCanAttack
-            } else {
-                // Move cursor (default when units selected and clicking terrain)
-                cursor = cursorCanMove
-            }
-        } else {
-            // Check for own selectable unit under cursor
-            let hitRadius = 14.0 / renderState.gameZoomLevel
-            var foundOwn = false
-            for obj in world.objects {
-                if obj.kind == .structure { continue }
-                if obj.house != world.playerHouse { continue }
-                if obj.strength <= 0 { continue }
-                let dx = obj.worldX - worldPos.worldX
-                let dy = obj.worldY - worldPos.worldY
-                if sqrt(dx * dx + dy * dy) < hitRadius {
-                    foundOwn = true
-                    break
-                }
-            }
-            if foundOwn {
-                cursor = cursorCanSelect
-            }
-        }
-    }
-
-    // Compute the display frame
-    let cursorFrame: Int
-    if cursor.frameCount > 1 {
-        cursorFrame = cursor.startFrame + (renderState.cursorAnimFrame % cursor.frameCount)
-    } else {
-        cursorFrame = cursor.startFrame
-    }
-
-    // Render the cursor frame centered on hotspot, scaled up for modern resolution
-    // Original game was 320x200, our window is ~960x600, so scale cursor by ~2x
-    let cursorScale: Int32 = 2
-    if cursorFrame < shp.frames.count,
-       let info = getUITexture(renderer, shp: shp, frame: cursorFrame, cache: &renderState.mouseTextures) {
-        let drawX = input.mouseX - cursor.hotX * cursorScale
-        let drawY = input.mouseY - cursor.hotY * cursorScale
-        var dstRect = SDL_Rect(x: drawX, y: drawY,
-                               w: Int32(info.width) * cursorScale,
-                               h: Int32(info.height) * cursorScale)
-        SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
-    }
-}
+// renderGameCursor() is now in GameCursor.swift
 
 // MARK: - UI Sprite Cache (SELECT.SHP, PIPS.SHP, MOUSE.SHP)
 
@@ -819,6 +847,45 @@ func renderGameMinimap(_ renderer: OpaquePointer?, world: GameWorld) {
     let tileSize = 24
 
     guard let scenario = scenarioData else { return }
+
+    // Power gating: disable minimap when player has no Communications Center or low power
+    let playerHouse = world.playerHouse
+    let playerState = getHouseState(playerHouse)
+    let hasCommsCenter = world.hasBuilding(type: "HQ", house: playerHouse) ||
+                         world.hasBuilding(type: "EYE", house: playerHouse)
+
+    if !hasCommsCenter || playerState.isLowPower {
+        // Render disabled minimap: dark background with static noise
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 180)
+        var minimapBg = SDL_Rect(x: minimapX - 2, y: minimapY - 2, w: minimapSize + 4, h: minimapSize + 4)
+        SDL_RenderFillRect(renderer, &minimapBg)
+
+        // Static noise dots
+        SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255)
+        var fillRect = SDL_Rect(x: minimapX, y: minimapY, w: minimapSize, h: minimapSize)
+        SDL_RenderFillRect(renderer, &fillRect)
+
+        // Random static dots for visual noise effect (use tick count as seed variation)
+        let tick = world.tickCount
+        for i in stride(from: 0, to: Int(minimapSize * minimapSize) / 8, by: 1) {
+            let hash = (i &* 2654435761 &+ tick &* 31) & 0x7FFFFFFF
+            let px = minimapX + Int32(hash % Int(minimapSize))
+            let py = minimapY + Int32((hash / Int(minimapSize)) % Int(minimapSize))
+            let brightness = UInt8(40 + (hash / Int(minimapSize * minimapSize)) % 40)
+            SDL_SetRenderDrawColor(renderer, brightness, brightness, brightness, 255)
+            var dot = SDL_Rect(x: px, y: py, w: 1, h: 1)
+            SDL_RenderFillRect(renderer, &dot)
+        }
+
+        // "LOW POWER" or "NO RADAR" text overlay
+        let label = playerState.isLowPower ? "LOW POWER" : "NO RADAR"
+        drawText(renderer, label,
+                 centerX: minimapX + minimapSize / 2,
+                 centerY: minimapY + minimapSize / 2,
+                 color: .red, scale: 1)
+        return
+    }
 
     // Build structure cell lookup
     var structureCells: [Int: House] = [:]

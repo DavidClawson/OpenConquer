@@ -124,7 +124,7 @@ class GameTrigger {
     let house: House
     let teamName: String?
     let persistence: TriggerPersistence
-    var data: Int               // Event-specific: credits threshold, time (in ticks), count
+    var data: Int               // Event-specific: credits threshold, time (in game ticks), count
     let dataCopy: Int           // Original data value for resetting
     var attachCount: Int = 0
     var isActive: Bool = true
@@ -137,9 +137,9 @@ class GameTrigger {
         self.house = house
         self.teamName = teamName
         self.persistence = persistence
-        // Time events store data in minutes; convert to ticks (15 ticks/sec * 60 sec)
+        // Time events store data in 1/10th minute intervals (6 sec each); convert to ticks
         if event == .time {
-            self.data = data * 15 * 60
+            self.data = data * 15 * 6
         } else {
             self.data = data
         }
@@ -208,6 +208,7 @@ func parseTriggers(from ini: INIFile) {
     }
 
     print("GameTrigger: Loaded \(session.gameTriggers.count) triggers")
+
 }
 
 // MARK: - Trigger Evaluation
@@ -236,19 +237,24 @@ func tickTriggers() {
 
         case .allDestroyed:
             // All units and buildings of the specified house destroyed
+            // Don't fire until the house has actually existed (grace period for reinforcements)
             let house = trigger.house
-            let hasUnits = world.objects.contains { $0.house == house && $0.strength > 0 && $0.kind != .structure }
-            let hasBuildings = world.objects.contains { $0.house == house && $0.strength > 0 && $0.kind == .structure }
-            if !hasUnits && !hasBuildings {
-                fireTrigger(trigger)
+            let hasAnything = world.objects.contains { $0.house == house && $0.strength > 0 }
+            if !hasAnything && world.tickCount > 30 {
+                // Verify the house ever had objects (check if any dead objects belonged to this house)
+                let everExisted = world.tickCount > 150  // ~10 seconds grace period
+                if everExisted {
+                    fireTrigger(trigger)
+                }
             }
 
         case .unitsDestroyed:
             // All units of the specified house destroyed
+            // Don't fire in the first 10 seconds to allow reinforcements to arrive
             let house = trigger.house
             let hasUnits = world.objects.contains { $0.house == house && $0.strength > 0 &&
                 ($0.kind == .unit || $0.kind == .infantry) }
-            if !hasUnits {
+            if !hasUnits && world.tickCount > 150 {
                 fireTrigger(trigger)
             }
 
@@ -346,8 +352,15 @@ func fireTrigger(_ trigger: GameTrigger) {
         }
 
     case .beginProduction:
-        // Signal AI to start production (stub for future M7)
-        print("Trigger: AI begin production")
+        // Enable AI production for all non-player, non-neutral houses
+        if let world = session.world {
+            for (house, state) in session.houseStates {
+                if house != world.playerHouse && house != .neutral {
+                    state.productionEnabled = true
+                    print("Trigger: AI production enabled for \(house.rawValue)")
+                }
+            }
+        }
 
     case .createTeam:
         if let teamName = trigger.teamName {

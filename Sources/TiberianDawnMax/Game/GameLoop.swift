@@ -117,6 +117,13 @@ func gameTick() {
             continue
         }
 
+        // VC special case: Gunboat always hunts regardless of assigned mission
+        if obj.typeName.uppercased() == "BOAT" && obj.cachedSpeedType == .float_ {
+            obj.mission = .hunt
+            obj.tickGunboatHunt()
+            continue
+        }
+
         switch obj.mission {
         case .move:
             obj.tickMove()
@@ -160,8 +167,12 @@ func gameTick() {
             obj.tickBuildingRepair()
         case .selling:
             obj.tickBuildingSell()
-        case .construction, .deconstruction:
-            break  // Handled by production system
+        case .construction:
+            obj.tickBuildUp()
+        case .deconstruction:
+            obj.tickDeconstruction()
+        case .sabotage:
+            obj.tickSabotage()
         case .missile:
             break  // Future: superweapon launch
         }
@@ -171,6 +182,42 @@ func gameTick() {
     for obj in world.objects {
         if obj.kind == .infantry {
             obj.tickFear()
+        }
+    }
+
+    // Tick SAM site deploy/retract animation
+    for obj in world.objects {
+        if obj.kind == .structure && obj.hasTurret {
+            obj.tickSAMDeploy()
+        }
+    }
+
+    // Spawn fire/smoke on damaged buildings (original C&C behavior)
+    // Only check periodically to avoid spamming animations
+    if world.tickCount % 30 == 0 {
+        for obj in world.objects {
+            guard obj.kind == .structure && obj.strength > 0 else { continue }
+            let health = obj.healthFraction
+
+            // Check if there's already a fire/smoke animation attached to this building
+            let hasFireAnim = session.activeAnimations.contains { $0.attachedToId == obj.id }
+
+            if health <= 0.25 && !hasFireAnim {
+                // Heavy damage: spawn fire animation on building
+                let size = buildingSize(obj.typeName)
+                let halfW = Double(size.w * 24) / 2.0
+                let halfH = Double(size.h * 24) / 2.0
+                let ox = Double.random(in: -halfW * 0.5...halfW * 0.5)
+                let oy = Double.random(in: -halfH * 0.5...halfH * 0.5)
+                let anim = GameAnimation(type: .onFireBig, worldX: obj.worldX + ox, worldY: obj.worldY + oy)
+                anim.attachedToId = obj.id
+                session.activeAnimations.append(anim)
+            } else if health <= 0.5 && health > 0.25 && !hasFireAnim {
+                // Half damage: spawn smoke animation on building
+                let anim = GameAnimation(type: .smokeM, worldX: obj.worldX, worldY: obj.worldY)
+                anim.attachedToId = obj.id
+                session.activeAnimations.append(anim)
+            }
         }
     }
 
@@ -202,6 +249,21 @@ func gameTick() {
             }
         }
     }
+    // Remove loaner units (reinforcement transports) that have exited the map
+    if let bounds = world.mapBounds {
+        for obj in world.objects {
+            guard obj.isALoaner && obj.strength > 0 && !obj.hasCargo else { continue }
+            let cx = obj.cellX
+            let cy = obj.cellY
+            if cx < bounds.x - 1 || cx > bounds.x + bounds.width ||
+               cy < bounds.y - 1 || cy > bounds.y + bounds.height {
+                // Gunboat: bounce at edges (handled by tickGunboatHunt), don't remove
+                if obj.typeName.uppercased() == "BOAT" { continue }
+                obj.strength = 0
+            }
+        }
+    }
+
     removeDeadObjects()
 
     // Recalculate power when buildings die or are built
@@ -216,12 +278,25 @@ func gameTick() {
 
 // MARK: - Movement Extensions
 
+/// Result of a single movement step attempt.
+enum MovementStepResult {
+    case noTarget          // No move target set
+    case noPath            // Pathfinding failed
+    case blocked           // Waiting for repath (cell impassable or enemy blocking)
+    case moving            // Still moving toward waypoint
+    case arrivedWaypoint   // Reached intermediate waypoint, more path remains
+    case arrivedFinal      // Reached final destination
+}
+
 extension GameObject {
-    /// Tick the move mission (follow path to target)
-    func tickMove() {
+
+    /// Core movement step logic shared by tickMove() and moveOneStep().
+    /// Handles pathfinding, path revalidation, occupancy checks, infantry crushing,
+    /// and per-tick position advancement. Returns a result the caller uses to decide
+    /// mission transitions.
+    func executeMovementStep() -> MovementStepResult {
         guard let targetX = moveTargetX, let targetY = moveTargetY else {
-            mission = .guard_
-            return
+            return .noTarget
         }
 
         // If we have no path, compute one via A*
@@ -240,11 +315,7 @@ extension GameObject {
                     speedType: cachedSpeedType
                 )
                 if path.isEmpty {
-                    // No path found, stop
-                    mission = .guard_
-                    moveTargetX = nil
-                    moveTargetY = nil
-                    return
+                    return .noPath
                 }
                 movePath = path
             }
@@ -255,8 +326,41 @@ extension GameObject {
         let nextY: Double
 
         if !movePath.isEmpty {
-            // Move toward the center of the next path cell
             let nextCell = movePath[0]
+            let nextCellIdx = nextCell.cellY * 64 + nextCell.cellX
+
+            // Revalidate: if next path cell became impassable (new structure, etc.), repath
+            let passMap = passabilityMap(for: cachedSpeedType)
+            if nextCellIdx >= 0 && nextCellIdx < 4096 && !passMap[nextCellIdx] {
+                movePath = []  // Invalidate stale path, will repath next tick
+                return .blocked
+            }
+
+            // Check if next path cell is occupied before entering it
+            if let world = session.world,
+               let occupantId = world.occupancy[nextCellIdx],
+               occupantId != id {
+                if let occupant = world.findObject(id: occupantId) {
+                    if isCrusher && occupant.isCrushable && isEnemy(self, occupant) {
+                        // Crush enemy infantry: kill them and continue moving
+                        occupant.applyDamage(amount: occupant.strength + 1, attackerHouse: house)
+                        occupant.spawnDeathEffects()
+                        audioManager.play(audioManager.infantryDeathScream(), worldX: occupant.worldX, worldY: occupant.worldY)
+                        session.campaign.trackKill(victimHouse: occupant.house, victimKind: occupant.kind)
+                        let attackerState = getHouseState(house)
+                        let victimState = getHouseState(occupant.house)
+                        victimState.unitsLost += 1
+                        attackerState.unitsKilled += 1
+                    } else if occupant.house == house {
+                        // Friendly unit — pass through (original C&C allows this)
+                    } else {
+                        // Enemy unit blocking — wait and repath next tick
+                        movePath = []
+                        return .blocked
+                    }
+                }
+            }
+
             nextX = Double(nextCell.cellX * 24) + 12.0
             nextY = Double(nextCell.cellY * 24) + 12.0
         } else {
@@ -288,16 +392,17 @@ extension GameObject {
                     let finalDy = targetY - worldY
                     let finalDist = sqrt(finalDx * finalDx + finalDy * finalDy)
                     if finalDist < 2.0 {
-                        mission = .guard_
                         moveTargetX = nil
                         moveTargetY = nil
+                        return .arrivedFinal
                     }
                 }
+                return .arrivedWaypoint
             } else {
                 // Arrived at final target
-                mission = .guard_
                 moveTargetX = nil
                 moveTargetY = nil
+                return .arrivedFinal
             }
         } else {
             // Move toward waypoint
@@ -305,6 +410,48 @@ extension GameObject {
             let moveY = (dy / dist) * speed
             worldX += moveX
             worldY += moveY
+            return .moving
+        }
+    }
+
+    /// Tick the move mission (follow path to target).
+    /// Transitions to .guard_ on arrival or path failure.
+    /// Supports attack-move (scan for enemies while moving) and waypoint queuing.
+    func tickMove() {
+        // Attack-move: periodically scan for enemies while moving
+        if isAttackMoving && isArmed {
+            if let world = session.world, world.tickCount % 8 == 0 {
+                let resolved = resolveWeapon()
+                let weaponRange = resolved?.range ?? 96.0
+                let sightPixels = Double(sightRange) * 24.0
+                let scanRange = max(sightPixels, weaponRange)
+                if let enemy = findNearestEnemy(self, range: scanRange) {
+                    // Suspend current move and engage enemy
+                    suspendedMission = .move
+                    attackTarget = enemy.id
+                    mission = .attack
+                    return
+                }
+            }
+        }
+
+        let result = executeMovementStep()
+        switch result {
+        case .noTarget, .noPath, .arrivedFinal:
+            // Check for queued waypoints before going idle
+            if !moveWaypoints.isEmpty {
+                let next = moveWaypoints.removeFirst()
+                moveTargetX = next.x
+                moveTargetY = next.y
+                movePath = []  // Recalculate A* for new segment
+            } else {
+                isAttackMoving = false
+                mission = .guard_
+                moveTargetX = nil
+                moveTargetY = nil
+            }
+        case .blocked, .moving, .arrivedWaypoint:
+            break
         }
     }
 
@@ -312,82 +459,15 @@ extension GameObject {
     /// Returns true if still moving.
     @discardableResult
     func moveOneStep() -> Bool {
-        guard let targetX = moveTargetX, let targetY = moveTargetY else {
+        let result = executeMovementStep()
+        switch result {
+        case .noTarget, .noPath, .arrivedFinal:
+            moveTargetX = nil
+            moveTargetY = nil
             return false
+        case .blocked, .moving, .arrivedWaypoint:
+            return true
         }
-
-        // If we have no path, compute one via A*
-        if movePath.isEmpty {
-            let fromCellX = cellX
-            let fromCellY = cellY
-            let toCellX = Int(targetX) / 24
-            let toCellY = Int(targetY) / 24
-
-            if fromCellX != toCellX || fromCellY != toCellY {
-                let path = findPath(
-                    fromX: fromCellX, fromY: fromCellY,
-                    toX: toCellX, toY: toCellY,
-                    ignoring: self,
-                    speedType: cachedSpeedType
-                )
-                if path.isEmpty {
-                    moveTargetX = nil
-                    moveTargetY = nil
-                    return false
-                }
-                movePath = path
-            }
-        }
-
-        // Determine the next waypoint
-        let nextX: Double
-        let nextY: Double
-
-        if !movePath.isEmpty {
-            let nextCell = movePath[0]
-            nextX = Double(nextCell.cellX * 24) + 12.0
-            nextY = Double(nextCell.cellY * 24) + 12.0
-        } else {
-            nextX = targetX
-            nextY = targetY
-        }
-
-        let dx = nextX - worldX
-        let dy = nextY - worldY
-        let dist = sqrt(dx * dx + dy * dy)
-
-        if dist > 0.5 {
-            facing = directionToFacing(dx: dx, dy: dy)
-        }
-
-        if dist <= speed {
-            worldX = nextX
-            worldY = nextY
-
-            if !movePath.isEmpty {
-                movePath.removeFirst()
-                if movePath.isEmpty {
-                    let finalDx = targetX - worldX
-                    let finalDy = targetY - worldY
-                    let finalDist = sqrt(finalDx * finalDx + finalDy * finalDy)
-                    if finalDist < 2.0 {
-                        moveTargetX = nil
-                        moveTargetY = nil
-                        return false
-                    }
-                }
-            } else {
-                moveTargetX = nil
-                moveTargetY = nil
-                return false
-            }
-        } else {
-            let moveX = (dx / dist) * speed
-            let moveY = (dy / dist) * speed
-            worldX += moveX
-            worldY += moveY
-        }
-        return true
     }
 }
 

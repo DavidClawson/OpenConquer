@@ -41,8 +41,8 @@ class UISprites {
 /// Consolidates all rendering-related global variables into one object.
 class RenderState {
     // MARK: - Window
-    var windowWidth: Int32 = 960
-    var windowHeight: Int32 = 600
+    var windowWidth: Int32 = 1920
+    var windowHeight: Int32 = 1200
 
     // MARK: - Palette
     var gamePalette: [(r: UInt8, g: UInt8, b: UInt8)] = []

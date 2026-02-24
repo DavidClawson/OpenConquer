@@ -32,7 +32,7 @@ func createAircraft(
     }
 
     let hp = strength ?? data.strength
-    let speed = Double(data.maxSpeed.rawValue) * 0.08
+    let speed = Double(data.maxSpeed.rawValue) * 0.16
 
     let obj = GameObject(
         id: world.allocateId(),
@@ -57,9 +57,15 @@ func createAircraft(
 
 // MARK: - Return to Base
 
-/// Send aircraft back to nearest helipad/airstrip
+/// Send aircraft back to nearest available (unoccupied) helipad/airstrip
 func returnToBase(_ obj: GameObject) {
     guard let world = session.world else { return }
+
+    // Release any previously reserved pad
+    if let oldPad = obj.landingPadId {
+        world.occupiedPads.remove(oldPad)
+        obj.landingPadId = nil
+    }
 
     var bestDist = Double.infinity
     var bestTarget: GameObject? = nil
@@ -68,6 +74,9 @@ func returnToBase(_ obj: GameObject) {
         guard other.kind == .structure && other.house == obj.house && other.strength > 0 else { continue }
         let upper = other.typeName.uppercased()
         guard upper == "HPAD" || upper == "AFLD" else { continue }
+
+        // Skip pads already occupied by another aircraft
+        if world.occupiedPads.contains(other.id) { continue }
 
         let dx = other.worldX - obj.worldX
         let dy = other.worldY - obj.worldY
@@ -79,12 +88,15 @@ func returnToBase(_ obj: GameObject) {
     }
 
     if let base = bestTarget {
+        // Reserve the pad so other aircraft won't target it
+        world.occupiedPads.insert(base.id)
+        obj.landingPadId = base.id
         obj.moveTargetX = base.worldX
         obj.moveTargetY = base.worldY
         obj.movePath = []
         obj.mission = .return_
     } else {
-        // No base to return to — just guard
+        // No available pad — just guard (will retry when a pad frees up)
         obj.mission = .guard_
     }
 }
@@ -114,6 +126,11 @@ extension GameObject {
             if altitude >= flightLevel {
                 altitude = flightLevel
                 isTakingOff = false
+                // Release the landing pad when fully airborne
+                if let padId = landingPadId {
+                    session.world?.occupiedPads.remove(padId)
+                    landingPadId = nil
+                }
             }
             return
         }
@@ -225,8 +242,7 @@ extension GameObject {
                 // Spawn muzzle flash at aircraft position
                 spawnAnimation(.muzzleFlash, worldX: worldX, worldY: worldY)
 
-                let died = target.applyDamage(amount: resolved.damage, warhead: resolved.warhead)
-                target.lastWhoHurtMe = house
+                let died = target.applyDamage(amount: resolved.damage, warhead: resolved.warhead, attackerHouse: house)
 
                 spawnImpactEffect(at: target.worldX, worldY: target.worldY, warhead: resolved.warhead)
 

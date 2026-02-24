@@ -120,7 +120,7 @@ struct ScenarioStructure {
 
 struct ScenarioUnit {
     let house: House
-    let typeName: String   // e.g. "MTNK", "HMMV"
+    let typeName: String   // e.g. "MTNK", "JEEP"
     let strength: Int
     let cell: Int
     let facing: Int
@@ -168,6 +168,8 @@ struct ScenarioData {
     let cellTriggers: [ScenarioCellTrigger]
     let baseBuildings: [ScenarioBaseBuilding]
     let ini: INIFile  // Keep reference for trigger parsing
+    let credits: Int      // Starting credits from [Basic] section
+    let buildLevel: Int   // Tech level cap from [Basic] section (1-15)
 }
 
 // MARK: - Cell Coordinate Helpers
@@ -217,6 +219,16 @@ func loadScenario(_ name: String, from mixManager: MIXFileManager) -> ScenarioDa
     }
 
     let ini = INIFile(data: data)
+
+    // [Basic] section — build level
+    let buildLevel = ini.int("Basic", "BuildLevel", default: 1)
+
+    // Credits: check player house section first ([GoodGuy] or [BadGuy]),
+    // then fall back to [Basic]. C&C stores credits as value/100.
+    let playerSection = name.uppercased().hasPrefix("SCB") ? "BadGuy" : "GoodGuy"
+    let houseCredits = ini.int(playerSection, "Credits", default: -1)
+    let basicCredits = ini.int("Basic", "Credits", default: 0)
+    let credits = (houseCredits >= 0 ? houseCredits : basicCredits) * 100
 
     // [MAP] section
     let theaterStr = ini.string("MAP", "Theater", default: "TEMPERATE")
@@ -346,6 +358,9 @@ func loadScenario(_ name: String, from mixManager: MIXFileManager) -> ScenarioDa
     print("  Structures: \(structures.count), Units: \(units.count), Infantry: \(infantry.count)")
     print("  Waypoints: \(waypoints.count), CellTriggers: \(cellTriggers.count), Base: \(baseBuildings.count)")
 
+    print("  Credits: \(credits), BuildLevel: \(buildLevel)")
+
+
     return ScenarioData(
         theater: theater,
         mapBounds: mapBounds,
@@ -357,6 +372,8 @@ func loadScenario(_ name: String, from mixManager: MIXFileManager) -> ScenarioDa
         waypoints: waypoints,
         cellTriggers: cellTriggers,
         baseBuildings: baseBuildings,
-        ini: ini
+        ini: ini,
+        credits: credits,
+        buildLevel: buildLevel
     )
 }

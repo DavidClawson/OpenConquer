@@ -49,19 +49,22 @@ func makeMainButtons() -> [Button] {
         Button(label: "Start New Game", x: cx, y: startY, w: bw, h: bh) {
             session.currentScreen = DifficultyScreen()
         },
-        Button(label: "Sprite Playground", x: cx, y: startY + 60, w: bw, h: bh) {
+        Button(label: "Load Mission", x: cx, y: startY + 60, w: bw, h: bh) {
+            session.currentScreen = LoadMissionFactionScreen()
+        },
+        Button(label: "Sprite Playground", x: cx, y: startY + 120, w: bw, h: bh) {
             session.spritePlayground.initialize()
             session.currentScreen = SpritePlaygroundScreen()
         },
-        Button(label: "Sound Test", x: cx, y: startY + 120, w: bw, h: bh) {
+        Button(label: "Sound Test", x: cx, y: startY + 180, w: bw, h: bh) {
             session.soundTest.initialize()
             session.currentScreen = SoundTestScreen()
         },
-        Button(label: "Map Viewer", x: cx, y: startY + 180, w: bw, h: bh) {
+        Button(label: "Map Viewer", x: cx, y: startY + 240, w: bw, h: bh) {
             loadMapViewerData(session.scenarioList[session.scenarioIndex])
             session.currentScreen = MapViewerScreen()
         },
-        Button(label: "Exit Game", x: cx, y: startY + 240, w: bw, h: bh) {
+        Button(label: "Exit Game", x: cx, y: startY + 300, w: bw, h: bh) {
             session.running = false
         },
     ]
@@ -97,6 +100,24 @@ func makeFactionButtons() -> [Button] {
         Button(label: "NOD", x: startX + bw + gap, y: cy, w: bw, h: bh) {
             session.selectedFaction = .nod
             session.currentScreen = LaunchingScreen(faction: .nod, difficulty: session.selectedDifficulty)
+        },
+    ]
+}
+
+func makeLoadMissionFactionButtons() -> [Button] {
+    let bw: Int32 = 200
+    let bh: Int32 = 80
+    let gap: Int32 = 60
+    let totalW = bw * 2 + gap
+    let startX = renderState.windowWidth / 2 - totalW / 2
+    let cy: Int32 = 220
+
+    return [
+        Button(label: "GDI", x: startX, y: cy, w: bw, h: bh) {
+            session.currentScreen = LoadMissionListScreen(faction: "GDI")
+        },
+        Button(label: "NOD", x: startX + bw + gap, y: cy, w: bw, h: bh) {
+            session.currentScreen = LoadMissionListScreen(faction: "NOD")
         },
     ]
 }

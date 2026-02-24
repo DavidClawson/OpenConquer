@@ -95,17 +95,33 @@ func buildPassabilityMap() {
         }
     }
 
-    // Mark water/land tiles appropriately for each map
+    // Mark water/land tiles appropriately for each map.
+    // Only pure water templates (W1, W2) are fully land-impassable.
+    // Shore (SH*), river (RV*), falls, ford, and bridge templates are multi-cell
+    // with a mix of land and water sub-tiles. Without per-icon land type data,
+    // we keep them land-passable to avoid blocking large terrain areas.
+    // Water passability: W1, W2, SH*, RV*, FALLS*, FORD* are water-passable for boats.
     for i in 0..<4096 {
         let templateType = Int(mapCells[i].templateType)
         if templateType != 0xFF && templateType < templateTable.count {
             let name = templateTable[templateType].icnName.uppercased()
             if name == "W1" || name == "W2" {
-                // Water: impassable for land, passable for water
+                // Pure open water: impassable for land, passable for water
                 landPassability[i] = false
-                // waterPassability[i] stays true (already true)
+                // waterPassability[i] stays true
+            } else if name.hasPrefix("SH") || name.hasPrefix("RV") ||
+                      name.hasPrefix("FALLS") || name.hasPrefix("FORD") {
+                // Shore/river/falls/ford: passable for BOTH land and water
+                // These multi-cell templates have mixed terrain; keep land-passable
+                // to avoid blocking banks/beaches. Boats can also traverse.
+                // landPassability[i] stays true
+                // waterPassability[i] stays true
+            } else if name.hasPrefix("BRIDGE") {
+                // Bridges: passable by land, not by water
+                // landPassability[i] stays true
+                waterPassability[i] = false
             } else {
-                // Land: passable for land (already true), impassable for water
+                // Regular land: passable for land, impassable for water
                 waterPassability[i] = false
             }
         } else {
@@ -136,6 +152,13 @@ func buildPassabilityMap() {
 func passabilityMap(for speed: SpeedType) -> [Bool] {
     switch speed {
     case .float_: return waterPassability
+    case .hover:
+        // Hovercraft can traverse both land and water (amphibious)
+        var combined = Array(repeating: false, count: 4096)
+        for i in 0..<4096 {
+            combined[i] = landPassability[i] || waterPassability[i]
+        }
+        return combined
     default: return landPassability
     }
 }
@@ -166,9 +189,15 @@ func isCellPassable(cellX: Int, cellY: Int, ignoring: GameObject? = nil, speedTy
     let passMap = passabilityMap(for: speedType)
     if !passMap[cell] { return false }
 
-    // Check dynamic occupancy
+    // Check dynamic occupancy — friendly units can pass through each other
     if let world = session.world, let occupantId = world.occupancy[cell] {
         if let ignoring = ignoring, occupantId == ignoring.id {
+            return true
+        }
+        // Allow passing through friendly units
+        if let ignoring = ignoring,
+           let occupant = world.findObject(id: occupantId),
+           occupant.house == ignoring.house {
             return true
         }
         return false
@@ -177,23 +206,61 @@ func isCellPassable(cellX: Int, cellY: Int, ignoring: GameObject? = nil, speedTy
     return true
 }
 
-// MARK: - A* Pathfinding
+// MARK: - A* Pathfinding (Binary Heap)
 
-private struct PathNode: Comparable {
-    let x: Int
-    let y: Int
-    let g: Double    // Cost from start
-    let f: Double    // g + heuristic
+/// Min-heap priority queue for A* open set. O(log n) insert/extract-min
+/// instead of O(n) linear scan, allowing much larger search spaces.
+private struct PathHeap {
+    private var nodes: [(cell: Int, f: Double)] = []
 
-    static func < (lhs: PathNode, rhs: PathNode) -> Bool {
-        lhs.f < rhs.f
+    var isEmpty: Bool { nodes.isEmpty }
+
+    mutating func insert(cell: Int, f: Double) {
+        nodes.append((cell, f))
+        siftUp(nodes.count - 1)
+    }
+
+    mutating func extractMin() -> Int {
+        let min = nodes[0].cell
+        let last = nodes.count - 1
+        nodes[0] = nodes[last]
+        nodes.removeLast()
+        if !nodes.isEmpty { siftDown(0) }
+        return min
+    }
+
+    private mutating func siftUp(_ i: Int) {
+        var idx = i
+        while idx > 0 {
+            let parent = (idx - 1) / 2
+            if nodes[idx].f < nodes[parent].f {
+                nodes.swapAt(idx, parent)
+                idx = parent
+            } else { break }
+        }
+    }
+
+    private mutating func siftDown(_ i: Int) {
+        var idx = i
+        let count = nodes.count
+        while true {
+            let left = 2 * idx + 1
+            let right = 2 * idx + 2
+            var smallest = idx
+            if left < count && nodes[left].f < nodes[smallest].f { smallest = left }
+            if right < count && nodes[right].f < nodes[smallest].f { smallest = right }
+            if smallest == idx { break }
+            nodes.swapAt(idx, smallest)
+            idx = smallest
+        }
     }
 }
 
 /// Find a path from (fromX, fromY) to (toX, toY) using A* on the 64x64 grid.
+/// Uses a binary heap for O(log n) priority queue operations.
 /// Returns array of (cellX, cellY) waypoints, or empty if no path found.
 func findPath(fromX: Int, fromY: Int, toX: Int, toY: Int,
-              ignoring: GameObject? = nil, maxSteps: Int = 400,
+              ignoring: GameObject? = nil, maxSteps: Int = 1200,
               speedType: SpeedType = .foot) -> [(cellX: Int, cellY: Int)] {
 
     // Quick bounds check
@@ -204,14 +271,13 @@ func findPath(fromX: Int, fromY: Int, toX: Int, toY: Int,
 
     let passMap = passabilityMap(for: speedType)
 
-    // If target is impassable (and it's not our own cell), find nearest passable cell
+    // If target is impassable, find nearest passable cell within 5-cell radius
     let targetCell = toY * 64 + toX
     if !passMap[targetCell] {
-        // Try to find nearest passable cell to target
         var bestX = toX, bestY = toY
         var bestDist = Double.infinity
-        for dy in -3...3 {
-            for dx in -3...3 {
+        for dy in -5...5 {
+            for dx in -5...5 {
                 let nx = toX + dx
                 let ny = toY + dy
                 if nx >= 0 && nx < 64 && ny >= 0 && ny < 64 &&
@@ -226,7 +292,8 @@ func findPath(fromX: Int, fromY: Int, toX: Int, toY: Int,
             }
         }
         if bestDist == Double.infinity { return [] }
-        return findPath(fromX: fromX, fromY: fromY, toX: bestX, toY: bestY, ignoring: ignoring, maxSteps: maxSteps, speedType: speedType)
+        return findPath(fromX: fromX, fromY: fromY, toX: bestX, toY: bestY,
+                       ignoring: ignoring, maxSteps: maxSteps, speedType: speedType)
     }
 
     // Already at target
@@ -238,38 +305,41 @@ func findPath(fromX: Int, fromY: Int, toX: Int, toY: Int,
         (1, -1, 1.414), (1, 1, 1.414), (-1, 1, 1.414), (-1, -1, 1.414)  // Diagonal
     ]
 
-    // Heuristic: Chebyshev distance (since we allow diagonal movement)
+    // Heuristic: octile distance (optimal for 8-directional movement)
     func heuristic(_ x: Int, _ y: Int) -> Double {
         let dx = abs(x - toX)
         let dy = abs(y - toY)
         return Double(max(dx, dy)) + 0.414 * Double(min(dx, dy))
     }
 
-    // Open set as a sorted array (simple priority queue)
-    var openSet: [PathNode] = [PathNode(x: fromX, y: fromY, g: 0, f: heuristic(fromX, fromY))]
-    var cameFrom: [Int: Int] = [:]  // cell -> parent cell
-    var gScore: [Int: Double] = [fromY * 64 + fromX: 0]
-    var closedSet = Set<Int>()
+    // Occupancy cost: cells with units get a soft penalty to route around them
+    let occupancy = session.world?.occupancy
+    let ignoringId = ignoring?.id
+
+    let startCell = fromY * 64 + fromX
+    var openSet = PathHeap()
+    openSet.insert(cell: startCell, f: heuristic(fromX, fromY))
+    var cameFrom = [Int: Int]()          // cell -> parent cell
+    var gScore = [Int: Double]()         // cell -> best known g cost
+    gScore[startCell] = 0
 
     var steps = 0
     while !openSet.isEmpty && steps < maxSteps {
         steps += 1
 
-        // Find node with lowest f score
-        var bestIdx = 0
-        for i in 1..<openSet.count {
-            if openSet[i].f < openSet[bestIdx].f {
-                bestIdx = i
-            }
-        }
-        let current = openSet.remove(at: bestIdx)
-        let currentCell = current.y * 64 + current.x
+        let currentCell = openSet.extractMin()
 
-        if current.x == toX && current.y == toY {
+        // Skip if we already found a better path to this cell
+        guard let currentG = gScore[currentCell] else { continue }
+
+        let cx = currentCell % 64
+        let cy = currentCell / 64
+
+        if cx == toX && cy == toY {
             // Reconstruct path
             var path: [(cellX: Int, cellY: Int)] = []
             var cell = currentCell
-            while cell != fromY * 64 + fromX {
+            while cell != startCell {
                 path.append((cellX: cell % 64, cellY: cell / 64))
                 guard let parent = cameFrom[cell] else { break }
                 cell = parent
@@ -278,35 +348,39 @@ func findPath(fromX: Int, fromY: Int, toX: Int, toY: Int,
             return path
         }
 
-        closedSet.insert(currentCell)
-
         for dir in dirs {
-            let nx = current.x + dir.dx
-            let ny = current.y + dir.dy
+            let nx = cx + dir.dx
+            let ny = cy + dir.dy
 
             guard nx >= 0 && nx < 64 && ny >= 0 && ny < 64 else { continue }
 
             let neighborCell = ny * 64 + nx
-            if closedSet.contains(neighborCell) { continue }
 
-            // Check passability for this speed type
+            // Check passability
             if !passMap[neighborCell] { continue }
 
             // For diagonal moves, ensure both adjacent cardinal cells are passable
+            // (prevents cutting through wall corners)
             if dir.dx != 0 && dir.dy != 0 {
-                let adjCell1 = current.y * 64 + nx
-                let adjCell2 = ny * 64 + current.x
-                if !passMap[adjCell1] || !passMap[adjCell2] { continue }
+                if !passMap[cy * 64 + nx] || !passMap[ny * 64 + cx] { continue }
             }
 
-            let tentativeG = current.g + dir.cost
+            // Base movement cost + soft penalty for occupied cells
+            var moveCost = dir.cost
+            if let occ = occupancy, let occupantId = occ[neighborCell] {
+                if occupantId != ignoringId {
+                    moveCost += 3.0  // Soft penalty: prefer unoccupied cells
+                }
+            }
+
+            let tentativeG = currentG + moveCost
             let existingG = gScore[neighborCell] ?? Double.infinity
 
             if tentativeG < existingG {
                 gScore[neighborCell] = tentativeG
                 cameFrom[neighborCell] = currentCell
                 let f = tentativeG + heuristic(nx, ny)
-                openSet.append(PathNode(x: nx, y: ny, g: tentativeG, f: f))
+                openSet.insert(cell: neighborCell, f: f)
             }
         }
     }

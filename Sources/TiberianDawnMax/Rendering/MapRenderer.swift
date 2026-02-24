@@ -289,8 +289,6 @@ func getTerrainTexture(_ renderer: OpaquePointer?, typeName: String, theater: Th
 /// Some units have INI names that differ from their SHP filenames.
 /// This maps INI names to the actual SHP filename stems.
 let spriteNameOverrides: [String: String] = [
-    "HMMV": "JEEP",       // Humm-Vee uses JEEP.SHP
-    "HOVER": "LST",       // Hovercraft uses LST.SHP (Landing Ship Tank)
     "MUZZFLSH": "GUNFIRE", // Muzzle flash → remastered GUNFIRE VFX
 ]
 
@@ -300,12 +298,12 @@ func getObjectTexture(_ renderer: OpaquePointer?, typeName: String, frame: Int, 
     // Resolve sprite name (some units/effects have different INI vs asset names)
     let spriteName = spriteNameOverrides[upperName] ?? upperName
 
-    // Try remastered sprite first (hi-res PNG) — try both original and override names
-    if let remastered = getRemasteredTexture(renderer, typeName: upperName, frame: frame) {
+    // Try remastered sprite first (hi-res PNG) — with house color hue-shifting
+    if let remastered = getRemasteredTextureWithHouse(renderer, typeName: upperName, frame: frame, house: house) {
         return remastered
     }
     if spriteName != upperName,
-       let remastered = getRemasteredTexture(renderer, typeName: spriteName, frame: frame) {
+       let remastered = getRemasteredTextureWithHouse(renderer, typeName: spriteName, frame: frame, house: house) {
         return remastered
     }
 
@@ -506,8 +504,7 @@ func renderMapViewer(_ renderer: OpaquePointer?) {
         return
     }
 
-    // === Pass 2: Overlays (tiberium, walls, roads) as SHP sprites ===
-    // Build wall connectivity lookup so walls pick connected frames
+    // === Pass 2a: Non-tiberium overlays (walls, roads) as SHP sprites ===
     let wallTypes: Set<String> = ["SBAG", "CYCL", "BRIK", "BARB", "WOOD"]
     var wallCells: [Int: String] = [:]
     for overlay in scenario.overlays {
@@ -518,13 +515,15 @@ func renderMapViewer(_ renderer: OpaquePointer?) {
     }
 
     for overlay in scenario.overlays {
+        let upper = overlay.typeName.uppercased()
+        // Skip tiberium overlays — they're rendered dynamically below
+        if upper.hasPrefix("TI") { continue }
+
         let pos = cellToPixel(overlay.cell)
         let screenX = Int32(pos.px - renderState.cameraX)
         let screenY = Int32(pos.py - renderState.cameraY)
 
         if screenX > vw || screenY > vh || screenX + 24 < 0 || screenY + 24 < 0 { continue }
-
-        let upper = overlay.typeName.uppercased()
 
         // Wall overlays: compute frame from neighbor connectivity (4-bit N/E/S/W mask)
         var frameIdx = 0
@@ -540,15 +539,36 @@ func renderMapViewer(_ renderer: OpaquePointer?) {
             var dstRect = SDL_Rect(x: screenX, y: screenY, w: Int32(info.width), h: Int32(info.height))
             SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
         } else {
-            if upper.hasPrefix("TI") {
-                SDL_SetRenderDrawColor(renderer, 0, 200, 0, 120)
-            } else if wallTypes.contains(upper) {
+            if wallTypes.contains(upper) {
                 SDL_SetRenderDrawColor(renderer, 150, 150, 150, 200)
             } else {
                 SDL_SetRenderDrawColor(renderer, 80, 80, 80, 140)
             }
             var rect = SDL_Rect(x: screenX + 2, y: screenY + 2, w: 20, h: 20)
             SDL_RenderFillRect(renderer, &rect)
+        }
+    }
+
+    // === Pass 2b: Tiberium from dynamic map data (grows/spreads over time) ===
+    if let world = session.world {
+        for cell in world.map.tiberiumCells {
+            let pos = cellToPixel(cell)
+            let screenX = Int32(pos.px - renderState.cameraX)
+            let screenY = Int32(pos.py - renderState.cameraY)
+
+            if screenX > vw || screenY > vh || screenX + 24 < 0 || screenY + 24 < 0 { continue }
+
+            let density = world.map.tiberiumDensity[cell] ?? 1
+            let tiName = "TI\(density)"
+
+            if let info = getObjectTexture(renderer, typeName: tiName, frame: 0, house: .neutral, theater: theater) {
+                var dstRect = SDL_Rect(x: screenX, y: screenY, w: Int32(info.width), h: Int32(info.height))
+                SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
+            } else {
+                SDL_SetRenderDrawColor(renderer, 0, 200, 0, 120)
+                var rect = SDL_Rect(x: screenX + 2, y: screenY + 2, w: 20, h: 20)
+                SDL_RenderFillRect(renderer, &rect)
+            }
         }
     }
 

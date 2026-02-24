@@ -18,6 +18,7 @@ class ProductionState {
     var sidebarTab: Int = 0
     var isRepairMode: Bool = false
     var isSellMode: Bool = false
+    var isAttackMoveMode: Bool = false
 
     /// Animate displayedCredits toward sidebarCredits each game tick.
     /// Ported from Vanilla Conquer credits.cpp CreditClass::AI.
@@ -60,6 +61,15 @@ class CombatState {
     var activeProjectiles: [Projectile] = []
     var nextProjectileId: Int = 1
     var activeAnimations: [GameAnimation] = []
+
+    // EVA speech rate limiting — tracks last tick each VoxType was spoken
+    var lastEVATick: [VoxType: Int] = [:]
+
+    // Track previous low-power state for edge-triggered EVA announcement
+    var wasLowPower: Bool = false
+
+    // Track previous sidebar build options for "new options" detection
+    var previousBuildOptionCount: Int = 0
 }
 
 // MARK: - GameSession
@@ -78,6 +88,7 @@ class GameSession {
 
     // MARK: - Game World
     var world: GameWorld? = nil
+    var scenarioBuildLevel: Int = 99  // Tech level cap (from scenario INI)
 
     // MARK: - Game Tick Timing
     var tickAccumulator: UInt32 = 0
@@ -137,6 +148,10 @@ class GameSession {
     var isSellMode: Bool {
         get { production.isSellMode }
         set { production.isSellMode = newValue }
+    }
+    var isAttackMoveMode: Bool {
+        get { production.isAttackMoveMode }
+        set { production.isAttackMoveMode = newValue }
     }
     func tickCreditsDisplay() { production.tickCreditsDisplay() }
 
@@ -202,6 +217,33 @@ class GameSession {
     var activeAnimations: [GameAnimation] {
         get { combat.activeAnimations }
         set { combat.activeAnimations = newValue }
+    }
+    var lastEVATick: [VoxType: Int] {
+        get { combat.lastEVATick }
+        set { combat.lastEVATick = newValue }
+    }
+    var wasLowPower: Bool {
+        get { combat.wasLowPower }
+        set { combat.wasLowPower = newValue }
+    }
+    var previousBuildOptionCount: Int {
+        get { combat.previousBuildOptionCount }
+        set { combat.previousBuildOptionCount = newValue }
+    }
+
+    /// Speak an EVA line with rate limiting. `cooldownTicks` is the minimum gap
+    /// between repeats of the same VoxType (default 90 ticks = ~6 seconds).
+    func speakEVA(_ vox: VoxType, cooldownTicks: Int = 90) {
+        guard let world = world else {
+            audioManager.speak(vox)
+            return
+        }
+        let tick = world.tickCount
+        if let last = lastEVATick[vox], tick - last < cooldownTicks {
+            return  // Rate limited
+        }
+        lastEVATick[vox] = tick
+        audioManager.speak(vox)
     }
 }
 

@@ -52,7 +52,7 @@ extension GameObject {
         case "APC":  return 5
         case "TRAN": return 5   // Chinook
         case "C17":  return 5   // Cargo plane
-        case "HOVER": return 5  // Hovercraft
+        case "LST": return 5    // Hovercraft (Landing Ship Tank)
         default:     return 0
         }
     }
@@ -151,8 +151,10 @@ func doReinforcements(teamName: String) {
         return
     }
 
-    // Determine delivery method by examining team composition
+    // Determine delivery method by examining team composition (VC reinf.cpp logic)
     var hasAirTransport = false
+    var hasWaterTransport = false
+    var hasGunboat = false
 
     for slot in teamType.classSlots {
         let upper = slot.typeName.uppercased()
@@ -161,10 +163,20 @@ func doReinforcements(teamName: String) {
                 hasAirTransport = true
             }
         }
+        if let ut = UnitType.from(iniName: upper), let data = unitTypeDataTable[ut] {
+            if data.isTransporter && data.speed == .hover {
+                hasWaterTransport = true  // Hovercraft/LST
+            }
+            if upper == "BOAT" {
+                hasGunboat = true  // Gunboat arrives via SOURCE_SHIPPING
+            }
+        }
     }
 
     if hasAirTransport {
         doAirReinforcement(teamType: teamType)
+    } else if hasWaterTransport || hasGunboat {
+        doBeachReinforcement(teamType: teamType, isGunboat: hasGunboat)
     } else {
         doGroundReinforcement(teamType: teamType)
     }
@@ -311,6 +323,158 @@ private func doAirReinforcement(teamType: TeamType) {
     }
 
     // Announce reinforcements if this is the player's house
+    if teamType.house == world.playerHouse {
+        audioManager.speak(.reinforcements)
+    }
+}
+
+// MARK: - Beach Reinforcement (Hovercraft / LST)
+
+/// Deliver reinforcements via beach landing (hovercraft/LST) or shipping lane (gunboat).
+/// Ported from VC reinf.cpp SOURCE_BEACH / SOURCE_SHIPPING logic.
+///
+/// Hovercraft: Spawns at southern water edge, sails north to beach, unloads cargo.
+/// Gunboat: Spawns at eastern water edge, sails west across map.
+private func doBeachReinforcement(teamType: TeamType, isGunboat: Bool) {
+    guard let world = session.world else { return }
+    let bounds = world.mapBounds ?? MapBounds(x: 0, y: 0, width: 64, height: 64)
+
+    if isGunboat {
+        // SOURCE_SHIPPING: Gunboat arrives from east edge, sails west
+        // Find a water row for the gunboat (scan from top of map for water rows)
+        var shippingRow = bounds.y + bounds.height / 2
+        for y in bounds.y..<(bounds.y + bounds.height) {
+            let rightEdgeCell = y * 64 + bounds.x + bounds.width - 1
+            if rightEdgeCell < 4096 && waterPassability[rightEdgeCell] {
+                shippingRow = y
+                break
+            }
+        }
+
+        let spawnX = Double((bounds.x + bounds.width) * 24) + 24.0
+        let spawnY = Double(shippingRow * 24) + 12.0
+
+        for slot in teamType.classSlots {
+            for _ in 0..<slot.desiredCount {
+                let speed = resolveSpeed(typeName: slot.typeName, kind: .unit)
+                let hp = resolveStrength(typeName: slot.typeName, kind: .unit, scenarioStrength: 256)
+                let obj = GameObject(
+                    id: world.allocateId(),
+                    typeName: slot.typeName,
+                    house: teamType.house,
+                    kind: .unit,
+                    worldX: spawnX, worldY: spawnY,
+                    facing: 192,  // DIR_W
+                    strength: hp,
+                    mission: .hunt,
+                    speed: speed
+                )
+                obj.isALoaner = true
+                // Destination: west edge of map along same row (stay within bounds)
+                obj.moveTargetX = Double(bounds.x * 24) + 12.0
+                obj.moveTargetY = spawnY
+                world.addObject(obj)
+            }
+        }
+
+        print("Reinforcements: Gunboat arriving via shipping from east edge at row \(shippingRow)")
+    } else {
+        // SOURCE_BEACH: Hovercraft arrives from south, lands on beach.
+        // Scan columns from CENTER outward to find a beach (water→land transition),
+        // preferring columns near the middle of the map for natural-looking approach.
+        var beachCell: Int? = nil
+        let centerX = bounds.x + bounds.width / 2
+        for offset in 0..<bounds.width {
+            // Alternate left and right from center
+            let candidates = offset == 0 ? [centerX] : [centerX + offset, centerX - offset]
+            for x in candidates {
+                if x < bounds.x || x >= bounds.x + bounds.width { continue }
+
+                // Scan upward from bottom to find where water meets land
+                var foundWater = false
+                for y in stride(from: bounds.y + bounds.height - 1, through: bounds.y, by: -1) {
+                    let cell = y * 64 + x
+                    guard cell >= 0 && cell < 4096 else { continue }
+                    if waterPassability[cell] {
+                        foundWater = true
+                    } else if foundWater && landPassability[cell] {
+                        // Found land cell above water — this is a beach
+                        beachCell = cell
+                        break
+                    }
+                }
+                if beachCell != nil { break }
+            }
+            if beachCell != nil { break }
+        }
+
+        // Fallback: if no beach found, use waypoint 25 or center of map
+        let landingCell = beachCell ?? session.scenarioWaypoints[25]
+            ?? ((bounds.y + bounds.height / 2) * 64 + bounds.x + bounds.width / 2)
+
+        let landingPos = cellToPixel(landingCell)
+        let destX = Double(landingPos.px) + 12.0
+        let destY = Double(landingPos.py) + 12.0
+
+        // Spawn hovercraft off the south edge of the map, directly below the landing cell
+        let landingCellX = landingCell % 64
+        let spawnY = Double(min(63, bounds.y + bounds.height) * 24) + 48.0
+        let spawnX = Double(landingCellX * 24) + 12.0
+
+        // Separate transport from cargo
+        var transportObj: GameObject? = nil
+        var cargoObjects: [GameObject] = []
+
+        for slot in teamType.classSlots {
+            for i in 0..<slot.desiredCount {
+                let kind = slot.kind
+                let speed = resolveSpeed(typeName: slot.typeName, kind: kind)
+                let hp = resolveStrength(typeName: slot.typeName, kind: kind, scenarioStrength: 256)
+
+                let upper = slot.typeName.uppercased()
+                let isTransport: Bool
+                if let ut = UnitType.from(iniName: upper), let data = unitTypeDataTable[ut] {
+                    isTransport = data.isTransporter
+                } else {
+                    isTransport = false
+                }
+
+                let obj = GameObject(
+                    id: world.allocateId(),
+                    typeName: slot.typeName,
+                    house: teamType.house,
+                    kind: kind,
+                    worldX: spawnX + Double(i) * 12.0, worldY: spawnY,
+                    facing: 0,  // DIR_N — facing north (toward beach)
+                    strength: hp,
+                    mission: .move,
+                    speed: speed
+                )
+
+                if isTransport {
+                    transportObj = obj
+                    obj.isALoaner = true
+                } else {
+                    cargoObjects.append(obj)
+                }
+
+                world.addObject(obj)
+            }
+        }
+
+        // Load cargo into hovercraft and send it to the beach
+        if let transport = transportObj {
+            for cargo in cargoObjects {
+                transport.loadPassenger(cargo)
+            }
+            transport.moveTargetX = destX
+            transport.moveTargetY = destY
+            transport.mission = .unload
+        }
+
+        print("Reinforcements: Hovercraft approaching beach from south at (\(Int(spawnX)), \(Int(spawnY))) -> cell \(landingCell)")
+    }
+
     if teamType.house == world.playerHouse {
         audioManager.speak(.reinforcements)
     }
@@ -537,6 +701,17 @@ extension GameObject {
                             }
                             moveTargetX = exitX
                             moveTargetY = worldY
+                            mission = .move
+                        } else if cachedSpeedType == .hover || cachedSpeedType == .float_ {
+                            // Water transport (hovercraft): sail south off map
+                            if let bounds = world.mapBounds {
+                                moveTargetX = worldX
+                                moveTargetY = Double((bounds.y + bounds.height + 2) * 24)
+                            } else {
+                                moveTargetY = 64.0 * 24.0 + 48.0
+                                moveTargetX = worldX
+                            }
+                            facing = 128  // DIR_S
                             mission = .move
                         } else {
                             // Ground transport: drive off map

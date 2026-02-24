@@ -2,7 +2,9 @@ import Foundation
 
 // MARK: - Speed Resolution from Type Data
 // MPH values from VC are converted to pixels per tick at 15 FPS
-// Formula: MPH * 0.08 gives a good gameplay feel
+// Original C&C: MPH in leptons/tick, 1 lepton = 24/256 ≈ 0.09375 px
+// We use 0.16 to compensate for modern displays being much larger than 320x200
+// (original visible area was ~13x8 cells; modern screens show ~80x45 cells)
 
 func resolveSpeed(typeName: String, kind: ObjectKind) -> Double {
     let upper = typeName.uppercased()
@@ -30,8 +32,8 @@ func resolveSpeed(typeName: String, kind: ObjectKind) -> Double {
     case .structure:
         return 0.0
     }
-    // Convert MPH to pixels/tick: scale factor tuned for 15 FPS gameplay
-    return Double(mph) * 0.08
+    // Convert MPH to pixels/tick: 2x original to compensate for large modern displays
+    return Double(mph) * 0.16
 }
 
 func resolveStrength(typeName: String, kind: ObjectKind, scenarioStrength: Int) -> Int {
@@ -77,6 +79,11 @@ func initGameWorld(scenario: ScenarioData, scenarioName: String) {
     let world = GameWorld()
     world.theater = scenario.theater
     world.mapBounds = scenario.mapBounds
+    world.map.scenarioData = scenario
+
+    // Clear stale texture caches (theater may differ between scenarios/viewer)
+    renderState.objectFailedSHPs.removeAll()
+    renderState.terrainFailedSHPs.removeAll()
 
     // Spawn structures
     for structure in scenario.structures {
@@ -125,6 +132,22 @@ func initGameWorld(scenario: ScenarioData, scenarioName: String) {
         if unit.trigger != "None" && !unit.trigger.isEmpty {
             obj.triggerName = unit.trigger
         }
+
+        // VC special case: Gunboat always faces west, hunts toward west edge, is a loaner
+        if unit.typeName.uppercased() == "BOAT" {
+            obj.facing = 192  // DIR_W
+            obj.turretFacing = 192
+            obj.mission = .hunt
+            obj.isALoaner = true
+            // Set destination to western map edge along same row (stay within bounds)
+            let boatCellY = unit.cell / 64
+            if let bounds = world.mapBounds {
+                let westCellX = bounds.x  // Stay within map bounds
+                obj.moveTargetX = Double(westCellX * 24) + 12.0
+                obj.moveTargetY = Double(boatCellY * 24) + 12.0
+            }
+        }
+
         world.addObject(obj)
     }
 
@@ -207,6 +230,11 @@ func initGameWorld(scenario: ScenarioData, scenarioName: String) {
 
     // Reset super weapons
     resetSuperWeapons()
+
+    // Reset EVA state
+    session.lastEVATick.removeAll()
+    session.wasLowPower = false
+    session.previousBuildOptionCount = getAvailableStructures().count + getAvailableUnits().count
 
     // Parse and initialize triggers
     parseTriggers(from: scenario.ini)

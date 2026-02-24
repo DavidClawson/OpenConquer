@@ -37,12 +37,12 @@ enum UnitType: Int, CaseIterable {
         case .vice:      return "VICE"
         case .apc:       return "APC"
         case .mlrs:      return "MLRS"
-        case .jeep:      return "HMMV"
+        case .jeep:      return "JEEP"
         case .buggy:     return "BGGY"
         case .harvester: return "HARV"
         case .arty:      return "ARTY"
         case .msam:      return "MSAM"
-        case .hover:     return "HOVER"
+        case .hover:     return "LST"
         case .mhq:       return "MHQ"
         case .gunboat:   return "BOAT"
         case .mcv:       return "MCV"
@@ -512,6 +512,64 @@ enum MissionType: Int, CaseIterable {
         case .repair:          return "Repair"
         case .missile:         return "Missile"
         case .none:            return "None"
+        }
+    }
+
+    /// Convert to the runtime Mission enum used by GameObject
+    var toMission: Mission {
+        switch self {
+        case .sleep:          return .sleep
+        case .attack:         return .attack
+        case .move:           return .move
+        case .retreat:        return .retreat
+        case .guard_:         return .guard_
+        case .sticky:         return .sticky
+        case .enter:          return .enter
+        case .capture:        return .capture
+        case .harvest:        return .harvest
+        case .guardArea:      return .guardArea
+        case .return_:        return .return_
+        case .stop:           return .stop
+        case .ambush:         return .ambush
+        case .hunt:           return .hunt
+        case .timedHunt:      return .timedHunt
+        case .unload:         return .unload
+        case .sabotage:       return .guard_  // No runtime sabotage; fallback to guard
+        case .construction:   return .construction
+        case .deconstruction: return .deconstruction
+        case .repair:         return .repair
+        case .missile:        return .missile
+        case .none:           return .guard_  // No runtime "none"; fallback to guard
+        }
+    }
+}
+
+extension Mission {
+    /// Convert to the type-data MissionType enum (returns nil for missions not in MissionType)
+    var toMissionType: MissionType? {
+        switch self {
+        case .sleep:          return .sleep
+        case .attack:         return .attack
+        case .move:           return .move
+        case .retreat:        return .retreat
+        case .guard_:         return .guard_
+        case .sticky:         return .sticky
+        case .enter:          return .enter
+        case .capture:        return .capture
+        case .harvest:        return .harvest
+        case .guardArea:      return .guardArea
+        case .return_:        return .return_
+        case .stop:           return .stop
+        case .ambush:         return .ambush
+        case .hunt:           return .hunt
+        case .timedHunt:      return .timedHunt
+        case .unload:         return .unload
+        case .construction:   return .construction
+        case .deconstruction: return .deconstruction
+        case .repair:         return .repair
+        case .missile:        return .missile
+        case .selling:        return nil  // No MissionType equivalent
+        case .sabotage:       return nil  // No MissionType equivalent
         }
     }
 }

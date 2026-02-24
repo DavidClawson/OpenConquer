@@ -211,8 +211,12 @@ class CampaignManager {
         scenarioData = scenario
         initGameWorld(scenario: scenario, scenarioName: scenName)
 
-        // Apply carry-over credits
-        session.sidebarCredits += state.carryOverCredits
+        // Set credits from scenario INI (+ carry-over from previous mission)
+        session.sidebarCredits = scenario.credits + state.carryOverCredits
+        session.displayedCredits = session.sidebarCredits
+
+        // Set build level from scenario INI
+        session.scenarioBuildLevel = scenario.buildLevel
 
         // Reset score for new mission
         score.reset()
@@ -357,6 +361,41 @@ struct SaveGameData: Codable {
     // Camera
     let cameraX: Double
     let cameraY: Double
+
+    // --- V2 fields (optional for backward compat with V1 saves) ---
+
+    // Control groups
+    var controlGroups: [[Int]]?
+
+    // Map state: tiberium
+    var tiberiumCells: [Int]?
+    var tiberiumDensity: [SavedTiberiumEntry]?
+    var tiberiumScan: Int?
+    var isForwardScan: Bool?
+
+    // Map state: smudges
+    var smudges: [SavedSmudge]?
+
+    // Map state: fog
+    var fogState: [Int]?
+
+    // Production queues
+    var unitBuildQueue: SavedProductionQueue?
+    var structureBuildQueue: SavedProductionQueue?
+
+    // Super weapon charge state
+    var ionCannon: SavedSuperWeapon?
+    var airStrike: SavedSuperWeapon?
+    var nukeStrike: SavedSuperWeapon?
+
+    // Active teams
+    var activeTeams: [SavedActiveTeam]?
+
+    // Scripting state
+    var triggerWinState: String?
+    var allowWinFlag: Bool?
+    var aiTickCounter: Int?
+    var scenarioBuildLevel: Int?
 }
 
 struct SavedObject: Codable {
@@ -376,6 +415,63 @@ struct SavedObject: Codable {
     let altitude: Int
     let ammo: Int
     let subCell: Int
+
+    // --- V2 fields (optional for backward compat) ---
+
+    // Movement
+    var moveTargetX: Double?
+    var moveTargetY: Double?
+    var movePath: [SavedCell]?
+    var navTargetId: Int?
+    var group: Int?
+    var isAttackMoving: Bool?
+    var moveWaypoints: [SavedCell]?
+
+    // Combat
+    var attackTarget: Int?
+    var suspendedTarget: Int?
+    var reloadTimer: Int?
+    var lastFireTick: Int?
+    var lastDamagedTick: Int?
+
+    // Mission state
+    var turretFacing: Int?
+    var missionQueue: String?
+    var suspendedMission: String?
+    var missionStatus: Int?
+
+    // Cargo / transport
+    var passengers: [Int]?
+    var isALoaner: Bool?
+
+    // Harvesting
+    var tiberiumLoad: Int?
+
+    // Infantry
+    var fear: UInt8?
+    var isProne: Bool?
+
+    // Building
+    var isRepairing: Bool?
+    var buildUpFrame: Int?
+    var buildUpTotalFrames: Int?
+    var buildUpDelay: Int?
+    var samDeployState: Int?
+    var powerOutput: Int?
+    var powerDrain: Int?
+
+    // Aircraft
+    var isLanding: Bool?
+    var isTakingOff: Bool?
+
+    // Flags
+    var isInLimbo: Bool?
+    var isTethered: Bool?
+}
+
+struct SavedCell: Codable {
+    let x: Int
+    let y: Int
 }
 
 struct SavedTrigger: Codable {
@@ -383,6 +479,51 @@ struct SavedTrigger: Codable {
     let isActive: Bool
     let data: Int
     let attachCount: Int
+}
+
+struct SavedTiberiumEntry: Codable {
+    let cell: Int
+    let density: Int
+}
+
+struct SavedSmudge: Codable {
+    let type: String
+    let cell: Int
+}
+
+struct SavedProductionQueue: Codable {
+    var typeName: String?
+    var progress: Int?
+    var cost: Int?
+    var totalTicks: Int?
+    var isOnHold: Bool?
+}
+
+struct SavedSuperWeapon: Codable {
+    var isPresent: Bool
+    var isReady: Bool
+    var isOneTime: Bool
+    var isSuspended: Bool
+    var chargeRemaining: Int
+    var suspendedTime: Int
+}
+
+struct SavedActiveTeam: Codable {
+    let typeName: String
+    let members: [Int]
+    let isMoving: Bool
+    let isFullStrength: Bool
+    let isUnderStrength: Bool
+    let isHasBeen: Bool
+    let currentMission: Int
+    let isNextMission: Bool
+    let centerX: Double
+    let centerY: Double
+    let target: Int?
+    let targetCell: Int?
+    let missionTimeout: Int
+    let isSuspended: Bool
+    let suspendTimer: Int
 }
 
 // MARK: - Save Directory
@@ -423,7 +564,48 @@ func saveGame(slot: Int, description: String = "") -> Bool {
             isAircraft: obj.isAircraft,
             altitude: obj.altitude,
             ammo: obj.ammo,
-            subCell: obj.subCell
+            subCell: obj.subCell,
+            // V2 movement
+            moveTargetX: obj.moveTargetX,
+            moveTargetY: obj.moveTargetY,
+            movePath: obj.movePath.isEmpty ? nil : obj.movePath.map { SavedCell(x: $0.cellX, y: $0.cellY) },
+            navTargetId: obj.navTargetId,
+            group: obj.group >= 0 ? obj.group : nil,
+            isAttackMoving: obj.isAttackMoving ? true : nil,
+            moveWaypoints: obj.moveWaypoints.isEmpty ? nil : obj.moveWaypoints.map { SavedCell(x: Int($0.x), y: Int($0.y)) },
+            // V2 combat
+            attackTarget: obj.attackTarget,
+            suspendedTarget: obj.suspendedTarget,
+            reloadTimer: obj.reloadTimer > 0 ? obj.reloadTimer : nil,
+            lastFireTick: obj.lastFireTick > 0 ? obj.lastFireTick : nil,
+            lastDamagedTick: obj.lastDamagedTick > 0 ? obj.lastDamagedTick : nil,
+            // V2 mission state
+            turretFacing: obj.turretFacing != obj.facing ? obj.turretFacing : nil,
+            missionQueue: obj.missionQueue?.saveName,
+            suspendedMission: obj.suspendedMission?.saveName,
+            missionStatus: obj.missionStatus != 0 ? obj.missionStatus : nil,
+            // V2 cargo
+            passengers: obj.passengers.isEmpty ? nil : obj.passengers,
+            isALoaner: obj.isALoaner ? true : nil,
+            // V2 harvesting
+            tiberiumLoad: obj.tiberiumLoad > 0 ? obj.tiberiumLoad : nil,
+            // V2 infantry
+            fear: obj.fear > 0 ? obj.fear : nil,
+            isProne: obj.isProne ? true : nil,
+            // V2 building
+            isRepairing: obj.isRepairing ? true : nil,
+            buildUpFrame: obj.buildUpFrame >= 0 ? obj.buildUpFrame : nil,
+            buildUpTotalFrames: obj.buildUpTotalFrames > 0 ? obj.buildUpTotalFrames : nil,
+            buildUpDelay: obj.buildUpDelay > 0 ? obj.buildUpDelay : nil,
+            samDeployState: obj.samDeployState > 0 ? obj.samDeployState : nil,
+            powerOutput: obj.powerOutput > 0 ? obj.powerOutput : nil,
+            powerDrain: obj.powerDrain > 0 ? obj.powerDrain : nil,
+            // V2 aircraft
+            isLanding: obj.isLanding ? true : nil,
+            isTakingOff: obj.isTakingOff ? true : nil,
+            // V2 flags
+            isInLimbo: obj.isInLimbo ? true : nil,
+            isTethered: obj.isTethered ? true : nil
         )
         savedObjects.append(saved)
     }
@@ -439,10 +621,68 @@ func saveGame(slot: Int, description: String = "") -> Bool {
         ))
     }
 
+    // Serialize tiberium density
+    let map = world.map
+    var tiberiumDensityEntries: [SavedTiberiumEntry] = []
+    for (cell, density) in map.tiberiumDensity {
+        tiberiumDensityEntries.append(SavedTiberiumEntry(cell: cell, density: density))
+    }
+
+    // Serialize smudges
+    let savedSmudges = map.smudges.map { SavedSmudge(type: $0.type.rawValue, cell: $0.cell) }
+
+    // Serialize fog state as compact int array (0=unexplored, 1=explored, 2=visible)
+    let fogInts = map.fogState.map { fog -> Int in
+        switch fog {
+        case .unexplored: return 0
+        case .explored: return 1
+        case .visible: return 2
+        }
+    }
+
+    // Serialize production queues
+    let savedUnitQueue = serializeProductionQueue(session.unitBuildQueue)
+    let savedStructQueue = serializeProductionQueue(session.structureBuildQueue)
+
+    // Serialize super weapons
+    let savedIonCannon = serializeSuperWeapon(session.playerIonCannon)
+    let savedAirStrike = serializeSuperWeapon(session.playerAirStrike)
+    let savedNukeStrike = serializeSuperWeapon(session.playerNukeStrike)
+
+    // Serialize active teams
+    var savedTeams: [SavedActiveTeam] = []
+    for team in session.activeTeams {
+        savedTeams.append(SavedActiveTeam(
+            typeName: team.type.name,
+            members: team.members,
+            isMoving: team.isMoving,
+            isFullStrength: team.isFullStrength,
+            isUnderStrength: team.isUnderStrength,
+            isHasBeen: team.isHasBeen,
+            currentMission: team.currentMission,
+            isNextMission: team.isNextMission,
+            centerX: team.centerX,
+            centerY: team.centerY,
+            target: team.target,
+            targetCell: team.targetCell,
+            missionTimeout: team.missionTimeout,
+            isSuspended: team.isSuspended,
+            suspendTimer: team.suspendTimer
+        ))
+    }
+
+    // Serialize win state
+    let winStateStr: String
+    switch session.triggerWinState {
+    case .playing: winStateStr = "playing"
+    case .won: winStateStr = "won"
+    case .lost: winStateStr = "lost"
+    }
+
     let bounds = world.mapBounds ?? MapBounds(x: 0, y: 0, width: 64, height: 64)
 
-    let saveData = SaveGameData(
-        version: 1,
+    var saveData = SaveGameData(
+        version: 2,
         description: desc,
         saveDate: Date(),
         scenarioName: session.currentScenarioName ?? session.campaignState.scenarioName,
@@ -472,6 +712,24 @@ func saveGame(slot: Int, description: String = "") -> Bool {
         cameraX: renderState.gameCameraX,
         cameraY: renderState.gameCameraY
     )
+    // V2 fields
+    saveData.controlGroups = world.controlGroups
+    saveData.tiberiumCells = Array(map.tiberiumCells)
+    saveData.tiberiumDensity = tiberiumDensityEntries
+    saveData.tiberiumScan = map.tiberiumScan
+    saveData.isForwardScan = map.isForwardScan
+    saveData.smudges = savedSmudges
+    saveData.fogState = fogInts
+    saveData.unitBuildQueue = savedUnitQueue
+    saveData.structureBuildQueue = savedStructQueue
+    saveData.ionCannon = savedIonCannon
+    saveData.airStrike = savedAirStrike
+    saveData.nukeStrike = savedNukeStrike
+    saveData.activeTeams = savedTeams
+    saveData.triggerWinState = winStateStr
+    saveData.allowWinFlag = session.allowWinFlag
+    saveData.aiTickCounter = session.aiTickCounter
+    saveData.scenarioBuildLevel = session.scenarioBuildLevel
 
     do {
         let encoder = JSONEncoder()
@@ -501,10 +759,11 @@ func loadGame(slot: Int) -> Bool {
         let decoder = JSONDecoder()
         let saveData = try decoder.decode(SaveGameData.self, from: jsonData)
 
-        guard saveData.version == 1 else {
+        guard saveData.version >= 1 && saveData.version <= 2 else {
             print("LoadGame: Unsupported save version \(saveData.version)")
             return false
         }
+        let isV2 = saveData.version >= 2
 
         // First load the scenario to get terrain, overlays, triggers etc.
         let scenName = saveData.scenarioName
@@ -544,6 +803,45 @@ func loadGame(slot: Int) -> Bool {
             obj.isAircraft = saved.isAircraft
             obj.altitude = saved.altitude
             obj.ammo = saved.ammo
+
+            // V2 fields
+            obj.moveTargetX = saved.moveTargetX
+            obj.moveTargetY = saved.moveTargetY
+            if let path = saved.movePath {
+                obj.movePath = path.map { (cellX: $0.x, cellY: $0.y) }
+            }
+            obj.navTargetId = saved.navTargetId
+            obj.group = saved.group ?? -1
+            obj.isAttackMoving = saved.isAttackMoving ?? false
+            if let wps = saved.moveWaypoints {
+                obj.moveWaypoints = wps.map { (x: Double($0.x), y: Double($0.y)) }
+            }
+            obj.attackTarget = saved.attackTarget
+            obj.suspendedTarget = saved.suspendedTarget
+            obj.reloadTimer = saved.reloadTimer ?? 0
+            obj.lastFireTick = saved.lastFireTick ?? 0
+            obj.lastDamagedTick = saved.lastDamagedTick ?? 0
+            if let tf = saved.turretFacing { obj.turretFacing = tf }
+            if let mq = saved.missionQueue { obj.missionQueue = Mission.from(mq) }
+            if let sm = saved.suspendedMission { obj.suspendedMission = Mission.from(sm) }
+            obj.missionStatus = saved.missionStatus ?? 0
+            obj.passengers = saved.passengers ?? []
+            obj.isALoaner = saved.isALoaner ?? false
+            obj.tiberiumLoad = saved.tiberiumLoad ?? 0
+            obj.fear = saved.fear ?? 0
+            obj.isProne = saved.isProne ?? false
+            obj.isRepairing = saved.isRepairing ?? false
+            obj.buildUpFrame = saved.buildUpFrame ?? -1
+            obj.buildUpTotalFrames = saved.buildUpTotalFrames ?? 0
+            obj.buildUpDelay = saved.buildUpDelay ?? 0
+            obj.samDeployState = saved.samDeployState ?? 0
+            if let po = saved.powerOutput { obj.powerOutput = po }
+            if let pd = saved.powerDrain { obj.powerDrain = pd }
+            obj.isLanding = saved.isLanding ?? false
+            obj.isTakingOff = saved.isTakingOff ?? false
+            obj.isInLimbo = saved.isInLimbo ?? false
+            obj.isTethered = saved.isTethered ?? false
+
             world.addObject(obj)
             world.nextObjectId = max(world.nextObjectId, saved.id + 1)
         }
@@ -583,10 +881,101 @@ func loadGame(slot: Int) -> Bool {
 
         // Rebuild derived data
         buildPassabilityMap()
-        initTiberiumCells()
-        initFog()
         initHouseStates()
-        resetSuperWeapons()
+
+        // Restore tiberium state from save or re-init from scenario
+        if isV2, let savedTibCells = saveData.tiberiumCells {
+            let map = world.map
+            map.tiberiumCells = Set(savedTibCells)
+            map.tiberiumDensity.removeAll()
+            if let densityEntries = saveData.tiberiumDensity {
+                for entry in densityEntries {
+                    map.tiberiumDensity[entry.cell] = entry.density
+                }
+            }
+            map.tiberiumScan = saveData.tiberiumScan ?? 0
+            map.isForwardScan = saveData.isForwardScan ?? true
+        } else {
+            initTiberiumCells()
+        }
+
+        // Restore smudges from save or leave empty
+        if isV2, let savedSmudges = saveData.smudges {
+            world.map.smudges = savedSmudges.compactMap { entry in
+                guard let smType = SmudgeType(rawValue: entry.type) else { return nil }
+                return Smudge(type: smType, cell: entry.cell)
+            }
+        }
+
+        // Restore fog from save or re-init
+        if isV2, let savedFog = saveData.fogState, savedFog.count == 4096 {
+            world.map.fogState = savedFog.map { val in
+                switch val {
+                case 2: return FogLevel.visible
+                case 1: return FogLevel.explored
+                default: return FogLevel.unexplored
+                }
+            }
+        } else {
+            initFog()
+        }
+
+        // Restore control groups
+        if isV2, let groups = saveData.controlGroups, groups.count == 10 {
+            world.controlGroups = groups
+        }
+
+        // Restore production queues
+        if isV2 {
+            restoreProductionQueue(session.unitBuildQueue, from: saveData.unitBuildQueue)
+            restoreProductionQueue(session.structureBuildQueue, from: saveData.structureBuildQueue)
+        }
+
+        // Restore super weapons
+        if isV2 {
+            if let sw = saveData.ionCannon { restoreSuperWeapon(session.playerIonCannon, from: sw) }
+            else { resetSuperWeapons() }
+            if let sw = saveData.airStrike { restoreSuperWeapon(session.playerAirStrike, from: sw) }
+            if let sw = saveData.nukeStrike { restoreSuperWeapon(session.playerNukeStrike, from: sw) }
+        } else {
+            resetSuperWeapons()
+        }
+
+        // Restore active teams
+        if isV2, let savedTeams = saveData.activeTeams {
+            session.activeTeams.removeAll()
+            for st in savedTeams {
+                guard let type = session.teamTypes.first(where: { $0.name == st.typeName }) else { continue }
+                let team = ActiveTeam(type: type)
+                team.members = st.members
+                team.isMoving = st.isMoving
+                team.isFullStrength = st.isFullStrength
+                team.isUnderStrength = st.isUnderStrength
+                team.isHasBeen = st.isHasBeen
+                team.currentMission = st.currentMission
+                team.isNextMission = st.isNextMission
+                team.centerX = st.centerX
+                team.centerY = st.centerY
+                team.target = st.target
+                team.targetCell = st.targetCell
+                team.missionTimeout = st.missionTimeout
+                team.isSuspended = st.isSuspended
+                team.suspendTimer = st.suspendTimer
+                session.activeTeams.append(team)
+            }
+        }
+
+        // Restore scripting state
+        if isV2 {
+            switch saveData.triggerWinState {
+            case "won": session.triggerWinState = .won
+            case "lost": session.triggerWinState = .lost
+            default: session.triggerWinState = .playing
+            }
+            session.allowWinFlag = saveData.allowWinFlag ?? false
+            session.aiTickCounter = saveData.aiTickCounter ?? 0
+            session.scenarioBuildLevel = saveData.scenarioBuildLevel ?? 99
+        }
 
         // Reload palette for theater
         let palName: String
@@ -597,7 +986,7 @@ func loadGame(slot: Int) -> Bool {
         }
         renderState.gamePalette = loadPalette(palName)
 
-        print("LoadGame: Loaded slot \(slot) - '\(saveData.description)' (\(world.objects.count) objects)")
+        print("LoadGame: Loaded slot \(slot) v\(saveData.version) - '\(saveData.description)' (\(world.objects.count) objects)")
         return true
     } catch {
         print("LoadGame: Failed to load slot \(slot): \(error)")
@@ -663,6 +1052,53 @@ func quickLoad() -> Bool {
     return loadGame(slot: 0)
 }
 
+// MARK: - Serialization Helpers
+
+func serializeProductionQueue(_ queue: ProductionQueue) -> SavedProductionQueue? {
+    guard let item = queue.item else { return nil }
+    return SavedProductionQueue(
+        typeName: item.typeName,
+        progress: item.progress,
+        cost: item.cost,
+        totalTicks: item.totalTicks,
+        isOnHold: queue.isOnHold
+    )
+}
+
+func restoreProductionQueue(_ queue: ProductionQueue, from saved: SavedProductionQueue?) {
+    guard let saved = saved, let typeName = saved.typeName else {
+        queue.clear()
+        return
+    }
+    queue.item = (
+        typeName: typeName,
+        progress: saved.progress ?? 0,
+        cost: saved.cost ?? 0,
+        totalTicks: saved.totalTicks ?? 0
+    )
+    queue.isOnHold = saved.isOnHold ?? false
+}
+
+func serializeSuperWeapon(_ weapon: SuperWeapon) -> SavedSuperWeapon {
+    return SavedSuperWeapon(
+        isPresent: weapon.isPresent,
+        isReady: weapon.isReady,
+        isOneTime: weapon.isOneTime,
+        isSuspended: weapon.isSuspended,
+        chargeRemaining: weapon.chargeRemaining,
+        suspendedTime: weapon.suspendedTime
+    )
+}
+
+func restoreSuperWeapon(_ weapon: SuperWeapon, from saved: SavedSuperWeapon) {
+    weapon.isPresent = saved.isPresent
+    weapon.isReady = saved.isReady
+    weapon.isOneTime = saved.isOneTime
+    weapon.isSuspended = saved.isSuspended
+    weapon.chargeRemaining = saved.chargeRemaining
+    weapon.suspendedTime = saved.suspendedTime
+}
+
 // MARK: - Helper Functions
 
 func objectKindString(_ kind: ObjectKind) -> String {
@@ -708,6 +1144,7 @@ extension Mission {
         case .selling: return "Selling"
         case .missile: return "Missile"
         case .sticky: return "Sticky"
+        case .sabotage: return "Sabotage"
         }
     }
 }

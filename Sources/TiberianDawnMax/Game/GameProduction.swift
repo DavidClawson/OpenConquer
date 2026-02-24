@@ -9,6 +9,7 @@ struct BuildableItem {
     let buildTicks: Int
     let prerequisite: String?
     let faction: String?  // "GDI", "NOD", or nil for both
+    let buildLevel: Int
 }
 
 struct BuildableStructure {
@@ -16,6 +17,7 @@ struct BuildableStructure {
     let cost: Int
     let buildTicks: Int
     let faction: String?
+    let buildLevel: Int
 }
 
 /// Generate unit/infantry build list from type data tables
@@ -44,7 +46,8 @@ func generateBuildableUnits() -> [BuildableItem] {
         }
         let ticks = max(20, data.cost / 5)
         items.append(BuildableItem(name: data.iniName, cost: data.cost,
-                                   buildTicks: ticks, prerequisite: prereq, faction: faction))
+                                   buildTicks: ticks, prerequisite: prereq, faction: faction,
+                                   buildLevel: data.buildLevel))
     }
 
     // Vehicles from unitTypeDataTable
@@ -71,7 +74,8 @@ func generateBuildableUnits() -> [BuildableItem] {
         }
         let ticks = max(30, data.cost / 5)
         items.append(BuildableItem(name: data.iniName, cost: data.cost,
-                                   buildTicks: ticks, prerequisite: prereq, faction: faction))
+                                   buildTicks: ticks, prerequisite: prereq, faction: faction,
+                                   buildLevel: data.buildLevel))
     }
 
     // Aircraft from aircraftTypeDataTable
@@ -91,7 +95,8 @@ func generateBuildableUnits() -> [BuildableItem] {
         let prereq: String = faction == "NOD" ? "AFLD" : "HPAD"
         let ticks = max(30, data.cost / 5)
         items.append(BuildableItem(name: data.iniName, cost: data.cost,
-                                   buildTicks: ticks, prerequisite: prereq, faction: faction))
+                                   buildTicks: ticks, prerequisite: prereq, faction: faction,
+                                   buildLevel: data.buildLevel))
     }
 
     // Sort by cost for consistent ordering
@@ -105,7 +110,6 @@ func generateBuildableStructures() -> [BuildableStructure] {
 
     for (_, data) in buildingTypeDataTable {
         guard data.isBuildable else { continue }
-        guard !data.isWall else { continue }  // Walls aren't sidebar buildable
         let faction: String?
         if data.ownable.contains(.good) && data.ownable.contains(.bad) {
             faction = nil
@@ -118,7 +122,8 @@ func generateBuildableStructures() -> [BuildableStructure] {
         }
         let ticks = max(30, data.cost / 5)
         items.append(BuildableStructure(name: data.iniName, cost: data.cost,
-                                        buildTicks: ticks, faction: faction))
+                                        buildTicks: ticks, faction: faction,
+                                        buildLevel: data.buildLevel))
     }
 
     // Sort by cost for consistent ordering
@@ -132,12 +137,12 @@ private var _buildableStructures: [BuildableStructure]? = nil
 
 var buildableUnits: [BuildableItem] {
     if _buildableUnits == nil { _buildableUnits = generateBuildableUnits() }
-    return _buildableUnits!
+    return _buildableUnits ?? []
 }
 
 var buildableStructures: [BuildableStructure] {
     if _buildableStructures == nil { _buildableStructures = generateBuildableStructures() }
-    return _buildableStructures!
+    return _buildableStructures ?? []
 }
 
 // MARK: - Query Functions
@@ -158,9 +163,11 @@ func getOwnedBuildingTypes() -> Set<String> {
 func getAvailableUnits() -> [BuildableItem] {
     let owned = getOwnedBuildingTypes()
     let faction = session.world?.playerHouse == .goodGuy ? "GDI" : "NOD"
+    let techLevel = session.scenarioBuildLevel
     var seen = Set<String>()
     var result: [BuildableItem] = []
     for item in buildableUnits {
+        if item.buildLevel > techLevel { continue }  // Tech level restriction
         if let prereq = item.prerequisite, !owned.contains(prereq) { continue }
         if let f = item.faction, f != faction { continue }
         if seen.contains(item.name) { continue }
@@ -174,10 +181,12 @@ func getAvailableUnits() -> [BuildableItem] {
 func getAvailableStructures() -> [BuildableStructure] {
     let owned = getOwnedBuildingTypes()
     let faction = session.world?.playerHouse == .goodGuy ? "GDI" : "NOD"
+    let techLevel = session.scenarioBuildLevel
     // Need a construction yard to build structures
     if !owned.contains("FACT") { return [] }
     var result: [BuildableStructure] = []
     for item in buildableStructures {
+        if item.buildLevel > techLevel { continue }  // Tech level restriction
         if let f = item.faction, f != faction { continue }
         result.append(item)
     }
@@ -195,10 +204,15 @@ func tickProduction() {
     if session.unitBuildQueue.item != nil {
         let completed = session.unitBuildQueue.tick(hasPower: houseState.hasPower, worldTickCount: world.tickCount)
         if completed {
+            let producedType = session.unitBuildQueue.item!.typeName.uppercased()
             spawnProducedUnit(session.unitBuildQueue.item!.typeName, world: world)
             session.unitBuildQueue.clear()
             audioManager.speak(.unitReady)
-            audioManager.play(.construction)
+            // Only play mechanical construction sound for vehicles, not infantry
+            let isInfantry = ["E1", "E2", "E3", "E4", "E5", "E6", "E7", "RMBO"].contains(producedType)
+            if !isInfantry {
+                audioManager.play(.construction)
+            }
         }
     }
 
@@ -242,8 +256,18 @@ func spawnProducedUnit(_ typeName: String, world: GameWorld) {
 
     // Find the producing structure
     let producerType: String
-    if ["E1", "E2", "E3", "E4", "E5", "E6", "RMBO"].contains(upper) {
-        producerType = getOwnedBuildingTypes().contains("PYLE") ? "PYLE" : "HAND"
+    let infantryTypes: Set<String> = ["E1", "E2", "E3", "E4", "E5", "E6", "E7", "RMBO"]
+    if infantryTypes.contains(upper) {
+        // GDI uses PYLE (Barracks), Nod uses HAND (Hand of Nod)
+        let owned = getOwnedBuildingTypes()
+        if owned.contains("PYLE") {
+            producerType = "PYLE"
+        } else if owned.contains("HAND") {
+            producerType = "HAND"
+        } else {
+            // Fallback: check for either
+            producerType = "PYLE"
+        }
     } else {
         producerType = "WEAP"
     }
@@ -297,6 +321,32 @@ func handleStructurePlacement(_ x: Int32, _ y: Int32) {
         }
     }
 
+    // Check adjacency to existing player structures (must be within 1 cell of a friendly building)
+    var isAdjacent = false
+    for obj in world.objects {
+        if obj.kind != .structure { continue }
+        if obj.house != world.playerHouse { continue }
+        if obj.strength <= 0 { continue }
+        let bSize = buildingSize(obj.typeName)
+        let bCellX = (Int(obj.worldX) - bSize.w * 12) / 24
+        let bCellY = (Int(obj.worldY) - bSize.h * 12) / 24
+        // Check if any cell of the new building is adjacent to any cell of this existing building
+        for dy in -1...size.h {
+            for dx in -1...size.w {
+                let checkX = cellX + dx
+                let checkY = cellY + dy
+                if checkX >= bCellX && checkX < bCellX + bSize.w &&
+                   checkY >= bCellY && checkY < bCellY + bSize.h {
+                    isAdjacent = true
+                    break
+                }
+            }
+            if isAdjacent { break }
+        }
+        if isAdjacent { break }
+    }
+    if !isAdjacent { return }
+
     // Place the structure
     let pos = cellToPixel(cellY * 64 + cellX)
     let cx = Double(pos.px) + Double(size.w * 24) / 2.0
@@ -310,10 +360,14 @@ func handleStructurePlacement(_ x: Int32, _ y: Int32) {
         worldX: cx, worldY: cy,
         facing: 0,
         strength: resolveStrength(typeName: pType, kind: .structure, scenarioStrength: 256),
-        mission: .guard_,
+        mission: .construction,
         speed: 0.0
     )
+    // Start build-up animation — will be resolved when frame count is known
+    obj.buildUpFrame = 0
+    obj.buildUpDelay = 0
     world.addObject(obj)
+    audioManager.play(.construction)
 
     // Mark footprint as impassable
     for dy in 0..<size.h {

@@ -15,42 +15,51 @@ func initTiberiumCells() {
     guard let map = session.world?.map else { return }
     map.tiberiumCells.removeAll()
     map.tiberiumDensity.removeAll()
-    guard let scenario = scenarioData else { return }
+    guard let scenario = scenarioData else {
+        print("GameEconomy: No scenarioData available for tiberium init")
+        return
+    }
+    print("GameEconomy: Scanning \(scenario.overlays.count) overlays for tiberium")
+    // Log first few overlays for debugging
+    for (i, ov) in scenario.overlays.prefix(10).enumerated() {
+        print("  overlay[\(i)]: cell=\(ov.cell) type='\(ov.typeName)'")
+    }
+    // First pass: register all tiberium cells
     for overlay in scenario.overlays {
         let upper = overlay.typeName.uppercased()
         if upper.hasPrefix("TI") {
-            // TI1 through TI12 are tiberium
             let numPart = upper.dropFirst(2)
             if let num = Int(numPart), num >= 1 && num <= 12 {
                 map.tiberiumCells.insert(overlay.cell)
-                // Count adjacent tiberium cells to set initial density (VC Tiberium_Adjust)
-                let adjTable = [0, 1, 3, 4, 6, 7, 8, 10, 11]
-                var adjCount = 0
-                let cx = overlay.cell % 64
-                let cy = overlay.cell / 64
-                for dy in -1...1 {
-                    for dx in -1...1 {
-                        if dx == 0 && dy == 0 { continue }
-                        let nx = cx + dx
-                        let ny = cy + dy
-                        if nx < 0 || nx >= 64 || ny < 0 || ny >= 64 { continue }
-                        let adjCell = ny * 64 + nx
-                        // Check if any other overlay is tiberium at this cell
-                        for other in scenario.overlays {
-                            if other.cell == adjCell {
-                                let ou = other.typeName.uppercased()
-                                if ou.hasPrefix("TI"), let on = Int(ou.dropFirst(2)), on >= 1 && on <= 12 {
-                                    adjCount += 1
-                                    break
-                                }
-                            }
-                        }
-                    }
-                }
-                let density = adjTable[min(adjCount, adjTable.count - 1)] + 1
-                map.tiberiumDensity[overlay.cell] = min(density, 12)
+                // Use the overlay's TI number as initial density (TI1=sparse, TI12=full)
+                map.tiberiumDensity[overlay.cell] = num
             }
         }
+    }
+
+    // Second pass: adjust density based on neighbor count (VC Tiberium_Adjust)
+    // Cells surrounded by more tiberium should be denser
+    let adjTable = [0, 1, 3, 4, 6, 7, 8, 10, 11]
+    for cell in map.tiberiumCells {
+        let cx = cell % 64
+        let cy = cell / 64
+        var adjCount = 0
+        for dy in -1...1 {
+            for dx in -1...1 {
+                if dx == 0 && dy == 0 { continue }
+                let nx = cx + dx
+                let ny = cy + dy
+                if nx >= 0 && nx < 64 && ny >= 0 && ny < 64 {
+                    if map.tiberiumCells.contains(ny * 64 + nx) {
+                        adjCount += 1
+                    }
+                }
+            }
+        }
+        // Use max of original TI number and neighbor-based density
+        let neighborDensity = adjTable[min(adjCount, adjTable.count - 1)] + 1
+        let current = map.tiberiumDensity[cell] ?? 1
+        map.tiberiumDensity[cell] = min(max(current, neighborDensity), 12)
     }
     print("GameEconomy: Found \(map.tiberiumCells.count) tiberium cells")
 }
@@ -65,6 +74,54 @@ extension GameObject {
         let upper = typeName.uppercased()
         if upper != "HARV" { return }
 
+        // Harvester threat avoidance: check for nearby enemy combat units every 15 ticks
+        if world.tickCount % 15 == 0 {
+            let fleeRange = 5.0 * 24.0  // 5 cells in pixels
+            var nearestEnemy: GameObject? = nil
+            var nearestEnemyDist = Double.infinity
+
+            for other in world.objects {
+                guard other.strength > 0 else { continue }
+                guard other.house != house else { continue }
+                guard other.house != .neutral else { continue }
+                guard !other.isAircraft else { continue }
+                // Only flee from armed ground units (not other harvesters, not unarmed)
+                guard other.isArmed else { continue }
+                guard other.kind == .unit || other.kind == .infantry else { continue }
+
+                let dx = other.worldX - worldX
+                let dy = other.worldY - worldY
+                let dist = sqrt(dx * dx + dy * dy)
+                if dist < fleeRange && dist < nearestEnemyDist {
+                    nearestEnemy = other
+                    nearestEnemyDist = dist
+                }
+            }
+
+            if let enemy = nearestEnemy {
+                if tiberiumLoad > 0 {
+                    // Carrying tiberium: force return to refinery immediately
+                    tiberiumLoad = maxTiberiumLoad
+                    moveTargetX = nil
+                    moveTargetY = nil
+                    movePath = []
+                    // Fall through to the normal "full" return-to-refinery logic below
+                } else {
+                    // Empty: flee in opposite direction from enemy
+                    let dx = worldX - enemy.worldX
+                    let dy = worldY - enemy.worldY
+                    let dist = max(1.0, sqrt(dx * dx + dy * dy))
+                    let fleeX = max(12, min(64 * 24 - 12, worldX + dx / dist * 120))
+                    let fleeY = max(12, min(64 * 24 - 12, worldY + dy / dist * 120))
+                    moveTargetX = fleeX
+                    moveTargetY = fleeY
+                    movePath = []
+                    moveOneStep()
+                    return
+                }
+            }
+        }
+
         // State machine based on current conditions
         if tiberiumLoad >= maxTiberiumLoad {
             // Full — return to refinery
@@ -75,8 +132,16 @@ extension GameObject {
 
                 if dist < 36.0 {
                     // At refinery — deposit
-                    let creditsGained = tiberiumLoad * tiberiumValue
+                    var creditsGained = tiberiumLoad * tiberiumValue
                     let houseState = getHouseState(house)
+                    // Enforce silo capacity: only store up to capacity limit
+                    if houseState.capacity > 0 {
+                        let currentStored = houseState.tiberium
+                        let spaceLeft = max(0, houseState.capacity - currentStored)
+                        let creditsToStore = min(creditsGained, spaceLeft)
+                        houseState.tiberium += creditsToStore
+                        creditsGained = creditsToStore
+                    }
                     houseState.addCredits(creditsGained)
                     // Keep sidebar credits in sync for the player
                     if house == session.world?.playerHouse {
@@ -265,8 +330,10 @@ extension GameMap {
         tiberiumScan = 0
         isForwardScan.toggle()
 
-        // Growth: pick a random candidate and increase its density
-        if !tiberiumGrowthCandidates.isEmpty {
+        // Growth: pick random candidates and increase their density
+        // Process up to 4 growth candidates per cycle for visible growth rate
+        let growthPicks = min(4, tiberiumGrowthCandidates.count)
+        for _ in 0..<growthPicks {
             let pick = Int.random(in: 0..<tiberiumGrowthCandidates.count)
             let cell = tiberiumGrowthCandidates[pick]
             if tiberiumCells.contains(cell) {
@@ -277,8 +344,10 @@ extension GameMap {
             }
         }
 
-        // Spread: pick a random candidate and try to spread to an adjacent empty cell
-        if !tiberiumSpreadCandidates.isEmpty {
+        // Spread: pick random candidates and try to spread to adjacent empty cells
+        // Process up to 2 spread candidates per cycle
+        let spreadPicks = min(2, tiberiumSpreadCandidates.count)
+        for _ in 0..<spreadPicks {
             let pick = Int.random(in: 0..<tiberiumSpreadCandidates.count)
             let cell = tiberiumSpreadCandidates[pick]
             let cx = cell % 64

@@ -22,6 +22,8 @@ class Projectile {
     let damage: Int
     let warhead: WarheadType
     let sourceHouse: House
+    let sourceX: Double             // Attacker's position at fire time (for fog reveal)
+    let sourceY: Double
     var age: Int = 0                // Ticks since launch
     var isFinished: Bool = false
     let speed: Double               // Pixels per tick
@@ -42,11 +44,12 @@ class Projectile {
         self.damage = damage
         self.warhead = warhead
         self.sourceHouse = sourceHouse
+        self.sourceX = startX
+        self.sourceY = startY
         // Convert MPH speed to pixels/tick
-        // Projectiles fly faster than ground units — use higher factor for snappier feel
-        // Original C&C: MPH in leptons/tick, 1 lepton = 24/256 px = 0.09375 px
-        // We boost projectiles by ~2.5x to feel right at modern display scales
-        self.speed = Double(data.maxSpeed.rawValue) * 0.20
+        // Projectiles should fly noticeably faster than ground units
+        // Unit speed factor is 0.16; projectiles use 0.40 for snappy feel
+        self.speed = Double(data.maxSpeed.rawValue) * 0.40
     }
 }
 
@@ -60,7 +63,11 @@ func spawnProjectile(bulletType: BulletType, from attacker: GameObject,
 
     // Invisible projectiles (sniper, bullets, laser) apply damage immediately
     if bData.isInvisible {
-        let died = target.applyDamage(amount: damage, warhead: warhead)
+        // Reveal attacker's position in fog if target is a player unit
+        if let world = session.world, target.house == world.playerHouse {
+            revealFogAroundPosition(worldX: attacker.worldX, worldY: attacker.worldY)
+        }
+        let died = target.applyDamage(amount: damage, warhead: warhead, attackerHouse: attacker.house)
         spawnImpactEffect(at: target.worldX, worldY: target.worldY, warhead: warhead)
         if died {
             target.spawnDeathEffects()
@@ -83,8 +90,9 @@ func spawnProjectile(bulletType: BulletType, from attacker: GameObject,
         return
     }
 
-    // Calculate launch offset (toward facing direction)
-    let faceRad = Double(attacker.facing) / 256.0 * 2.0 * .pi
+    // Calculate launch offset (toward facing direction — use turret for turreted units)
+    let fireFacing = attacker.hasTurret ? attacker.turretFacing : attacker.facing
+    let faceRad = Double(fireFacing) / 256.0 * 2.0 * .pi
     let launchDist = (attacker.kind == .infantry) ? 6.0 : 10.0
     let startX = attacker.worldX + sin(faceRad) * launchDist
     let startY = attacker.worldY - cos(faceRad) * launchDist
@@ -154,8 +162,11 @@ func tickProjectiles() {
 
             if let tid = proj.targetId,
                let target = world.findObject(id: tid), target.strength > 0 {
-                target.lastWhoHurtMe = proj.sourceHouse
-                let died = target.applyDamage(amount: proj.damage, warhead: proj.warhead)
+                // Reveal attacker's position in fog if target is a player unit
+                if target.house == world.playerHouse {
+                    revealFogAroundPosition(worldX: proj.sourceX, worldY: proj.sourceY)
+                }
+                let died = target.applyDamage(amount: proj.damage, warhead: proj.warhead, attackerHouse: proj.sourceHouse)
                 spawnImpactEffect(at: target.worldX, worldY: target.worldY, warhead: proj.warhead)
 
                 if died {

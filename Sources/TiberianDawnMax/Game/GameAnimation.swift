@@ -223,6 +223,27 @@ let animTypeDataTable: [GameAnimType: AnimTypeData] = [
         damage: 0, delay: 1, startFrame: 0, loopStart: 0, loopEnd: -1,
         stages: -1, loops: 0, chainTo: nil
     ),
+    .onFireSmall: AnimTypeData(
+        name: "ONIFIRE1", size: 24, biggest: 0,
+        isNormalized: false, isWhiteTrans: false, isScorcher: false, isCrater: false,
+        isSticky: true, isGroundLayer: true, isTranslucent: false, isFlame: true,
+        damage: 0, delay: 2, startFrame: 0, loopStart: 0, loopEnd: -1,
+        stages: -1, loops: 127, chainTo: nil
+    ),
+    .onFireMed: AnimTypeData(
+        name: "ONIFIRE3", size: 32, biggest: 0,
+        isNormalized: false, isWhiteTrans: false, isScorcher: false, isCrater: false,
+        isSticky: true, isGroundLayer: true, isTranslucent: false, isFlame: true,
+        damage: 0, delay: 2, startFrame: 0, loopStart: 0, loopEnd: -1,
+        stages: -1, loops: 127, chainTo: nil
+    ),
+    .onFireBig: AnimTypeData(
+        name: "ONIFIRE2", size: 48, biggest: 0,
+        isNormalized: false, isWhiteTrans: false, isScorcher: false, isCrater: false,
+        isSticky: true, isGroundLayer: true, isTranslucent: false, isFlame: true,
+        damage: 0, delay: 2, startFrame: 0, loopStart: 0, loopEnd: -1,
+        stages: -1, loops: 127, chainTo: nil
+    ),
     .smokePuff: AnimTypeData(
         name: "SMOKEY", size: 24, biggest: 2,
         isNormalized: true, isWhiteTrans: false, isScorcher: false, isCrater: false,

@@ -205,9 +205,10 @@ private func loadPNGTexture(_ renderer: OpaquePointer?, path: String) -> OpaqueP
 /// The remastered sprites use bright green (hue ~105-120°) as the team color.
 /// This function loads a remastered PNG and shifts green team-color pixels to
 /// the target house's hue, matching how the C&C Remastered game uses shaders.
-private let teamColorHueMin: Float = 95.0 / 360.0   // ~0.264
-private let teamColorHueMax: Float = 130.0 / 360.0   // ~0.361
-private let teamColorSatMin: Float = 0.30             // minimum saturation to qualify
+/// Widened range to catch all green variants including darker/lighter shades.
+private let teamColorHueMin: Float = 80.0 / 360.0    // ~0.222 — catches yellow-green
+private let teamColorHueMax: Float = 160.0 / 360.0   // ~0.444 — catches cyan-green
+private let teamColorSatMin: Float = 0.20             // lower threshold for paler greens
 
 /// Target hue (0-360) for each house color
 private func houseTargetHue(_ house: House) -> Float? {
