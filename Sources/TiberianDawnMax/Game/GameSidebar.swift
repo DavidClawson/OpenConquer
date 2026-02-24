@@ -360,13 +360,7 @@ func handleRepairSellGameClick(worldX: Double, worldY: Double) -> Bool {
         if obj.house != world.playerHouse { continue }
         if obj.strength <= 0 { continue }
 
-        let size = buildingSize(obj.typeName)
-        let halfW = Double(size.w * 24) / 2.0
-        let halfH = Double(size.h * 24) / 2.0
-        let dx = worldX - obj.worldX
-        let dy = worldY - obj.worldY
-
-        if abs(dx) <= halfW && abs(dy) <= halfH {
+        if isWorldPosOnBuilding(worldX: worldX, worldY: worldY, building: obj) {
             if session.isRepairMode {
                 // Toggle repair on this building
                 if obj.isRepairing {

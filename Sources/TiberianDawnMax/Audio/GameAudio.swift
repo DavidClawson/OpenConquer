@@ -454,6 +454,15 @@ enum ThemeType: Int, CaseIterable {
     }
 }
 
+/// Result of async music loading (thread-safe handoff from background to main)
+private struct MusicLoadResult {
+    let theme: ThemeType
+    let name: String
+    let samples: [Int16]
+    let sampleRate: Int
+    let loaded: Bool
+}
+
 // MARK: - Audio Manager
 
 class AudioManager {
@@ -480,6 +489,10 @@ class AudioManager {
     var musicEnabled: Bool = true
     var musicLoading: Bool = false  // True while async loading in progress
     var needsNextTrack: Bool = false  // Flag to advance track outside tick()
+
+    /// Thread-safe pending music load result (set by background thread, consumed by tick)
+    private var pendingMusicResult: MusicLoadResult? = nil
+    private let pendingMusicLock = NSLock()
 
     // Playlist
     var musicPlaylist: [ThemeType] = []
@@ -718,24 +731,14 @@ class AudioManager {
                 }
             }
 
-            // Apply on main thread
-            DispatchQueue.main.async {
-                if loaded && self.currentTheme == theme {
-                    self.soundCache[name] = decodedSamples
-                    self.soundSampleRates[name] = sampleRate
-                    self.musicSamples = decodedSamples
-                    self.musicSampleRate = sampleRate
-                    self.musicOffset = 0
-                    self.musicLoading = false
-                    self.isMusicPlaying = true
-                    print("AudioManager: Playing theme '\(theme.title)' (\(decodedSamples.count) samples, \(sampleRate)Hz)")
-                } else {
-                    self.musicLoading = false
-                    if !loaded {
-                        print("AudioManager: Theme '\(name)' not found")
-                    }
-                }
-            }
+            // Store result for main thread pickup (no DispatchQueue.main needed)
+            self.pendingMusicLock.lock()
+            self.pendingMusicResult = MusicLoadResult(
+                theme: theme, name: name,
+                samples: decodedSamples, sampleRate: sampleRate,
+                loaded: loaded
+            )
+            self.pendingMusicLock.unlock()
         }
     }
 
@@ -747,9 +750,18 @@ class AudioManager {
         musicOffset = 0
     }
 
+    /// Track how many consecutive tracks failed to load (prevent infinite skip loop)
+    private var consecutiveTrackFailures: Int = 0
+
     /// Advance to the next track in the playlist
     func nextTrack() {
         guard musicEnabled, !musicPlaylist.isEmpty else { return }
+        // Safety: if too many tracks fail in a row, stop trying
+        guard consecutiveTrackFailures < musicPlaylist.count else {
+            print("AudioManager: All tracks failed to load, music disabled")
+            consecutiveTrackFailures = 0
+            return
+        }
         currentTrackIndex = (currentTrackIndex + 1) % musicPlaylist.count
         // Re-shuffle when wrapping around to the start
         if currentTrackIndex == 0 {
@@ -813,6 +825,33 @@ class AudioManager {
     func tick() {
         guard isInitialized else { return }
 
+        // Check for completed async music load
+        pendingMusicLock.lock()
+        let result = pendingMusicResult
+        pendingMusicResult = nil
+        pendingMusicLock.unlock()
+
+        if let r = result {
+            if r.loaded && currentTheme == r.theme {
+                soundCache[r.name] = r.samples
+                soundSampleRates[r.name] = r.sampleRate
+                musicSamples = r.samples
+                musicSampleRate = r.sampleRate
+                musicOffset = 0
+                musicLoading = false
+                isMusicPlaying = true
+                consecutiveTrackFailures = 0
+                print("AudioManager: Playing theme '\(r.theme.title)' (\(r.samples.count) samples, \(r.sampleRate)Hz)")
+            } else {
+                musicLoading = false
+                if !r.loaded {
+                    consecutiveTrackFailures += 1
+                    print("AudioManager: Theme '\(r.name)' not found (failure \(consecutiveTrackFailures)), trying next track")
+                    needsNextTrack = !musicPlaylist.isEmpty
+                }
+            }
+        }
+
         // Handle deferred track advance (loaded outside the mixing loop)
         if needsNextTrack && !musicLoading {
             needsNextTrack = false
@@ -822,7 +861,8 @@ class AudioManager {
         // Only queue audio when there's something to play — avoids latency buildup
         let hasAudio = !activeSounds.isEmpty || activeSpeech != nil ||
                        (isMusicPlaying && !musicSamples.isEmpty)
-        guard hasAudio else { return }
+        // Keep ticking even while music is loading so the queue doesn't drain
+        guard hasAudio || musicLoading else { return }
 
         // Keep the queue fed but not overstuffed — target ~100ms of buffered audio.
         // If the queue already has enough, skip this frame to avoid latency buildup.

@@ -53,20 +53,7 @@ func renderGameCursor(_ renderer: OpaquePointer?, world: GameWorld) {
 
     // Sell mode cursor — overrides normal cursor when hovering over own buildings
     if session.isSellMode && input.mouseX < renderState.windowWidth - sidebarWidth {
-        let worldPos = gameScreenToWorld(input.mouseX, input.mouseY)
         cursor = cursorSell
-        for obj in world.objects {
-            if obj.kind != .structure { continue }
-            if obj.house != world.playerHouse { continue }
-            if obj.strength <= 0 { continue }
-            let size = buildingSize(obj.typeName)
-            let halfW = Double(size.w * 24) / 2.0
-            let halfH = Double(size.h * 24) / 2.0
-            if abs(worldPos.worldX - obj.worldX) <= halfW && abs(worldPos.worldY - obj.worldY) <= halfH {
-                cursor = cursorSell
-                break
-            }
-        }
     }
 
     // Only apply game cursor logic when mouse is in the game viewport
@@ -82,10 +69,7 @@ func renderGameCursor(_ renderer: OpaquePointer?, world: GameWorld) {
                 if obj.house != world.playerHouse { continue }
                 if obj.strength <= 0 { continue }
                 if obj.strength >= obj.maxStrength { continue }
-                let size = buildingSize(obj.typeName)
-                let halfW = Double(size.w * 24) / 2.0
-                let halfH = Double(size.h * 24) / 2.0
-                if abs(worldPos.worldX - obj.worldX) <= halfW && abs(worldPos.worldY - obj.worldY) <= halfH {
+                if isWorldPosOnBuilding(worldX: worldPos.worldX, worldY: worldPos.worldY, building: obj) {
                     cursor = cursorRepair
                     hoveringDamagedBuilding = true
                     break

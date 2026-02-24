@@ -330,12 +330,15 @@ func getObjectTexture(_ renderer: OpaquePointer?, typeName: String, frame: Int, 
         }
         guard let fileData = data else {
             renderState.objectFailedSHPs.insert(spriteName)
+            let theaterSuffix = theater?.suffix ?? "(none)"
+            print("SHP: '\(spriteName)' not found (tried \(spriteName)\(theaterSuffix), \(spriteName).SHP)")
             return nil
         }
         do {
             renderState.objectSHPCache[spriteName] = try SHPFile(data: fileData)
         } catch {
             renderState.objectFailedSHPs.insert(spriteName)
+            print("SHP: '\(spriteName)' parse error: \(error)")
             return nil
         }
     }

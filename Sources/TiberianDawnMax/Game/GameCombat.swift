@@ -599,12 +599,9 @@ func findEnemyAtWorldPos(worldX: Double, worldY: Double) -> GameObject? {
         let dy = obj.worldY - worldY
         let dist = sqrt(dx * dx + dy * dy)
 
-        // For structures, use a larger hit area
+        // For structures, use visual hit area (extends above footprint)
         if obj.kind == .structure {
-            let size = buildingSize(obj.typeName)
-            let halfW = Double(size.w * 24) / 2.0
-            let halfH = Double(size.h * 24) / 2.0
-            if abs(dx) <= halfW && abs(dy) <= halfH {
+            if isWorldPosOnBuilding(worldX: worldX, worldY: worldY, building: obj) {
                 return obj
             }
         } else if dist < hitRadius {

@@ -257,7 +257,8 @@ func loadScenario(_ name: String, from mixManager: MIXFileManager) -> ScenarioDa
     var overlays: [ScenarioOverlay] = []
     for entry in ini.entries("OVERLAY") {
         if let cell = Int(entry.key) {
-            overlays.append(ScenarioOverlay(cell: cell, typeName: entry.value))
+            let typeName = entry.value.trimmingCharacters(in: .whitespaces)
+            overlays.append(ScenarioOverlay(cell: cell, typeName: typeName))
         }
     }
 

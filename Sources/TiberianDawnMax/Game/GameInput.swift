@@ -1,6 +1,23 @@
 import CSDL2
 import Foundation
 
+// MARK: - Building Hit Test
+
+/// Test if a world position is within a building's clickable area.
+/// Building sprites are taller than their footprint (anchored at the bottom),
+/// so the hit area extends upward beyond the footprint center to cover the
+/// visible sprite region that users naturally click on.
+func isWorldPosOnBuilding(worldX: Double, worldY: Double, building: GameObject) -> Bool {
+    let size = buildingSize(building.typeName)
+    let halfW = Double(size.w * 24) / 2.0
+    let halfH = Double(size.h * 24) / 2.0
+    // Horizontal: match footprint width
+    guard abs(worldX - building.worldX) <= halfW else { return false }
+    // Vertical: extend upward by halfH to cover the sprite above the footprint
+    let dy = worldY - building.worldY
+    return dy >= -halfH * 2.0 && dy <= halfH
+}
+
 // MARK: - Coordinate Conversion
 
 func gameScreenToWorld(_ screenX: Int32, _ screenY: Int32) -> (worldX: Double, worldY: Double) {
@@ -74,10 +91,7 @@ func handleGameLeftUp(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
             if obj.kind != .structure { continue }
             if obj.house != world.playerHouse { continue }
             if obj.strength <= 0 { continue }
-            let size = buildingSize(obj.typeName)
-            let halfW = Double(size.w * 24) / 2.0
-            let halfH = Double(size.h * 24) / 2.0
-            if abs(worldPos.worldX - obj.worldX) <= halfW && abs(worldPos.worldY - obj.worldY) <= halfH {
+            if isWorldPosOnBuilding(worldX: worldPos.worldX, worldY: worldPos.worldY, building: obj) {
                 clickedBuilding = obj
                 break
             }
