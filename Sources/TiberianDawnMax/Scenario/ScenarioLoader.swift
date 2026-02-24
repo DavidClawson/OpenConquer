@@ -73,12 +73,20 @@ enum House: String, CaseIterable {
 
     static func from(_ string: String) -> House {
         let lower = string.lowercased()
+        // Check raw values first (GoodGuy, BadGuy, etc.)
         for house in House.allCases {
             if lower == house.rawValue.lowercased() {
                 return house
             }
         }
-        return .neutral
+        // Also accept common INI aliases
+        switch lower {
+        case "gdi":      return .goodGuy
+        case "nod":      return .badGuy
+        case "civilian": return .neutral
+        case "jp":       return .neutral   // Japanese campaign
+        default:         return .neutral
+        }
     }
 }
 

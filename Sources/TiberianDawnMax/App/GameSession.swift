@@ -74,6 +74,7 @@ class GameSession {
     var scenarioList: [String] = []
     var scenarioIndex: Int = 0
     var soundTest = SoundTestState()
+    var spritePlayground = SpritePlaygroundState()
 
     // MARK: - Game World
     var world: GameWorld? = nil

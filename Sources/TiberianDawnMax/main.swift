@@ -28,6 +28,19 @@ func loadGameData() {
         "SCG01EA.INI",   // GDI mission 1 scenario
         "TEMPERAT.PAL",  // Temperate theater palette
         "DESERT.PAL",    // Desert theater palette
+        "HMMV.SHP",      // Humvee (iniName — not in MIX, use JEEP.SHP)
+        "JEEP.SHP",      // Humvee (actual SHP name)
+        "APC.SHP",       // APC
+        "MTNK.SHP",      // Medium Tank
+        "E1.SHP",        // Minigunner
+        "BOAT.SHP",      // Gunboat
+        "HOVER.SHP",     // Hovercraft
+        "LST.SHP",       // Landing Ship Tank (alternative hovercraft name?)
+        "MUZZFLSH.SHP",  // Muzzle flash animation
+        "PIFF.SHP",      // Impact piff
+        "VEH-HIT1.SHP",  // Vehicle hit explosion
+        "FBALL1.SHP",    // Fireball explosion
+        "FRAG1.SHP",     // Fragment explosion
     ]
 
     print("File lookup test:")

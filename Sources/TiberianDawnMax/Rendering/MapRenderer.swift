@@ -286,48 +286,63 @@ func getTerrainTexture(_ renderer: OpaquePointer?, typeName: String, theater: Th
     return nil
 }
 
+/// Some units have INI names that differ from their SHP filenames.
+/// This maps INI names to the actual SHP filename stems.
+let spriteNameOverrides: [String: String] = [
+    "HMMV": "JEEP",       // Humm-Vee uses JEEP.SHP
+    "HOVER": "LST",       // Hovercraft uses LST.SHP (Landing Ship Tank)
+    "MUZZFLSH": "GUNFIRE", // Muzzle flash → remastered GUNFIRE VFX
+]
+
 func getObjectTexture(_ renderer: OpaquePointer?, typeName: String, frame: Int, house: House, theater: TheaterType? = nil) -> (texture: OpaquePointer, width: Int, height: Int)? {
     let upperName = typeName.uppercased()
 
-    // Try remastered sprite first (hi-res PNG)
+    // Resolve sprite name (some units/effects have different INI vs asset names)
+    let spriteName = spriteNameOverrides[upperName] ?? upperName
+
+    // Try remastered sprite first (hi-res PNG) — try both original and override names
     if let remastered = getRemasteredTexture(renderer, typeName: upperName, frame: frame) {
+        return remastered
+    }
+    if spriteName != upperName,
+       let remastered = getRemasteredTexture(renderer, typeName: spriteName, frame: frame) {
         return remastered
     }
 
     // Fall back to classic SHP from MIX archives
-    let key = "\(upperName)_\(frame)_\(house.rawValue)"
+    let key = "\(spriteName)_\(frame)_\(house.rawValue)"
 
     if let cached = renderState.objectTextureCache[key] {
-        let shp = renderState.objectSHPCache[upperName]!
+        let shp = renderState.objectSHPCache[spriteName]!
         let f = shp.frames[frame]
         return (texture: cached, width: f.width, height: f.height)
     }
 
-    if renderState.objectFailedSHPs.contains(upperName) { return nil }
+    if renderState.objectFailedSHPs.contains(spriteName) { return nil }
 
-    if renderState.objectSHPCache[upperName] == nil {
+    if renderState.objectSHPCache[spriteName] == nil {
         var data: Data? = nil
         // Buildings/overlays use theater-specific extensions (.TEM, .DES, .WIN)
         if let theater = theater {
-            data = mixManager.retrieve(upperName + theater.suffix)
+            data = mixManager.retrieve(spriteName + theater.suffix)
         }
         // Units/infantry use .SHP; also fallback for buildings
         if data == nil {
-            data = mixManager.retrieve(upperName + ".SHP")
+            data = mixManager.retrieve(spriteName + ".SHP")
         }
         guard let fileData = data else {
-            renderState.objectFailedSHPs.insert(upperName)
+            renderState.objectFailedSHPs.insert(spriteName)
             return nil
         }
         do {
-            renderState.objectSHPCache[upperName] = try SHPFile(data: fileData)
+            renderState.objectSHPCache[spriteName] = try SHPFile(data: fileData)
         } catch {
-            renderState.objectFailedSHPs.insert(upperName)
+            renderState.objectFailedSHPs.insert(spriteName)
             return nil
         }
     }
 
-    guard let shp = renderState.objectSHPCache[upperName],
+    guard let shp = renderState.objectSHPCache[spriteName],
           frame < shp.frames.count else {
         return nil
     }
@@ -338,6 +353,35 @@ func getObjectTexture(_ renderer: OpaquePointer?, typeName: String, frame: Int, 
         return (texture: texture, width: f.width, height: f.height)
     }
     return nil
+}
+
+/// Create a sprite texture for UI elements (cursor, select box, pips).
+/// Unlike game sprites, index 4 is rendered as its actual palette color (not shadow).
+func createUISpriteTexture(_ renderer: OpaquePointer?, frame: SHPFrame) -> OpaquePointer? {
+    let w = frame.width
+    let h = frame.height
+    guard w > 0 && h > 0 else { return nil }
+    let format: UInt32 = 0x16362004  // SDL_PIXELFORMAT_ARGB8888
+    guard let texture = SDL_CreateTexture(renderer, format, Int32(SDL_TEXTUREACCESS_STATIC.rawValue), Int32(w), Int32(h)) else {
+        return nil
+    }
+
+    var argb = [UInt32](repeating: 0, count: w * h)
+    for i in 0..<(w * h) {
+        let palIdx = Int(frame.pixels[i])
+        if palIdx == 0 {
+            argb[i] = 0x00000000  // Fully transparent
+        } else {
+            let c = renderState.gamePalette[palIdx]
+            argb[i] = 0xFF000000 | (UInt32(c.r) << 16) | (UInt32(c.g) << 8) | UInt32(c.b)
+        }
+    }
+
+    _ = argb.withUnsafeMutableBufferPointer { buf in
+        SDL_UpdateTexture(texture, nil, buf.baseAddress, Int32(w * 4))
+    }
+    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND)
+    return texture
 }
 
 func getTileTexture(_ renderer: OpaquePointer?, icnName: String, iconIndex: Int, theater: TheaterType = .temperate) -> OpaquePointer? {

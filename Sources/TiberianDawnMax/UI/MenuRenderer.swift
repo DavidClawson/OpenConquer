@@ -49,9 +49,9 @@ func makeMainButtons() -> [Button] {
         Button(label: "Start New Game", x: cx, y: startY, w: bw, h: bh) {
             session.currentScreen = DifficultyScreen()
         },
-        Button(label: "Sprite Viewer", x: cx, y: startY + 60, w: bw, h: bh) {
-            loadCurrentSprite()
-            session.currentScreen = SpriteViewerScreen()
+        Button(label: "Sprite Playground", x: cx, y: startY + 60, w: bw, h: bh) {
+            session.spritePlayground.initialize()
+            session.currentScreen = SpritePlaygroundScreen()
         },
         Button(label: "Sound Test", x: cx, y: startY + 120, w: bw, h: bh) {
             session.soundTest.initialize()

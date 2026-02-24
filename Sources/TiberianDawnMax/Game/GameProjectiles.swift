@@ -42,8 +42,11 @@ class Projectile {
         self.damage = damage
         self.warhead = warhead
         self.sourceHouse = sourceHouse
-        // Convert MPH speed to pixels/tick (same as unit speed)
-        self.speed = Double(data.maxSpeed.rawValue) * 0.08
+        // Convert MPH speed to pixels/tick
+        // Projectiles fly faster than ground units — use higher factor for snappier feel
+        // Original C&C: MPH in leptons/tick, 1 lepton = 24/256 px = 0.09375 px
+        // We boost projectiles by ~2.5x to feel right at modern display scales
+        self.speed = Double(data.maxSpeed.rawValue) * 0.20
     }
 }
 
@@ -240,12 +243,20 @@ func renderProjectiles(_ renderer: OpaquePointer?, camX: Int, camY: Int, vw: Int
 
         // Smoke trail for fueled projectiles (missiles)
         if proj.bulletData.isFueled && proj.age > 1 {
-            SDL_SetRenderDrawColor(renderer, 180, 180, 180, UInt8(max(40, 120 - proj.age * 5)))
             let trailRad = Double(proj.facing) / 256.0 * 2.0 * .pi
-            let tx = screenX - Int32(sin(trailRad) * 6.0)
-            let ty = screenY + Int32(cos(trailRad) * 6.0)
-            var trailRect = SDL_Rect(x: tx - 2, y: ty - 2, w: 4, h: 4)
-            SDL_RenderFillRect(renderer, &trailRect)
+            let sinF = sin(trailRad)
+            let cosF = cos(trailRad)
+            // Draw multiple puffs behind the missile for a continuous trail
+            for i in 1...4 {
+                let dist = Double(i) * 5.0
+                let alpha = UInt8(max(20, 160 - i * 35))
+                let size: Int32 = Int32(max(2, 5 - i))
+                SDL_SetRenderDrawColor(renderer, 180, 180, 180, alpha)
+                let tx = screenX - Int32(sinF * dist)
+                let ty = screenY + Int32(cosF * dist)
+                var trailRect = SDL_Rect(x: tx - size / 2, y: ty - size / 2, w: size, h: size)
+                SDL_RenderFillRect(renderer, &trailRect)
+            }
         }
     }
 }

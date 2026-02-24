@@ -235,7 +235,7 @@ let animTypeDataTable: [GameAnimType: AnimTypeData] = [
         isNormalized: true, isWhiteTrans: true, isScorcher: false, isCrater: false,
         isSticky: false, isGroundLayer: false, isTranslucent: true, isFlame: false,
         damage: 0, delay: 1, startFrame: 0, loopStart: 0, loopEnd: -1,
-        stages: -1, loops: 1, chainTo: nil
+        stages: 10, loops: 0, chainTo: nil
     ),
 ]
 

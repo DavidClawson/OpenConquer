@@ -212,7 +212,15 @@ func renderGame(_ renderer: OpaquePointer?) {
 
         if obj.kind == .unit {
             let facingIdx = facing32[min(255, max(0, obj.facing))]
-            let frameIdx = bodyShape[facingIdx]
+            var frameIdx = bodyShape[facingIdx]
+
+            // Clamp frame index for units whose SHP has fewer than 32 body frames
+            // (e.g. hovercraft has very few orientations)
+            let unitSpriteName = spriteNameOverrides[obj.typeName.uppercased()] ?? obj.typeName.uppercased()
+            if let shp = renderState.objectSHPCache[unitSpriteName],
+               frameIdx >= shp.frames.count && shp.frames.count > 0 {
+                frameIdx = (facingIdx * shp.frames.count) / 32
+            }
 
             // Aircraft: draw shadow at ground level, sprite offset upward by altitude
             if obj.isAircraft && obj.altitude > 0 {
@@ -259,6 +267,18 @@ func renderGame(_ renderer: OpaquePointer?) {
                    drawX + Int32(info.width) < 0 || drawY + Int32(info.height) < 0 { continue }
                 var dstRect = SDL_Rect(x: drawX, y: drawY, w: Int32(info.width), h: Int32(info.height))
                 SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
+
+                // Render turret overlay for turreted units (frame 32 + turretFacing)
+                if obj.hasTurret {
+                    let turretFacingIdx = facing32[min(255, max(0, obj.turretFacing))]
+                    let turretFrameIdx = 32 + bodyShape[turretFacingIdx]
+                    if let turretInfo = getObjectTexture(renderer, typeName: obj.typeName, frame: turretFrameIdx, house: obj.house) {
+                        let tDrawX = screenX - Int32(turretInfo.width) / 2
+                        let tDrawY = screenY - Int32(turretInfo.height) / 2
+                        var tDstRect = SDL_Rect(x: tDrawX, y: tDrawY, w: Int32(turretInfo.width), h: Int32(turretInfo.height))
+                        SDL_RenderCopy(renderer, turretInfo.texture, nil, &tDstRect)
+                    }
+                }
             } else {
                 let unitSize: Int32 = 16
                 let hc = obj.house.displayColor
@@ -534,12 +554,16 @@ func renderGameCursor(_ renderer: OpaquePointer?, world: GameWorld) {
         cursorFrame = cursor.startFrame
     }
 
-    // Render the cursor frame centered on hotspot
+    // Render the cursor frame centered on hotspot, scaled up for modern resolution
+    // Original game was 320x200, our window is ~960x600, so scale cursor by ~2x
+    let cursorScale: Int32 = 2
     if cursorFrame < shp.frames.count,
        let info = getUITexture(renderer, shp: shp, frame: cursorFrame, cache: &renderState.mouseTextures) {
-        let drawX = input.mouseX - cursor.hotX
-        let drawY = input.mouseY - cursor.hotY
-        var dstRect = SDL_Rect(x: drawX, y: drawY, w: Int32(info.width), h: Int32(info.height))
+        let drawX = input.mouseX - cursor.hotX * cursorScale
+        let drawY = input.mouseY - cursor.hotY * cursorScale
+        var dstRect = SDL_Rect(x: drawX, y: drawY,
+                               w: Int32(info.width) * cursorScale,
+                               h: Int32(info.height) * cursorScale)
         SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
     }
 }
@@ -579,7 +603,23 @@ func loadUISprites(_ renderer: OpaquePointer?) {
     if let data = mixManager.retrieve("MOUSE.SHP") {
         do {
             renderState.mouseSHP = try SHPFile(data: data)
-            print("Loaded MOUSE.SHP: \(renderState.mouseSHP!.frames.count) frames")
+            let shp = renderState.mouseSHP!
+            let f0 = shp.frames[0]
+            let nonZero = f0.pixels.filter { $0 != 0 }.count
+            let paletteLoaded = !renderState.gamePalette.isEmpty
+            print("Loaded MOUSE.SHP: \(shp.frames.count) frames, frame 0: \(f0.width)x\(f0.height), \(nonZero) visible, palette loaded: \(paletteLoaded)")
+            // Dump unique palette indices used by frame 0
+            let usedIndices = Set(f0.pixels.filter { $0 != 0 }).sorted()
+            print("  Frame 0 palette indices: \(usedIndices.map { String($0) }.joined(separator: ","))")
+            // Dump ASCII art of frame 0
+            for y in 0..<min(f0.height, 24) {
+                var row = "  "
+                for x in 0..<f0.width {
+                    let p = f0.pixels[y * f0.width + x]
+                    row += p == 0 ? "." : "#"
+                }
+                print(row)
+            }
         } catch {
             print("Failed to parse MOUSE.SHP: \(error)")
         }
@@ -593,7 +633,8 @@ func getUITexture(_ renderer: OpaquePointer?, shp: SHPFile, frame: Int, cache: i
         return (texture: cached, width: f.width, height: f.height)
     }
     let f = shp.frames[frame]
-    if let texture = createSpriteTexture(renderer, frame: f) {
+    // Use UI sprite texture (no shadow on index 4)
+    if let texture = createUISpriteTexture(renderer, frame: f) {
         cache[frame] = texture
         return (texture: texture, width: f.width, height: f.height)
     }
@@ -680,8 +721,16 @@ func renderAnimations(_ renderer: OpaquePointer?, camX: Int, camY: Int, vw: Int3
             var dstRect = SDL_Rect(x: drawX, y: drawY, w: Int32(info.width), h: Int32(info.height))
             SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
         } else {
-            // Procedural fallback: animated circles for explosions
-            renderProceduralExplosion(renderer, anim: anim, screenX: screenX, screenY: screenY)
+            // Check if SHP exists but the current frame exceeds its frame count
+            // (animation is done — don't show ugly procedural rectangles)
+            let animSpriteName = spriteNameOverrides[anim.data.name.uppercased()] ?? anim.data.name.uppercased()
+            if let shp = renderState.objectSHPCache[animSpriteName],
+               anim.currentFrame >= shp.frames.count {
+                anim.isFinished = true
+            } else {
+                // SHP not loaded yet or truly missing — use procedural fallback
+                renderProceduralExplosion(renderer, anim: anim, screenX: screenX, screenY: screenY)
+            }
         }
     }
 
@@ -721,9 +770,15 @@ func renderProceduralExplosion(_ renderer: OpaquePointer?, anim: GameAnimation, 
     let radius = Int32(Double(halfSize) * min(1.0, progress * 2.0))
     let alpha = UInt8(max(0, min(255, Int(255.0 * (1.0 - progress)))))
 
-    // Color based on type
+    // Color and shape based on type
     let r: UInt8, g: UInt8, b: UInt8
     switch anim.type {
+    case .muzzleFlash:
+        // Small bright white-yellow flash, fades fast
+        SDL_SetRenderDrawColor(renderer, 255, 255, 200, UInt8(max(0, min(255, 255 - Int(progress * 400)))))
+        var flash = SDL_Rect(x: screenX - 3, y: screenY - 3, w: 6, h: 6)
+        SDL_RenderFillRect(renderer, &flash)
+        return
     case .napalm1, .napalm2, .napalm3, .burnSmall, .burnMed, .burnBig:
         r = 255; g = UInt8(max(0, 160 - Int(progress * 160))); b = 0
     case .piff, .piffpiff:

@@ -211,11 +211,23 @@ extension GameObject {
                 lastFireTick = world.tickCount
 
                 // Spawn muzzle flash animation at barrel position
+                // Use weapon-appropriate flash: small piff for small arms, GUNFIRE for cannons
                 let faceRad = Double(facing) / 256.0 * 2.0 * Double.pi
                 let flashDist = (kind == .infantry) ? 6.0 : 10.0
                 let mfx = worldX + sin(faceRad) * flashDist
                 let mfy = worldY - cos(faceRad) * flashDist
-                spawnAnimation(.muzzleFlash, worldX: mfx, worldY: mfy)
+                if let weapon = cachedPrimaryWeapon {
+                    switch weapon {
+                    case .m60mg, .m16, .chainGun, .pistol, .rifle:
+                        // Small arms: quick small flash
+                        spawnAnimation(.piff, worldX: mfx, worldY: mfy)
+                    case .flamethrower, .flameTongue, .chemspray:
+                        break  // Flame weapons don't need a separate muzzle flash
+                    default:
+                        // Cannons, rockets, etc: full muzzle flash
+                        spawnAnimation(.muzzleFlash, worldX: mfx, worldY: mfy)
+                    }
+                }
 
                 // Decrement ammo if limited
                 if ammo > 0 {
