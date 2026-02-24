@@ -109,6 +109,7 @@ func loadMapViewerData(_ scenarioName: String = "SCG01EA") {
     objectTextureCache.removeAll()
     objectSHPCache.removeAll()
     objectFailedSHPs.removeAll()
+    clearRemasteredTextureCache()
 
     for (_, texture) in terrainTextureCache { SDL_DestroyTexture(texture) }
     terrainTextureCache.removeAll()
@@ -282,6 +283,13 @@ func getTerrainTexture(_ renderer: OpaquePointer?, typeName: String, theater: Th
 
 func getObjectTexture(_ renderer: OpaquePointer?, typeName: String, frame: Int, house: House, theater: TheaterType? = nil) -> (texture: OpaquePointer, width: Int, height: Int)? {
     let upperName = typeName.uppercased()
+
+    // Try remastered sprite first (hi-res PNG)
+    if let remastered = getRemasteredTexture(renderer, typeName: upperName, frame: frame) {
+        return remastered
+    }
+
+    // Fall back to classic SHP from MIX archives
     let key = "\(upperName)_\(frame)_\(house.rawValue)"
 
     if let cached = objectTextureCache[key] {

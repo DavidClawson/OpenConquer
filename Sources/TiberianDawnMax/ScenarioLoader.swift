@@ -159,6 +159,7 @@ struct ScenarioData {
     let waypoints: [ScenarioWaypoint]
     let cellTriggers: [ScenarioCellTrigger]
     let baseBuildings: [ScenarioBaseBuilding]
+    let ini: INIFile  // Keep reference for trigger parsing
 }
 
 // MARK: - Cell Coordinate Helpers
@@ -192,23 +193,11 @@ func subCellOffset(_ subLocation: Int) -> (dx: Int, dy: Int) {
 
 /// Returns (width, height) in cells for known building types
 func buildingSize(_ typeName: String) -> (w: Int, h: Int) {
-    switch typeName.uppercased() {
-    case "FACT":                       return (w: 3, h: 3)  // Construction Yard
-    case "PROC":                       return (w: 3, h: 3)  // Refinery
-    case "WEAP":                       return (w: 3, h: 2)  // Weapons Factory
-    case "AFLD":                       return (w: 3, h: 2)  // Airfield
-    case "TMPL", "FIX":               return (w: 3, h: 3)  // Temple / Repair
-    case "NUKE", "NUK2":              return (w: 2, h: 2)  // Power Plant
-    case "PYLE", "HAND":              return (w: 2, h: 2)  // Barracks
-    case "SAM":                        return (w: 2, h: 2)  // SAM Site
-    case "HPAD":                       return (w: 2, h: 2)  // Helipad
-    case "EYE":                        return (w: 2, h: 2)  // Adv. Comm Center
-    case "SILO":                       return (w: 2, h: 1)  // Tiberium Silo
-    case "HQ":                         return (w: 2, h: 2)  // HQ / Comm Center
-    case "ARCO", "HOSP", "BIO", "MISS": return (w: 2, h: 2)
-    case "ATWR", "GTWR", "GUN", "OBLI": return (w: 1, h: 1)  // Turrets
-    default:                           return (w: 2, h: 2)
+    let upper = typeName.uppercased()
+    if let st = StructType.from(iniName: upper), let data = buildingTypeDataTable[st] {
+        return (w: data.sizeW, h: data.sizeH)
     }
+    return (w: 2, h: 2)  // fallback
 }
 
 // MARK: - Scenario Loader
@@ -359,6 +348,7 @@ func loadScenario(_ name: String, from mixManager: MIXFileManager) -> ScenarioDa
         infantry: infantry,
         waypoints: waypoints,
         cellTriggers: cellTriggers,
-        baseBuildings: baseBuildings
+        baseBuildings: baseBuildings,
+        ini: ini
     )
 }

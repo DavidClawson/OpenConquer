@@ -100,6 +100,9 @@ func handleGameLeftUp(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
 
         if let obj = nearest {
             obj.isSelected = !obj.isSelected || !shiftHeld
+            if obj.isSelected && obj.house == world.playerHouse {
+                soundEffect(unitReportSound())
+            }
         }
     }
 
@@ -126,6 +129,7 @@ func handleGameRightClick(_ x: Int32, _ y: Int32) {
             obj.mission = .attack
             obj.movePath = []
         }
+        soundEffect(unitAcknowledgeSound())
         return
     }
 
@@ -152,6 +156,7 @@ func handleGameRightClick(_ x: Int32, _ y: Int32) {
         obj.mission = .move
         obj.movePath = []  // Clear old path so A* recalculates
     }
+    soundEffect(unitAcknowledgeSound())
 }
 
 // MARK: - Game Renderer
@@ -161,6 +166,9 @@ func renderGame(_ renderer: OpaquePointer?) {
     let tileSize = 24
     let mapSize = 64
     let theater = world.theater
+
+    // Load UI sprites on first frame
+    loadUISprites(renderer)
 
     // Clip game rendering to viewport area (left of sidebar)
     let gameViewportWidth = windowWidth - sidebarWidth
@@ -348,25 +356,78 @@ func renderGame(_ renderer: OpaquePointer?) {
         }
     }
 
-    // Draw mobile game objects (units and infantry) from their live positions
+    // Draw mobile game objects (units and infantry) from interpolated positions
+    let interp = renderInterpolation
     for obj in mobileObjects {
         // Skip enemy objects on non-visible cells (fog of war)
         if obj.house != world.playerHouse && !isCellVisible(obj.cell) { continue }
 
-        let screenX = Int32(obj.worldX - Double(camX))
-        let screenY = Int32(obj.worldY - Double(camY))
+        // Interpolate between previous and current tick positions for smooth rendering
+        let drawX = obj.prevWorldX + (obj.worldX - obj.prevWorldX) * interp
+        let drawY = obj.prevWorldY + (obj.worldY - obj.prevWorldY) * interp
+        let screenX = Int32(drawX - Double(camX))
+        let screenY = Int32(drawY - Double(camY))
+
+        // Check if damaged recently (red flash for 3 ticks)
+        let isDamageFlash = (world.tickCount - obj.lastDamagedTick) < 3 && obj.lastDamagedTick > 0
 
         if obj.kind == .unit {
             let facingIdx = facing32[min(255, max(0, obj.facing))]
             let frameIdx = bodyShape[facingIdx]
 
-            if let info = getObjectTexture(renderer, typeName: obj.typeName, frame: frameIdx, house: obj.house) {
+            // Aircraft: draw shadow at ground level, sprite offset upward by altitude
+            if obj.isAircraft && obj.altitude > 0 {
+                let altOffset = Int32(obj.altitude)
+
+                // Shadow: dark ellipse on the ground
+                SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
+                SDL_SetRenderDrawColor(renderer, 0, 0, 0, 80)
+                let shadowW: Int32 = 18
+                let shadowH: Int32 = 8
+                var shadowRect = SDL_Rect(x: screenX - shadowW / 2, y: screenY - shadowH / 2 + altOffset / 2,
+                                          w: shadowW, h: shadowH)
+                SDL_RenderFillRect(renderer, &shadowRect)
+
+                // Draw aircraft elevated
+                let elevatedY = screenY - altOffset
+                if let info = getObjectTexture(renderer, typeName: obj.typeName, frame: frameIdx, house: obj.house) {
+                    let drawX = screenX - Int32(info.width) / 2
+                    let drawY = elevatedY - Int32(info.height) / 2
+                    if isDamageFlash { SDL_SetTextureColorMod(info.texture, 255, 80, 80) }
+                    var dstRect = SDL_Rect(x: drawX, y: drawY, w: Int32(info.width), h: Int32(info.height))
+                    SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
+                    if isDamageFlash { SDL_SetTextureColorMod(info.texture, 255, 255, 255) }
+                } else {
+                    // Procedural aircraft: diamond shape
+                    let hc = obj.house.displayColor
+                    SDL_SetRenderDrawColor(renderer, hc.r, hc.g, hc.b, 220)
+                    let sz: Int32 = 14
+                    // Draw diamond
+                    var points: [SDL_Point] = [
+                        SDL_Point(x: screenX, y: elevatedY - sz / 2),
+                        SDL_Point(x: screenX + sz / 2, y: elevatedY),
+                        SDL_Point(x: screenX, y: elevatedY + sz / 2),
+                        SDL_Point(x: screenX - sz / 2, y: elevatedY),
+                        SDL_Point(x: screenX, y: elevatedY - sz / 2),
+                    ]
+                    SDL_RenderDrawLines(renderer, &points, Int32(points.count))
+                    // Fill center
+                    var fillRect = SDL_Rect(x: screenX - 3, y: elevatedY - 3, w: 6, h: 6)
+                    SDL_RenderFillRect(renderer, &fillRect)
+                }
+            } else if let info = getObjectTexture(renderer, typeName: obj.typeName, frame: frameIdx, house: obj.house) {
                 let drawX = screenX - Int32(info.width) / 2
                 let drawY = screenY - Int32(info.height) / 2
                 if drawX > vw || drawY > vh ||
                    drawX + Int32(info.width) < 0 || drawY + Int32(info.height) < 0 { continue }
+                if isDamageFlash {
+                    SDL_SetTextureColorMod(info.texture, 255, 80, 80)
+                }
                 var dstRect = SDL_Rect(x: drawX, y: drawY, w: Int32(info.width), h: Int32(info.height))
                 SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
+                if isDamageFlash {
+                    SDL_SetTextureColorMod(info.texture, 255, 255, 255)
+                }
             } else {
                 let unitSize: Int32 = 16
                 let hc = obj.house.displayColor
@@ -378,15 +439,53 @@ func renderGame(_ renderer: OpaquePointer?) {
             }
         } else if obj.kind == .infantry {
             let facingIdx = facing32[min(255, max(0, obj.facing))]
-            let frameIdx = humanShape[facingIdx]
+            let direction = humanShape[facingIdx]  // 0-7 direction index
+
+            // Determine animation frame based on infantry state
+            let frameIdx: Int
+            let isMoving = obj.moveTargetX != nil
+            let isFiring = (world.tickCount - obj.lastFireTick) < 4 && obj.lastFireTick > 0
+            if obj.isProne {
+                if isMoving {
+                    // DO_CRAWL: Frame=144, Count=4, Jump=4 (minigunner layout)
+                    let crawlStart = 144
+                    let crawlCount = 4
+                    let crawlJump = 4
+                    frameIdx = crawlStart + direction * crawlJump + (world.tickCount % crawlCount)
+                } else {
+                    // DO_PRONE: Frame=192, Count=1, Jump=8
+                    frameIdx = 192 + direction * 8
+                }
+            } else if isFiring {
+                // DO_FIRE_WEAPON: Frame=64, Count=8, Jump=8 (minigunner)
+                let fireStart = 64
+                let fireCount = 8
+                let fireJump = 8
+                frameIdx = fireStart + direction * fireJump + (world.tickCount % fireCount)
+            } else if isMoving {
+                // DO_WALK: Frame=16, Count=6, Jump=6 (all standard infantry)
+                let walkStart = 16
+                let walkCount = 6
+                let walkJump = 6
+                frameIdx = walkStart + direction * walkJump + (world.tickCount % walkCount)
+            } else {
+                // DO_STAND_READY: Frame=0, Count=1, Jump=1
+                frameIdx = direction
+            }
 
             if let info = getObjectTexture(renderer, typeName: obj.typeName, frame: frameIdx, house: obj.house) {
                 let drawX = screenX - Int32(info.width) / 2
                 let drawY = screenY - Int32(info.height) / 2
                 if drawX > vw || drawY > vh ||
                    drawX + Int32(info.width) < 0 || drawY + Int32(info.height) < 0 { continue }
+                if isDamageFlash {
+                    SDL_SetTextureColorMod(info.texture, 255, 80, 80)
+                }
                 var dstRect = SDL_Rect(x: drawX, y: drawY, w: Int32(info.width), h: Int32(info.height))
                 SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
+                if isDamageFlash {
+                    SDL_SetTextureColorMod(info.texture, 255, 255, 255)
+                }
             } else {
                 let dotSize: Int32 = 6
                 let hc = obj.house.displayColor
@@ -396,6 +495,42 @@ func renderGame(_ renderer: OpaquePointer?) {
             }
         }
     }
+
+    // === Pass 4a: Animations (explosions, fires, effects) ===
+    renderAnimations(renderer, camX: camX, camY: camY, vw: vw, vh: vh)
+
+    // === Pass 4b: Muzzle flash effects ===
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
+    for obj in world.objects {
+        let flashDuration = (world.tickCount - obj.lastFireTick)
+        guard flashDuration < 3 && obj.lastFireTick > 0 else { continue }
+        if obj.house != world.playerHouse && !isCellVisible(obj.cell) { continue }
+
+        let screenX = Int32(obj.worldX - Double(camX))
+        let screenY = Int32(obj.worldY - Double(camY))
+
+        // Offset flash toward the facing direction
+        let faceRad = Double(obj.facing) / 256.0 * 2.0 * Double.pi
+        let flashDist = (obj.kind == .infantry) ? 6.0 : 10.0
+        let fx = screenX + Int32(sin(faceRad) * flashDist)
+        let fy = screenY - Int32(cos(faceRad) * flashDist)
+
+        let alpha = UInt8(max(0, 255 - flashDuration * 80))
+        let radius: Int32 = (obj.kind == .infantry) ? 3 : 5
+
+        // Bright yellow-white core
+        SDL_SetRenderDrawColor(renderer, 255, 255, 200, alpha)
+        var coreRect = SDL_Rect(x: fx - radius, y: fy - radius, w: radius * 2, h: radius * 2)
+        SDL_RenderFillRect(renderer, &coreRect)
+
+        // Outer glow
+        SDL_SetRenderDrawColor(renderer, 255, 200, 50, alpha / 2)
+        var glowRect = SDL_Rect(x: fx - radius - 1, y: fy - radius - 1, w: radius * 2 + 2, h: radius * 2 + 2)
+        SDL_RenderDrawRect(renderer, &glowRect)
+    }
+
+    // === Pass 4c: In-flight projectiles (missiles, shells, grenades) ===
+    renderProjectiles(renderer, camX: camX, camY: camY, vw: vw, vh: vh)
 
     // === Pass 5: Selection highlights ===
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
@@ -420,13 +555,13 @@ func renderGame(_ renderer: OpaquePointer?) {
                 let sy = Int32(pos.py - camY)
                 let sw = Int32(size.w * 24)
                 let sh = Int32(size.h * 24)
-                renderSelectionBox(renderer, x: sx, y: sy, w: sw, h: sh, strength: obj.strength)
+                renderSelectionBox(renderer, x: sx, y: sy, w: sw, h: sh, healthFraction: obj.healthFraction)
             }
         } else {
             let boxSize: Int32 = obj.kind == .unit ? 20 : 12
             let sx = screenX - boxSize / 2
             let sy = screenY - boxSize / 2
-            renderSelectionBox(renderer, x: sx, y: sy, w: boxSize, h: boxSize, strength: obj.strength)
+            renderSelectionBox(renderer, x: sx, y: sy, w: boxSize, h: boxSize, healthFraction: obj.healthFraction)
         }
     }
 
@@ -508,31 +643,221 @@ func renderGame(_ renderer: OpaquePointer?) {
         drawText(renderer, "\(selectedCount) SELECTED", centerX: gameViewportCenter, centerY: 35, color: .green, scale: 1)
     }
 
-    drawText(renderer, "Select  Drag  Right Click: Move/Attack  Esc: Menu",
+    // Win/Lose state display
+    if triggerWinState == .won {
+        drawText(renderer, "MISSION ACCOMPLISHED", centerX: gameViewportCenter, centerY: windowHeight / 2 - 40, color: .green, scale: 3)
+        let scoreData = generateScoreScreen(won: true)
+        drawText(renderer, "Score: \(scoreData.score)  Time: \(scoreData.elapsedTime)", centerX: gameViewportCenter, centerY: windowHeight / 2, color: .amber, scale: 1)
+        drawText(renderer, "N: Next Mission  R: Restart  ESC: Menu", centerX: gameViewportCenter, centerY: windowHeight / 2 + 25, color: .gray, scale: 1)
+    } else if triggerWinState == .lost {
+        drawText(renderer, "MISSION FAILED", centerX: gameViewportCenter, centerY: windowHeight / 2 - 40, color: .red, scale: 3)
+        let scoreData = generateScoreScreen(won: false)
+        drawText(renderer, "Score: \(scoreData.score)  Time: \(scoreData.elapsedTime)", centerX: gameViewportCenter, centerY: windowHeight / 2, color: .amber, scale: 1)
+        drawText(renderer, "R: Restart  ESC: Menu", centerX: gameViewportCenter, centerY: windowHeight / 2 + 25, color: .gray, scale: 1)
+    }
+
+    drawText(renderer, "RClick: Move/Attack  F3: Perf  F5: Save  F9: Load  Esc: Menu",
              centerX: gameViewportCenter, centerY: windowHeight - 15, color: .gray, scale: 1)
+
+    // === Custom Cursor Rendering ===
+    renderGameCursor(renderer, world: world)
+}
+
+// MARK: - Game Cursor Rendering
+
+/// Cursor type with VC-authentic frame mapping from mouse.cpp MouseControl[]
+struct CursorDef {
+    let startFrame: Int
+    let frameCount: Int
+    let hotX: Int32
+    let hotY: Int32
+}
+
+let cursorNormal    = CursorDef(startFrame: 0,   frameCount: 1,  hotX: 0,  hotY: 0)
+let cursorCanMove   = CursorDef(startFrame: 10,  frameCount: 1,  hotX: 15, hotY: 12)
+let cursorNoMove    = CursorDef(startFrame: 11,  frameCount: 1,  hotX: 15, hotY: 12)
+let cursorCanSelect = CursorDef(startFrame: 12,  frameCount: 6,  hotX: 15, hotY: 12)
+let cursorCanAttack = CursorDef(startFrame: 18,  frameCount: 8,  hotX: 15, hotY: 12)
+let cursorDeploy    = CursorDef(startFrame: 53,  frameCount: 9,  hotX: 15, hotY: 12)
+let cursorEnter     = CursorDef(startFrame: 119, frameCount: 3,  hotX: 15, hotY: 12)
+let cursorAreaGuard = CursorDef(startFrame: 153, frameCount: 1,  hotX: 15, hotY: 12)
+
+func renderGameCursor(_ renderer: OpaquePointer?, world: GameWorld) {
+    guard let shp = mouseSHP, !shp.frames.isEmpty else { return }
+
+    // Hide system cursor when playing
+    if !systemCursorHidden {
+        SDL_ShowCursor(SDL_DISABLE)
+        systemCursorHidden = true
+    }
+
+    // Animate cursor (cycle every ~66ms = 15 FPS like the game tick rate)
+    let now = SDL_GetTicks()
+    if now - cursorAnimTimer > 66 {
+        cursorAnimTimer = now
+        cursorAnimFrame += 1
+    }
+
+    // Determine cursor type based on what's under the mouse
+    var cursor = cursorNormal
+
+    // Only apply game cursor logic when mouse is in the game viewport
+    if mouseX < windowWidth - sidebarWidth {
+        let worldPos = gameScreenToWorld(mouseX, mouseY)
+        let selected = world.selectedObjects()
+
+        if !selected.isEmpty {
+            // Check for enemy under cursor → attack cursor
+            if let _ = findEnemyAtWorldPos(worldX: worldPos.worldX, worldY: worldPos.worldY) {
+                cursor = cursorCanAttack
+            } else {
+                // Move cursor (default when units selected and clicking terrain)
+                cursor = cursorCanMove
+            }
+        } else {
+            // Check for own selectable unit under cursor
+            let hitRadius = 14.0 / gameZoomLevel
+            var foundOwn = false
+            for obj in world.objects {
+                if obj.kind == .structure { continue }
+                if obj.house != world.playerHouse { continue }
+                if obj.strength <= 0 { continue }
+                let dx = obj.worldX - worldPos.worldX
+                let dy = obj.worldY - worldPos.worldY
+                if sqrt(dx * dx + dy * dy) < hitRadius {
+                    foundOwn = true
+                    break
+                }
+            }
+            if foundOwn {
+                cursor = cursorCanSelect
+            }
+        }
+    }
+
+    // Compute the display frame
+    let cursorFrame: Int
+    if cursor.frameCount > 1 {
+        cursorFrame = cursor.startFrame + (cursorAnimFrame % cursor.frameCount)
+    } else {
+        cursorFrame = cursor.startFrame
+    }
+
+    // Render the cursor frame centered on hotspot
+    if cursorFrame < shp.frames.count,
+       let info = getUITexture(renderer, shp: shp, frame: cursorFrame, cache: &mouseTextures) {
+        let drawX = mouseX - cursor.hotX
+        let drawY = mouseY - cursor.hotY
+        var dstRect = SDL_Rect(x: drawX, y: drawY, w: Int32(info.width), h: Int32(info.height))
+        SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
+    }
+}
+
+// MARK: - UI Sprite Cache (SELECT.SHP, PIPS.SHP, MOUSE.SHP)
+
+var selectSHP: SHPFile? = nil
+var selectTextures: [Int: OpaquePointer] = [:]
+var pipsSHP: SHPFile? = nil
+var pipsTextures: [Int: OpaquePointer] = [:]
+var mouseSHP: SHPFile? = nil
+var mouseTextures: [Int: OpaquePointer] = [:]
+var uiSpritesLoaded = false
+var cursorAnimFrame: Int = 0
+var cursorAnimTimer: UInt32 = 0
+var systemCursorHidden = false
+
+func loadUISprites(_ renderer: OpaquePointer?) {
+    guard !uiSpritesLoaded else { return }
+    uiSpritesLoaded = true
+
+    // SELECT.SHP — selection brackets
+    if let data = mixManager.retrieve("SELECT.SHP") {
+        do {
+            selectSHP = try SHPFile(data: data)
+            print("Loaded SELECT.SHP: \(selectSHP!.frames.count) frames")
+            for (i, f) in selectSHP!.frames.enumerated() {
+                let nonZero = f.pixels.filter { $0 != 0 }.count
+                print("  SELECT.SHP frame \(i): \(f.width)x\(f.height), \(nonZero) visible pixels")
+            }
+        } catch {
+            print("Failed to parse SELECT.SHP: \(error)")
+        }
+    }
+
+    // PIPS.SHP — health pips
+    if let data = mixManager.retrieve("PIPS.SHP") {
+        do {
+            pipsSHP = try SHPFile(data: data)
+            print("Loaded PIPS.SHP: \(pipsSHP!.frames.count) frames")
+        } catch {
+            print("Failed to parse PIPS.SHP: \(error)")
+        }
+    }
+
+    // MOUSE.SHP — cursor shapes
+    if let data = mixManager.retrieve("MOUSE.SHP") {
+        do {
+            mouseSHP = try SHPFile(data: data)
+            print("Loaded MOUSE.SHP: \(mouseSHP!.frames.count) frames")
+        } catch {
+            print("Failed to parse MOUSE.SHP: \(error)")
+        }
+    }
+}
+
+func getUITexture(_ renderer: OpaquePointer?, shp: SHPFile, frame: Int, cache: inout [Int: OpaquePointer]) -> (texture: OpaquePointer, width: Int, height: Int)? {
+    guard frame >= 0 && frame < shp.frames.count else { return nil }
+    if let cached = cache[frame] {
+        let f = shp.frames[frame]
+        return (texture: cached, width: f.width, height: f.height)
+    }
+    let f = shp.frames[frame]
+    if let texture = createSpriteTexture(renderer, frame: f) {
+        cache[frame] = texture
+        return (texture: texture, width: f.width, height: f.height)
+    }
+    return nil
 }
 
 // MARK: - Selection Box Rendering
 
-func renderSelectionBox(_ renderer: OpaquePointer?, x: Int32, y: Int32, w: Int32, h: Int32, strength: Int) {
-    // Green selection border
-    SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255)
-    var border = SDL_Rect(x: x, y: y, w: w, h: h)
-    SDL_RenderDrawRect(renderer, &border)
+func renderSelectionBox(_ renderer: OpaquePointer?, x: Int32, y: Int32, w: Int32, h: Int32, healthFraction: Double) {
+    renderProceduralBrackets(renderer, x: x, y: y, w: w, h: h)
+    renderHealthPips(renderer, x: x, y: y, w: w, healthFraction: healthFraction)
+}
 
-    // Health bar above selection
+/// Fallback procedural white corner brackets
+func renderProceduralBrackets(_ renderer: OpaquePointer?, x: Int32, y: Int32, w: Int32, h: Int32) {
+    let cornerLen: Int32 = max(4, min(w, h) / 3)
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255)
+
+    // Top-left
+    SDL_RenderDrawLine(renderer, x, y, x + cornerLen, y)
+    SDL_RenderDrawLine(renderer, x, y, x, y + cornerLen)
+    // Top-right
+    SDL_RenderDrawLine(renderer, x + w, y, x + w - cornerLen, y)
+    SDL_RenderDrawLine(renderer, x + w, y, x + w, y + cornerLen)
+    // Bottom-left
+    SDL_RenderDrawLine(renderer, x, y + h, x + cornerLen, y + h)
+    SDL_RenderDrawLine(renderer, x, y + h, x, y + h - cornerLen)
+    // Bottom-right
+    SDL_RenderDrawLine(renderer, x + w, y + h, x + w - cornerLen, y + h)
+    SDL_RenderDrawLine(renderer, x + w, y + h, x + w, y + h - cornerLen)
+}
+
+/// Render health bar above selected unit
+func renderHealthPips(_ renderer: OpaquePointer?, x: Int32, y: Int32, w: Int32, healthFraction: Double) {
+    let healthFrac = max(0.0, min(1.0, healthFraction))
+
     let barW = w
     let barH: Int32 = 3
     let barX = x
     let barY = y - barH - 2
-    let healthFrac = Double(strength) / 256.0
 
-    // Background (dark)
     SDL_SetRenderDrawColor(renderer, 40, 40, 40, 200)
     var bgRect = SDL_Rect(x: barX, y: barY, w: barW, h: barH)
     SDL_RenderFillRect(renderer, &bgRect)
 
-    // Health fill (green → yellow → red based on health)
     let fillW = Int32(Double(barW) * healthFrac)
     let r: UInt8, g: UInt8
     if healthFrac > 0.5 {
@@ -545,6 +870,105 @@ func renderSelectionBox(_ renderer: OpaquePointer?, x: Int32, y: Int32, w: Int32
     SDL_SetRenderDrawColor(renderer, r, g, 0, 255)
     var healthRect = SDL_Rect(x: barX, y: barY, w: fillW, h: barH)
     SDL_RenderFillRect(renderer, &healthRect)
+}
+
+// MARK: - Animation Rendering
+
+/// Render active animations (explosions, fires, smoke)
+func renderAnimations(_ renderer: OpaquePointer?, camX: Int, camY: Int, vw: Int32, vh: Int32) {
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
+
+    for anim in activeAnimations {
+        if anim.isFinished { continue }
+
+        let screenX = Int32(anim.worldX) - Int32(camX)
+        let screenY = Int32(anim.worldY) - Int32(camY)
+
+        // Cull off-screen animations
+        let maxSize = Int32(anim.data.size)
+        if screenX + maxSize < 0 || screenY + maxSize < 0 ||
+           screenX - maxSize > vw || screenY - maxSize > vh { continue }
+
+        // Try to render from SHP sprite
+        let theater = gameWorld?.theater ?? .temperate
+        if let info = getObjectTexture(renderer, typeName: anim.data.name,
+                                       frame: anim.currentFrame, house: .neutral,
+                                       theater: theater) {
+            let drawX = screenX - Int32(info.width) / 2
+            let drawY = screenY - Int32(info.height) / 2
+            var dstRect = SDL_Rect(x: drawX, y: drawY, w: Int32(info.width), h: Int32(info.height))
+            SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
+        } else {
+            // Procedural fallback: animated circles for explosions
+            renderProceduralExplosion(renderer, anim: anim, screenX: screenX, screenY: screenY)
+        }
+    }
+
+    // Render smudges (scorch marks, craters)
+    for smudge in mapSmudges {
+        let cellX = smudge.cell % 64
+        let cellY = smudge.cell / 64
+        let screenX = Int32(cellX * 24 - camX)
+        let screenY = Int32(cellY * 24 - camY)
+        if screenX > vw || screenY > vh || screenX + 24 < 0 || screenY + 24 < 0 { continue }
+
+        // Try SHP first
+        let theater = gameWorld?.theater ?? .temperate
+        if let info = getObjectTexture(renderer, typeName: smudge.type.rawValue,
+                                       frame: 0, house: .neutral, theater: theater) {
+            var dstRect = SDL_Rect(x: screenX, y: screenY, w: Int32(info.width), h: Int32(info.height))
+            SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
+        } else {
+            // Procedural fallback: dark circle for craters, dark oval for scorch
+            SDL_SetRenderDrawColor(renderer, 20, 15, 10,
+                                   smudge.type.isCrater ? 140 : 80)
+            let size: Int32 = smudge.type.isCrater ? 16 : 20
+            var rect = SDL_Rect(x: screenX + (24 - size) / 2, y: screenY + (24 - size) / 2,
+                               w: size, h: size)
+            SDL_RenderFillRect(renderer, &rect)
+        }
+    }
+}
+
+/// Procedural explosion effect when SHP not available
+func renderProceduralExplosion(_ renderer: OpaquePointer?, anim: GameAnimation, screenX: Int32, screenY: Int32) {
+    let maxFrames = anim.data.stages > 0 ? anim.data.stages : 30
+    let progress = Double(anim.currentFrame) / Double(max(1, maxFrames))
+    let halfSize = Int32(anim.data.size) / 2
+
+    // Explosion: expanding circle that fades
+    let radius = Int32(Double(halfSize) * min(1.0, progress * 2.0))
+    let alpha = UInt8(max(0, min(255, Int(255.0 * (1.0 - progress)))))
+
+    // Color based on type
+    let r: UInt8, g: UInt8, b: UInt8
+    switch anim.type {
+    case .napalm1, .napalm2, .napalm3, .burnSmall, .burnMed, .burnBig:
+        r = 255; g = UInt8(max(0, 160 - Int(progress * 160))); b = 0
+    case .piff, .piffpiff:
+        r = 255; g = 255; b = 200
+    case .smokeM, .smokePuff:
+        r = 80; g = 80; b = 80
+    case .ionCannon:
+        r = 100; g = 150; b = 255
+    default:
+        r = 255; g = UInt8(max(0, 200 - Int(progress * 200))); b = 0
+    }
+
+    SDL_SetRenderDrawColor(renderer, r, g, b, alpha)
+
+    // Core
+    var coreRect = SDL_Rect(x: screenX - radius, y: screenY - radius,
+                           w: radius * 2, h: radius * 2)
+    SDL_RenderFillRect(renderer, &coreRect)
+
+    // Outer glow (larger, more transparent)
+    if radius > 2 {
+        SDL_SetRenderDrawColor(renderer, r, g / 2, 0, alpha / 3)
+        var glowRect = SDL_Rect(x: screenX - radius - 2, y: screenY - radius - 2,
+                               w: radius * 2 + 4, h: radius * 2 + 4)
+        SDL_RenderDrawRect(renderer, &glowRect)
+    }
 }
 
 // MARK: - Game Minimap

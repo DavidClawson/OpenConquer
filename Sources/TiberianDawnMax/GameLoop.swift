@@ -8,6 +8,10 @@ let tickDurationMs: UInt32 = 66  // ~15 FPS (1000/15)
 var tickAccumulator: UInt32 = 0
 var lastTickTime: UInt32 = 0
 
+/// Interpolation factor 0.0-1.0 between game ticks for smooth rendering.
+/// 0.0 = at previous tick position, 1.0 = at current tick position.
+var renderInterpolation: Double = 0.0
+
 // MARK: - Game Update
 
 func updateGame() {
@@ -26,6 +30,9 @@ func updateGame() {
         tickAccumulator -= tickDurationMs
         gameTick()
     }
+
+    // Compute interpolation factor for smooth rendering between ticks
+    renderInterpolation = Double(tickAccumulator) / Double(tickDurationMs)
 }
 
 // MARK: - Game Tick
@@ -33,6 +40,12 @@ func updateGame() {
 func gameTick() {
     guard let world = gameWorld else { return }
     world.tickCount += 1
+
+    // Save previous positions for render interpolation
+    for obj in world.objects {
+        obj.prevWorldX = obj.worldX
+        obj.prevWorldY = obj.worldY
+    }
 
     // Update occupancy at start of tick
     updateOccupancy()
@@ -43,11 +56,47 @@ func gameTick() {
     // Tick production
     tickProduction()
 
+    // Tick super weapons
+    tickSuperWeapons()
+
     // Tick AI
     tickAI()
+    tickAISuperWeapons()
+
+    // Tick team AI (coordinated squads)
+    tickTeams()
+
+    // Tick triggers (win/lose conditions, timed events)
+    tickTriggers()
 
     // Update each object by mission
     for obj in world.objects {
+        // Aircraft-specific handling
+        if obj.isAircraft {
+            tickAircraft(obj)
+            switch obj.mission {
+            case .attack:
+                tickAircraftAttack(obj)
+            case .guard_:
+                tickAircraftGuard(obj)
+            case .return_:
+                tickAircraftReturn(obj)
+            case .move:
+                if obj.altitude >= flightLevel {
+                    let arrived = !flyToward(obj)
+                    if arrived {
+                        obj.mission = .guard_
+                    }
+                }
+            case .hunt, .timedHunt:
+                tickAircraftGuard(obj)
+                if obj.mission == .guard_ { obj.mission = .hunt }
+            default:
+                break
+            }
+            continue
+        }
+
         switch obj.mission {
         case .move:
             tickMove(obj)
@@ -57,16 +106,92 @@ func gameTick() {
             tickHarvest(obj)
         case .guard_:
             // Auto-target enemies for armed units/structures
-            if weaponData[obj.typeName.uppercased()] != nil {
+            if obj.isArmed {
                 tickGuardScan(obj)
             }
-        case .stop, .sleep:
+        case .guardArea:
+            tickGuardArea(obj)
+        case .hunt, .timedHunt:
+            tickHunt(obj)
+        case .ambush:
+            // Ambush: like sleep but switches to hunt when discovered
+            // Becomes hunt when any player unit is in sight range
+            if let _ = findNearestEnemy(obj, range: Double(obj.sightRange) * 24.0) {
+                obj.mission = .hunt
+            }
+        case .stop, .sleep, .sticky:
             break
+        case .retreat:
+            tickRetreat(obj)
+        case .return_:
+            tickReturn(obj)
+        case .enter:
+            // Move toward nav target (transport/building)
+            if obj.moveTargetX != nil {
+                let _ = moveOneStep(obj)
+            } else {
+                obj.mission = .guard_
+            }
+        case .capture:
+            tickCapture(obj)
+        case .unload:
+            tickUnload(obj)
+        case .repair:
+            tickBuildingRepair(obj)
+        case .selling:
+            tickBuildingSell(obj)
+        case .construction, .deconstruction:
+            break  // Handled by production system
+        case .missile:
+            break  // Future: superweapon launch
         }
     }
 
-    // Remove dead objects
+    // Tick infantry fear system
+    for obj in world.objects {
+        if obj.kind == .infantry {
+            tickFear(obj)
+        }
+    }
+
+    // Check cell triggers for player units that may have moved
+    for obj in world.objects {
+        if obj.house == world.playerHouse && obj.strength > 0 {
+            checkCellTriggers(cell: obj.cell, enteringObject: obj)
+        }
+    }
+
+    // Tick projectiles in flight
+    tickProjectiles()
+
+    // Tick animations
+    tickAnimations()
+
+    // Remove dead objects — spring "destroyed" triggers first, spawn death effects
+    for obj in world.objects {
+        if obj.strength <= 0 {
+            if let trigName = obj.triggerName {
+                springTrigger(named: trigName, event: .destroyed)
+            }
+            // Death effects are spawned by tickAttack when it kills;
+            // also catch any other deaths (e.g., fire damage, triggers)
+            if obj.lastDamagedTick == world.tickCount {
+                // Already handled by combat this tick
+            } else if obj.kind == .structure {
+                spawnDeathEffects(obj)
+            }
+        }
+    }
     removeDeadObjects()
+
+    // Recalculate power when buildings die or are built
+    if world.tickCount % 30 == 0 {
+        recalculateAllHousePower()
+    }
+
+    // Sync sidebar credits with HouseState
+    let playerState = getHouseState(world.playerHouse)
+    playerState.credits = sidebarCredits
 }
 
 // MARK: - Movement Tick
@@ -89,7 +214,8 @@ func tickMove(_ obj: GameObject) {
             let path = findPath(
                 fromX: fromCellX, fromY: fromCellY,
                 toX: toCellX, toY: toCellY,
-                ignoring: obj
+                ignoring: obj,
+                speedType: obj.cachedSpeedType
             )
             if path.isEmpty {
                 // No path found, stop
@@ -158,6 +284,89 @@ func tickMove(_ obj: GameObject) {
         obj.worldX += moveX
         obj.worldY += moveY
     }
+}
+
+// MARK: - Movement Step (mission-agnostic)
+
+/// Move one step toward the current move target without touching the mission.
+/// Returns true if still moving, false if arrived or no target.
+func moveOneStep(_ obj: GameObject) -> Bool {
+    guard let targetX = obj.moveTargetX, let targetY = obj.moveTargetY else {
+        return false
+    }
+
+    // If we have no path, compute one via A*
+    if obj.movePath.isEmpty {
+        let fromCellX = obj.cellX
+        let fromCellY = obj.cellY
+        let toCellX = Int(targetX) / 24
+        let toCellY = Int(targetY) / 24
+
+        if fromCellX != toCellX || fromCellY != toCellY {
+            let path = findPath(
+                fromX: fromCellX, fromY: fromCellY,
+                toX: toCellX, toY: toCellY,
+                ignoring: obj,
+                speedType: obj.cachedSpeedType
+            )
+            if path.isEmpty {
+                obj.moveTargetX = nil
+                obj.moveTargetY = nil
+                return false
+            }
+            obj.movePath = path
+        }
+    }
+
+    // Determine the next waypoint
+    let nextX: Double
+    let nextY: Double
+
+    if !obj.movePath.isEmpty {
+        let nextCell = obj.movePath[0]
+        nextX = Double(nextCell.cellX * 24) + 12.0
+        nextY = Double(nextCell.cellY * 24) + 12.0
+    } else {
+        nextX = targetX
+        nextY = targetY
+    }
+
+    let dx = nextX - obj.worldX
+    let dy = nextY - obj.worldY
+    let dist = sqrt(dx * dx + dy * dy)
+
+    if dist > 0.5 {
+        obj.facing = directionToFacing(dx: dx, dy: dy)
+    }
+
+    if dist <= obj.speed {
+        obj.worldX = nextX
+        obj.worldY = nextY
+
+        if !obj.movePath.isEmpty {
+            obj.movePath.removeFirst()
+            if obj.movePath.isEmpty {
+                let finalDx = targetX - obj.worldX
+                let finalDy = targetY - obj.worldY
+                let finalDist = sqrt(finalDx * finalDx + finalDy * finalDy)
+                if finalDist < 2.0 {
+                    obj.moveTargetX = nil
+                    obj.moveTargetY = nil
+                    return false
+                }
+            }
+        } else {
+            obj.moveTargetX = nil
+            obj.moveTargetY = nil
+            return false
+        }
+    } else {
+        let moveX = (dx / dist) * obj.speed
+        let moveY = (dy / dist) * obj.speed
+        obj.worldX += moveX
+        obj.worldY += moveY
+    }
+    return true
 }
 
 // MARK: - Facing Calculation

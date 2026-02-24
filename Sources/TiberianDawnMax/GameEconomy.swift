@@ -46,7 +46,12 @@ func tickHarvest(_ obj: GameObject) {
             if dist < 36.0 {
                 // At refinery — deposit
                 let creditsGained = obj.tiberiumLoad * tiberiumValue
-                sidebarCredits += creditsGained
+                let houseState = getHouseState(obj.house)
+                houseState.addCredits(creditsGained)
+                // Keep sidebar credits in sync for the player
+                if obj.house == gameWorld?.playerHouse {
+                    sidebarCredits += creditsGained
+                }
                 obj.tiberiumLoad = 0
                 // Clear movement to go find more tiberium
                 obj.moveTargetX = nil
@@ -60,10 +65,11 @@ func tickHarvest(_ obj: GameObject) {
                     obj.movePath = findPath(
                         fromX: obj.cellX, fromY: obj.cellY,
                         toX: refinery.cellX, toY: refinery.cellY,
-                        ignoring: obj
+                        ignoring: obj,
+                        speedType: .harvester
                     )
                 }
-                tickMove(obj)
+                let _ = moveOneStep(obj)
             }
         } else {
             // No refinery — just sit
@@ -92,7 +98,7 @@ func tickHarvest(_ obj: GameObject) {
                 let dy = my - targetPy
                 if sqrt(dx * dx + dy * dy) < 2.0 {
                     // Already heading there
-                    tickMove(obj)
+                    let _ = moveOneStep(obj)
                     return
                 }
             }
@@ -102,9 +108,10 @@ func tickHarvest(_ obj: GameObject) {
             obj.movePath = findPath(
                 fromX: obj.cellX, fromY: obj.cellY,
                 toX: target.cellX, toY: target.cellY,
-                ignoring: obj
+                ignoring: obj,
+                speedType: .harvester
             )
-            tickMove(obj)
+            let _ = moveOneStep(obj)
         } else {
             // No tiberium left — return to refinery if carrying anything
             if obj.tiberiumLoad > 0 {

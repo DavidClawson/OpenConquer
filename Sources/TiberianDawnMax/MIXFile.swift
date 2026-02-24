@@ -200,6 +200,31 @@ class MIXFileManager {
         return nil
     }
 
+    /// Register a MIX file that is nested inside another already-registered MIX archive.
+    /// This allows finding AUD files inside SOUNDS.MIX, SPEECH.MIX, etc.
+    func registerSubArchive(_ name: String) {
+        let upperName = name.uppercased()
+        // Check if already registered
+        if mixFiles.contains(where: { $0.name == upperName }) { return }
+
+        guard let data = retrieve(name) else {
+            // Not an error — some sub-archives may not exist
+            return
+        }
+
+        do {
+            // Write to temp file so MIXFile(url:) can parse it
+            let tempDir = FileManager.default.temporaryDirectory
+            let tempURL = tempDir.appendingPathComponent("_sub_\(upperName)")
+            try data.write(to: tempURL)
+            let mix = try MIXFile(url: tempURL)
+            mixFiles.append((name: upperName, mix: mix))
+            print("MIX: Registered sub-archive \(upperName) (\(mix.entries.count) files)")
+        } catch {
+            print("MIX: Failed to register sub-archive \(name): \(error)")
+        }
+    }
+
     var registeredFiles: [String] {
         mixFiles.map { $0.name }
     }

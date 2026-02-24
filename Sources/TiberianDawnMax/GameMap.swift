@@ -2,8 +2,15 @@ import Foundation
 
 // MARK: - Static Passability
 
-/// 4096-entry grid: true = passable, false = impassable
-var staticPassability: [Bool] = Array(repeating: true, count: 4096)
+/// Land passability: true = passable for ground units, false = impassable
+var landPassability: [Bool] = Array(repeating: true, count: 4096)
+/// Water passability: true = passable for naval units, false = impassable
+var waterPassability: [Bool] = Array(repeating: true, count: 4096)
+/// Legacy alias used by structure placement and MCV deploy
+var staticPassability: [Bool] {
+    get { landPassability }
+    set { landPassability = newValue }
+}
 
 // Water template types (from templateTable in MapLoader.swift)
 private let waterTemplateTypes: Set<Int> = [1, 2]  // W1, W2
@@ -11,10 +18,11 @@ private let waterTemplateTypes: Set<Int> = [1, 2]  // W1, W2
 /// Build the static passability map from terrain data.
 /// Called once after loading a scenario into game mode.
 func buildPassabilityMap() {
-    // Start with all cells passable
-    staticPassability = Array(repeating: true, count: 4096)
+    // Start with all cells passable in both maps
+    landPassability = Array(repeating: true, count: 4096)
+    waterPassability = Array(repeating: true, count: 4096)
 
-    // Mark structure footprints as impassable
+    // Mark structure footprints as impassable in BOTH maps
     if let scenario = scenarioData {
         for structure in scenario.structures {
             let size = buildingSize(structure.typeName)
@@ -24,47 +32,66 @@ func buildPassabilityMap() {
                     let cx = baseXY.x + dx
                     let cy = baseXY.y + dy
                     if cx >= 0 && cx < 64 && cy >= 0 && cy < 64 {
-                        staticPassability[cy * 64 + cx] = false
+                        landPassability[cy * 64 + cx] = false
+                        waterPassability[cy * 64 + cx] = false
                     }
                 }
             }
         }
 
-        // Mark terrain objects as impassable
+        // Mark terrain objects as impassable in BOTH maps
         for terrainObj in scenario.terrain {
             let cell = terrainObj.cell
             if cell >= 0 && cell < 4096 {
-                staticPassability[cell] = false
+                landPassability[cell] = false
+                waterPassability[cell] = false
             }
         }
     }
 
-    // Mark water tiles as impassable
+    // Mark water/land tiles appropriately for each map
     for i in 0..<4096 {
         let templateType = Int(mapCells[i].templateType)
         if templateType != 0xFF && templateType < templateTable.count {
             let name = templateTable[templateType].icnName.uppercased()
-            // Water templates
             if name == "W1" || name == "W2" {
-                staticPassability[i] = false
+                // Water: impassable for land, passable for water
+                landPassability[i] = false
+                // waterPassability[i] stays true (already true)
+            } else {
+                // Land: passable for land (already true), impassable for water
+                waterPassability[i] = false
             }
+        } else {
+            // Default land cell: impassable for water
+            waterPassability[i] = false
         }
     }
 
-    // Mark cells outside map bounds as impassable
+    // Mark cells outside map bounds as impassable in BOTH maps
     if let bounds = scenarioData?.mapBounds {
         for y in 0..<64 {
             for x in 0..<64 {
                 if x < bounds.x || x >= bounds.x + bounds.width ||
                    y < bounds.y || y >= bounds.y + bounds.height {
-                    staticPassability[y * 64 + x] = false
+                    landPassability[y * 64 + x] = false
+                    waterPassability[y * 64 + x] = false
                 }
             }
         }
     }
 
-    let impassableCount = staticPassability.filter { !$0 }.count
-    print("GameMap: Built passability map, \(impassableCount) impassable cells")
+    let landImpassable = landPassability.filter { !$0 }.count
+    let waterImpassable = waterPassability.filter { !$0 }.count
+    print("GameMap: Built passability map, \(landImpassable) land-impassable, \(waterImpassable) water-impassable cells")
+}
+
+/// Get the appropriate passability map for a given speed type
+func passabilityMap(for speed: SpeedType) -> [Bool] {
+    switch speed {
+    case .float_: return waterPassability
+    default: return landPassability
+    }
 }
 
 // MARK: - Dynamic Occupancy
@@ -85,12 +112,13 @@ func updateOccupancy() {
 
 // MARK: - Passability Check
 
-func isCellPassable(cellX: Int, cellY: Int, ignoring: GameObject? = nil) -> Bool {
+func isCellPassable(cellX: Int, cellY: Int, ignoring: GameObject? = nil, speedType: SpeedType = .foot) -> Bool {
     guard cellX >= 0 && cellX < 64 && cellY >= 0 && cellY < 64 else { return false }
     let cell = cellY * 64 + cellX
 
-    // Check static passability
-    if !staticPassability[cell] { return false }
+    // Check passability for this speed type
+    let passMap = passabilityMap(for: speedType)
+    if !passMap[cell] { return false }
 
     // Check dynamic occupancy
     if let world = gameWorld, let occupantId = world.occupancy[cell] {
@@ -119,7 +147,8 @@ private struct PathNode: Comparable {
 /// Find a path from (fromX, fromY) to (toX, toY) using A* on the 64x64 grid.
 /// Returns array of (cellX, cellY) waypoints, or empty if no path found.
 func findPath(fromX: Int, fromY: Int, toX: Int, toY: Int,
-              ignoring: GameObject? = nil, maxSteps: Int = 400) -> [(cellX: Int, cellY: Int)] {
+              ignoring: GameObject? = nil, maxSteps: Int = 400,
+              speedType: SpeedType = .foot) -> [(cellX: Int, cellY: Int)] {
 
     // Quick bounds check
     guard fromX >= 0 && fromX < 64 && fromY >= 0 && fromY < 64 &&
@@ -127,9 +156,11 @@ func findPath(fromX: Int, fromY: Int, toX: Int, toY: Int,
         return []
     }
 
+    let passMap = passabilityMap(for: speedType)
+
     // If target is impassable (and it's not our own cell), find nearest passable cell
     let targetCell = toY * 64 + toX
-    if !staticPassability[targetCell] {
+    if !passMap[targetCell] {
         // Try to find nearest passable cell to target
         var bestX = toX, bestY = toY
         var bestDist = Double.infinity
@@ -138,7 +169,7 @@ func findPath(fromX: Int, fromY: Int, toX: Int, toY: Int,
                 let nx = toX + dx
                 let ny = toY + dy
                 if nx >= 0 && nx < 64 && ny >= 0 && ny < 64 &&
-                   staticPassability[ny * 64 + nx] {
+                   passMap[ny * 64 + nx] {
                     let dist = sqrt(Double(dx * dx + dy * dy))
                     if dist < bestDist {
                         bestDist = dist
@@ -149,7 +180,7 @@ func findPath(fromX: Int, fromY: Int, toX: Int, toY: Int,
             }
         }
         if bestDist == Double.infinity { return [] }
-        return findPath(fromX: fromX, fromY: fromY, toX: bestX, toY: bestY, ignoring: ignoring, maxSteps: maxSteps)
+        return findPath(fromX: fromX, fromY: fromY, toX: bestX, toY: bestY, ignoring: ignoring, maxSteps: maxSteps, speedType: speedType)
     }
 
     // Already at target
@@ -212,14 +243,14 @@ func findPath(fromX: Int, fromY: Int, toX: Int, toY: Int,
             let neighborCell = ny * 64 + nx
             if closedSet.contains(neighborCell) { continue }
 
-            // Check passability (ignore occupancy for pathfinding to allow units to flow)
-            if !staticPassability[neighborCell] { continue }
+            // Check passability for this speed type
+            if !passMap[neighborCell] { continue }
 
             // For diagonal moves, ensure both adjacent cardinal cells are passable
             if dir.dx != 0 && dir.dy != 0 {
                 let adjCell1 = current.y * 64 + nx
                 let adjCell2 = ny * 64 + current.x
-                if !staticPassability[adjCell1] || !staticPassability[adjCell2] { continue }
+                if !passMap[adjCell1] || !passMap[adjCell2] { continue }
             }
 
             let tentativeG = current.g + dir.cost

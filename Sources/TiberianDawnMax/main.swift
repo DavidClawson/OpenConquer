@@ -6,30 +6,14 @@ import Foundation
 let dataPath = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent("Library/Application Support/Vanilla-Conquer/vanillatd")
 
-let mixManager = MIXFileManager()
+let assetManager = AssetManager(dataPath: dataPath)
+
+/// Temporary shim — existing code references `mixManager` everywhere.
+/// New code should use `assetManager.retrieve()` instead.
+var mixManager: MIXFileManager { assetManager.mixManager }
 
 func loadGameData() {
-    print("Loading game data from: \(dataPath.path)")
-
-    do {
-        try mixManager.registerAll(in: dataPath)
-
-        // Also check gdi/ and nod/ subdirectories
-        let gdiDir = dataPath.appendingPathComponent("gdi")
-        let nodDir = dataPath.appendingPathComponent("nod")
-        if FileManager.default.fileExists(atPath: gdiDir.path) {
-            try mixManager.registerAll(in: gdiDir)
-        }
-        if FileManager.default.fileExists(atPath: nodDir.path) {
-            try mixManager.registerAll(in: nodDir)
-        }
-    } catch {
-        print("Error loading MIX files: \(error)")
-    }
-
-    print("Total MIX files: \(mixManager.registeredFiles.count)")
-    print("Total entries: \(mixManager.totalEntries)")
-    print("")
+    assetManager.initialize()
 
     // Test some known filenames
     let testFiles = [
@@ -61,6 +45,9 @@ func loadGameData() {
 
 // Run MIX loading on startup
 loadGameData()
+
+// Index remastered sprites (if available)
+initRemasteredSprites()
 
 // If --test-mix flag, just print results and exit
 if CommandLine.arguments.contains("--test-mix") {
@@ -184,6 +171,7 @@ enum MenuState {
     case chooseFaction
     case launching(Faction, Difficulty)
     case spriteViewer
+    case soundTest
     case mapViewer
     case playing
 }
@@ -226,10 +214,10 @@ struct Button {
 
 // MARK: - App
 
-let windowWidth: Int32 = 960
-let windowHeight: Int32 = 600
+var windowWidth: Int32 = 960
+var windowHeight: Int32 = 600
 
-guard SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) == 0 else {
+guard SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_AUDIO) == 0 else {
     print("SDL_Init failed: \(String(cString: SDL_GetError()))")
     exit(1)
 }
@@ -240,7 +228,7 @@ guard let window = SDL_CreateWindow(
     Int32(SDL_WINDOWPOS_CENTERED_MASK),
     windowWidth,
     windowHeight,
-    SDL_WINDOW_SHOWN.rawValue | SDL_WINDOW_ALLOW_HIGHDPI.rawValue
+    SDL_WINDOW_SHOWN.rawValue | SDL_WINDOW_ALLOW_HIGHDPI.rawValue | SDL_WINDOW_RESIZABLE.rawValue
 ) else {
     print("SDL_CreateWindow failed: \(String(cString: SDL_GetError()))")
     exit(1)
@@ -250,6 +238,10 @@ guard let renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED.raw
     print("SDL_CreateRenderer failed: \(String(cString: SDL_GetError()))")
     exit(1)
 }
+
+// Initialize audio system
+audioManager.initialize()
+audioManager.soundLibrary = SoundLibrary(assetManager: assetManager)
 
 var state: MenuState = .main
 var running = true
@@ -278,11 +270,15 @@ func makeMainButtons() -> [Button] {
             loadCurrentSprite()
             state = .spriteViewer
         },
-        Button(label: "Map Viewer", x: cx, y: startY + 120, w: bw, h: bh) {
+        Button(label: "Sound Test", x: cx, y: startY + 120, w: bw, h: bh) {
+            initSoundTest()
+            state = .soundTest
+        },
+        Button(label: "Map Viewer", x: cx, y: startY + 180, w: bw, h: bh) {
             loadMapViewerData(scenarioList[scenarioIndex])
             state = .mapViewer
         },
-        Button(label: "Exit Game", x: cx, y: startY + 180, w: bw, h: bh) {
+        Button(label: "Exit Game", x: cx, y: startY + 240, w: bw, h: bh) {
             running = false
         },
     ]
@@ -325,6 +321,8 @@ func makeFactionButtons() -> [Button] {
 // MARK: - Main loop
 
 while running {
+    perf.beginFrame()
+
     // Events
     while SDL_PollEvent(&event) != 0 {
         let eventType = SDL_EventType(rawValue: event.type)
@@ -346,6 +344,8 @@ while running {
                     state = .chooseFaction
                 case .spriteViewer:
                     state = .main
+                case .soundTest:
+                    state = .main
                 case .mapViewer:
                     state = .main
                 case .playing:
@@ -356,8 +356,15 @@ while running {
                         world.deselectAll()
                     } else {
                         state = .mapViewer
+                        // Restore system cursor when leaving game
+                        SDL_ShowCursor(SDL_ENABLE)
+                        systemCursorHidden = false
                     }
                 }
+            }
+            // Global: F3 toggles performance overlay
+            if key == Int32(SDLK_F3.rawValue) {
+                perfShowOverlay.toggle()
             }
             // Sprite viewer controls
             if case .spriteViewer = state {
@@ -378,6 +385,10 @@ while running {
                 } else if key == Int32(SDLK_SPACE.rawValue) {
                     spriteViewerAnimating = !spriteViewerAnimating
                 }
+            }
+            // Sound test controls
+            if case .soundTest = state {
+                handleSoundTestKey(key)
             }
             // Map viewer controls: [ and ] to cycle scenarios, +/- to zoom
             if case .mapViewer = state {
@@ -402,13 +413,16 @@ while running {
                 } else if key == Int32(SDLK_p.rawValue) {
                     // Enter playing mode
                     if let sd = scenarioData {
-                        initGameWorld(scenario: sd, scenarioName: scenarioList[scenarioIndex])
+                        let scenName = scenarioList[scenarioIndex]
+                        initGameWorld(scenario: sd, scenarioName: scenName)
+                        currentScenarioName = scenName
                         // Initialize game camera to match map viewer camera
                         gameCameraX = Double(cameraX)
                         gameCameraY = Double(cameraY)
                         gameZoomLevel = zoomLevel
                         lastTickTime = 0
                         tickAccumulator = 0
+                        missionScore.reset()
                         state = .playing
                     }
                 } else if key >= Int32(SDLK_0.rawValue) && key <= Int32(SDLK_9.rawValue) {
@@ -434,6 +448,32 @@ while running {
                     gameZoomLevel = min(3.0, gameZoomLevel + 0.25)
                 } else if key == Int32(SDLK_MINUS.rawValue) {
                     gameZoomLevel = max(0.5, gameZoomLevel - 0.25)
+                } else if key == Int32(SDLK_F5.rawValue) {
+                    if quickSave() {
+                        print("Quick saved!")
+                    }
+                } else if key == Int32(SDLK_F9.rawValue) {
+                    if quickLoad() {
+                        print("Quick loaded!")
+                    }
+                } else if key == Int32(SDLK_r.rawValue) {
+                    // Restart mission
+                    if triggerWinState != .playing {
+                        restartMission()
+                        triggerWinState = .playing
+                    }
+                } else if key == Int32(SDLK_n.rawValue) {
+                    // Next mission (after win)
+                    if triggerWinState == .won && campaignState.isActive {
+                        handleMissionWin()
+                        if !campaignState.isComplete {
+                            if startNextMission() {
+                                triggerWinState = .playing
+                            }
+                        } else {
+                            state = .main
+                        }
+                    }
                 }
             }
 
@@ -490,9 +530,28 @@ while running {
                 if case .playing = state {
                     // Check if click is in sidebar area
                     if event.button.x >= windowWidth - sidebarWidth {
-                        handleSidebarClick(event.button.x, event.button.y)
+                        // Check super weapon buttons first
+                        if handleSuperWeaponClick(event.button.x, event.button.y) {
+                            // Handled
+                        } else if !handleRepairSellClick(event.button.x, event.button.y) {
+                            handleSidebarClick(event.button.x, event.button.y)
+                        }
+                    } else if superWeaponTargeting != nil {
+                        // Super weapon targeting: deploy at clicked position
+                        let worldPos = gameScreenToWorld(event.button.x, event.button.y)
+                        if !handleSuperWeaponGameClick(worldX: worldPos.worldX, worldY: worldPos.worldY) {
+                            superWeaponTargeting = nil
+                        }
                     } else if isPlacingStructure {
                         handleStructurePlacement(event.button.x, event.button.y)
+                    } else if isRepairMode || isSellMode {
+                        // Repair/sell mode: click on building in game world
+                        let worldPos = gameScreenToWorld(event.button.x, event.button.y)
+                        if !handleRepairSellGameClick(worldX: worldPos.worldX, worldY: worldPos.worldY) {
+                            // Clicked on non-building — cancel mode
+                            isRepairMode = false
+                            isSellMode = false
+                        }
                     } else {
                         let shiftHeld = (SDL_GetModState().rawValue & UInt32(KMOD_SHIFT.rawValue)) != 0
                         handleGameLeftDown(event.button.x, event.button.y, shiftHeld: shiftHeld)
@@ -505,6 +564,7 @@ while running {
                 case .chooseDifficulty: buttons = makeDifficultyButtons()
                 case .chooseFaction: buttons = makeFactionButtons()
                 case .spriteViewer: buttons = []
+                case .soundTest: buttons = []
                 case .mapViewer: buttons = []
                 case .launching: buttons = []
                 case .playing: buttons = []
@@ -519,13 +579,24 @@ while running {
             // Right click for move order in playing mode (or cancel placement)
             if event.button.button == UInt8(SDL_BUTTON_RIGHT) {
                 if case .playing = state {
-                    if isPlacingStructure {
+                    if superWeaponTargeting != nil {
+                        superWeaponTargeting = nil
+                    } else if isRepairMode || isSellMode {
+                        isRepairMode = false
+                        isSellMode = false
+                    } else if isPlacingStructure {
                         isPlacingStructure = false
                         placementType = nil
                     } else {
                         handleGameRightClick(event.button.x, event.button.y)
                     }
                 }
+            }
+
+        case SDL_WINDOWEVENT:
+            if event.window.event == UInt8(SDL_WINDOWEVENT_RESIZED.rawValue) {
+                windowWidth = event.window.data1
+                windowHeight = event.window.data2
             }
 
         default:
@@ -583,10 +654,18 @@ while running {
 
     // Update game logic in playing state
     if case .playing = state {
+        perf.beginSection("Logic")
         updateGame()
+        perf.endSection("Logic")
     }
 
+    // Tick audio system (mix and queue output)
+    perf.beginSection("Audio")
+    audioManager.tick()
+    perf.endSection("Audio")
+
     // Render
+    perf.beginSection("Render")
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255)
     SDL_RenderClear(renderer)
 
@@ -626,12 +705,43 @@ while running {
         drawText(renderer, "Esc: Back", centerX: windowWidth / 2, centerY: windowHeight - 40, color: .gray, scale: 1)
 
     case .launching(let faction, let difficulty):
-        drawText(renderer, "Launching...", centerX: windowWidth / 2, centerY: windowHeight / 2 - 40, color: .green, scale: 3)
-        drawText(renderer, "\(faction.rawValue) / \(difficulty.rawValue)", centerX: windowWidth / 2, centerY: windowHeight / 2 + 20, color: .amber, scale: 2)
+        drawText(renderer, "Loading...", centerX: windowWidth / 2, centerY: windowHeight / 2, color: .green, scale: 3)
+        SDL_RenderPresent(renderer)
 
-        // TODO: Actually launch game engine here
-        drawText(renderer, "Game engine not yet connected", centerX: windowWidth / 2, centerY: windowHeight / 2 + 70, color: .gray, scale: 1)
-        drawText(renderer, "Esc: Back", centerX: windowWidth / 2, centerY: windowHeight - 40, color: .gray, scale: 1)
+        // Initialize campaign
+        campaignState.currentFaction = (faction == .gdi) ? "GDI" : "NOD"
+        campaignState.difficulty = (difficulty == .easy) ? 0 : (difficulty == .normal ? 1 : 2)
+        campaignState.currentMission = 1
+        campaignState.currentVariant = "EA"
+        campaignState.isActive = true
+        campaignState.carryOverCredits = 0
+        campaignState.completedMissions.removeAll()
+
+        // Load first scenario using existing startNextMission()
+        if startNextMission() {
+            // Initialize game camera — center on player start waypoint 98, or map bounds
+            if let scenario = scenarioData,
+               let startWP = scenario.waypoints.first(where: { $0.id == 98 }) {
+                let pos = cellToPixel(startWP.cell)
+                let vpW = Double(windowWidth - sidebarWidth)
+                let vpH = Double(windowHeight)
+                gameCameraX = Double(pos.px) - vpW / 2.0
+                gameCameraY = Double(pos.py) - vpH / 2.0
+            } else if let bounds = gameWorld?.mapBounds {
+                gameCameraX = Double(bounds.x * 24)
+                gameCameraY = Double(bounds.y * 24)
+            }
+            gameZoomLevel = 1.0
+            lastTickTime = 0
+            tickAccumulator = 0
+            missionScore.reset()
+            triggerWinState = .playing
+            state = .playing
+        } else {
+            // Fallback if scenario not found
+            print("Failed to load first mission for \(faction.rawValue)")
+            state = .main
+        }
 
     case .spriteViewer:
         let shapeName = viewableShapes[spriteViewerIndex]
@@ -680,6 +790,9 @@ while running {
         drawText(renderer, "Left/Right: Shape  Up/Down: Frame  Space: \(animLabel)", centerX: windowWidth / 2, centerY: windowHeight - 60, color: .gray, scale: 1)
         drawText(renderer, "Esc: Back", centerX: windowWidth / 2, centerY: windowHeight - 35, color: .gray, scale: 1)
 
+    case .soundTest:
+        renderSoundTest(renderer)
+
     case .mapViewer:
         // Increment animation frame for terrain (trees etc.)
         animationFrame += 1
@@ -704,10 +817,17 @@ while running {
         renderGame(renderer)
     }
 
+    perf.endSection("Render")
+
+    // Performance overlay (F3 to toggle)
+    perf.renderOverlay(renderer)
+    perf.endFrame()
+
     SDL_RenderPresent(renderer)
     SDL_Delay(16) // ~60fps
 }
 
+audioManager.shutdown()
 SDL_DestroyRenderer(renderer)
 SDL_DestroyWindow(window)
 SDL_Quit()

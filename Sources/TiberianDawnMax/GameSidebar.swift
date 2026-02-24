@@ -19,7 +19,7 @@ var structureBuildQueue: (typeName: String, progress: Int, cost: Int, totalTicks
 var isPlacingStructure: Bool = false
 var placementType: String? = nil
 
-// MARK: - Build Data
+// MARK: - Build Data (derived from type data tables)
 
 struct BuildableItem {
     let name: String
@@ -29,25 +29,6 @@ struct BuildableItem {
     let faction: String?  // "GDI", "NOD", or nil for both
 }
 
-let buildableUnits: [BuildableItem] = [
-    BuildableItem(name: "E1",   cost: 100,  buildTicks: 30,  prerequisite: "PYLE", faction: nil),
-    BuildableItem(name: "E2",   cost: 160,  buildTicks: 35,  prerequisite: "PYLE", faction: nil),
-    BuildableItem(name: "E3",   cost: 300,  buildTicks: 50,  prerequisite: "PYLE", faction: nil),
-    BuildableItem(name: "E1",   cost: 100,  buildTicks: 30,  prerequisite: "HAND", faction: nil),
-    BuildableItem(name: "E2",   cost: 160,  buildTicks: 35,  prerequisite: "HAND", faction: nil),
-    BuildableItem(name: "E3",   cost: 300,  buildTicks: 50,  prerequisite: "HAND", faction: nil),
-    BuildableItem(name: "E4",   cost: 200,  buildTicks: 35,  prerequisite: "HAND", faction: "NOD"),
-    BuildableItem(name: "MTNK", cost: 800,  buildTicks: 100, prerequisite: "WEAP", faction: nil),
-    BuildableItem(name: "LTNK", cost: 600,  buildTicks: 80,  prerequisite: "WEAP", faction: "NOD"),
-    BuildableItem(name: "HTNK", cost: 1500, buildTicks: 150, prerequisite: "WEAP", faction: "GDI"),
-    BuildableItem(name: "HMMV", cost: 400,  buildTicks: 60,  prerequisite: "WEAP", faction: "GDI"),
-    BuildableItem(name: "BGGY", cost: 300,  buildTicks: 50,  prerequisite: "WEAP", faction: "NOD"),
-    BuildableItem(name: "APC",  cost: 700,  buildTicks: 90,  prerequisite: "WEAP", faction: nil),
-    BuildableItem(name: "ARTY", cost: 450,  buildTicks: 70,  prerequisite: "WEAP", faction: "NOD"),
-    BuildableItem(name: "MSAM", cost: 800,  buildTicks: 100, prerequisite: "WEAP", faction: "GDI"),
-    BuildableItem(name: "HARV", cost: 1400, buildTicks: 120, prerequisite: "PROC", faction: nil),
-]
-
 struct BuildableStructure {
     let name: String
     let cost: Int
@@ -55,21 +36,127 @@ struct BuildableStructure {
     let faction: String?
 }
 
-let buildableStructures: [BuildableStructure] = [
-    BuildableStructure(name: "NUKE", cost: 300,  buildTicks: 60,  faction: nil),
-    BuildableStructure(name: "PYLE", cost: 300,  buildTicks: 60,  faction: "GDI"),
-    BuildableStructure(name: "HAND", cost: 300,  buildTicks: 60,  faction: "NOD"),
-    BuildableStructure(name: "PROC", cost: 1500, buildTicks: 120, faction: nil),
-    BuildableStructure(name: "WEAP", cost: 2000, buildTicks: 150, faction: nil),
-    BuildableStructure(name: "GUN",  cost: 600,  buildTicks: 60,  faction: "GDI"),
-    BuildableStructure(name: "GTWR", cost: 800,  buildTicks: 80,  faction: "GDI"),
-    BuildableStructure(name: "OBLI", cost: 1500, buildTicks: 100, faction: "NOD"),
-    BuildableStructure(name: "ATWR", cost: 1000, buildTicks: 90,  faction: nil),
-    BuildableStructure(name: "SILO", cost: 150,  buildTicks: 40,  faction: nil),
-    BuildableStructure(name: "HPAD", cost: 1500, buildTicks: 120, faction: nil),
-    BuildableStructure(name: "HQ",   cost: 1000, buildTicks: 90,  faction: nil),
-    BuildableStructure(name: "FACT", cost: 5000, buildTicks: 200, faction: nil),
-]
+/// Generate unit/infantry build list from type data tables
+func generateBuildableUnits() -> [BuildableItem] {
+    var items: [BuildableItem] = []
+
+    // Infantry from infantryTypeDataTable
+    for (_, data) in infantryTypeDataTable {
+        guard data.isBuildable else { continue }
+        let faction: String?
+        if data.ownable.contains(.good) && data.ownable.contains(.bad) {
+            faction = nil
+        } else if data.ownable.contains(.good) {
+            faction = "GDI"
+        } else if data.ownable.contains(.bad) {
+            faction = "NOD"
+        } else {
+            continue  // Not buildable by GDI or Nod
+        }
+        // Infantry need PYLE (GDI) or HAND (Nod) — use prerequisite field if set
+        let prereq: String?
+        if data.prerequisite != .none {
+            prereq = nil  // Has specific prerequisite from struct flags
+        } else {
+            prereq = faction == "NOD" ? "HAND" : (faction == "GDI" ? "PYLE" : nil)
+        }
+        let ticks = max(20, data.cost / 5)
+        items.append(BuildableItem(name: data.iniName, cost: data.cost,
+                                   buildTicks: ticks, prerequisite: prereq, faction: faction))
+    }
+
+    // Vehicles from unitTypeDataTable
+    for (_, data) in unitTypeDataTable {
+        guard data.isBuildable else { continue }
+        let faction: String?
+        if data.ownable.contains(.good) && data.ownable.contains(.bad) {
+            faction = nil
+        } else if data.ownable.contains(.good) {
+            faction = "GDI"
+        } else if data.ownable.contains(.bad) {
+            faction = "NOD"
+        } else {
+            continue
+        }
+        // Vehicles need WEAP (or PROC for HARV)
+        let prereq: String
+        if data.iniName == "HARV" {
+            prereq = "PROC"
+        } else if data.iniName == "MCV" {
+            prereq = "WEAP"
+        } else {
+            prereq = "WEAP"
+        }
+        let ticks = max(30, data.cost / 5)
+        items.append(BuildableItem(name: data.iniName, cost: data.cost,
+                                   buildTicks: ticks, prerequisite: prereq, faction: faction))
+    }
+
+    // Aircraft from aircraftTypeDataTable
+    for (_, data) in aircraftTypeDataTable {
+        guard data.isBuildable else { continue }
+        let faction: String?
+        if data.ownable.contains(.good) && data.ownable.contains(.bad) {
+            faction = nil
+        } else if data.ownable.contains(.good) {
+            faction = "GDI"
+        } else if data.ownable.contains(.bad) {
+            faction = "NOD"
+        } else {
+            continue
+        }
+        // Aircraft need HPAD or AFLD
+        let prereq: String = faction == "NOD" ? "AFLD" : "HPAD"
+        let ticks = max(30, data.cost / 5)
+        items.append(BuildableItem(name: data.iniName, cost: data.cost,
+                                   buildTicks: ticks, prerequisite: prereq, faction: faction))
+    }
+
+    // Sort by cost for consistent ordering
+    items.sort { $0.cost < $1.cost }
+    return items
+}
+
+/// Generate structure build list from type data tables
+func generateBuildableStructures() -> [BuildableStructure] {
+    var items: [BuildableStructure] = []
+
+    for (_, data) in buildingTypeDataTable {
+        guard data.isBuildable else { continue }
+        guard !data.isWall else { continue }  // Walls aren't sidebar buildable
+        let faction: String?
+        if data.ownable.contains(.good) && data.ownable.contains(.bad) {
+            faction = nil
+        } else if data.ownable.contains(.good) {
+            faction = "GDI"
+        } else if data.ownable.contains(.bad) {
+            faction = "NOD"
+        } else {
+            continue
+        }
+        let ticks = max(30, data.cost / 5)
+        items.append(BuildableStructure(name: data.iniName, cost: data.cost,
+                                        buildTicks: ticks, faction: faction))
+    }
+
+    // Sort by cost for consistent ordering
+    items.sort { $0.cost < $1.cost }
+    return items
+}
+
+// Lazy-initialized build lists from type data
+private var _buildableUnits: [BuildableItem]? = nil
+private var _buildableStructures: [BuildableStructure]? = nil
+
+var buildableUnits: [BuildableItem] {
+    if _buildableUnits == nil { _buildableUnits = generateBuildableUnits() }
+    return _buildableUnits!
+}
+
+var buildableStructures: [BuildableStructure] {
+    if _buildableStructures == nil { _buildableStructures = generateBuildableStructures() }
+    return _buildableStructures!
+}
 
 // MARK: - Query Functions
 
@@ -143,8 +230,11 @@ func renderSidebar(_ renderer: OpaquePointer?) {
         displayedCredits = max(sidebarCredits, displayedCredits - max(1, (displayedCredits - sidebarCredits) / 8))
     }
 
-    drawText(renderer, "CREDITS", centerX: sx + sidebarWidth / 2, centerY: 15, color: .amber, scale: 1)
-    drawText(renderer, "$\(displayedCredits)", centerX: sx + sidebarWidth / 2, centerY: 32, color: .green, scale: 2)
+    drawText(renderer, "CREDITS", centerX: sx + sidebarWidth / 2, centerY: 10, color: .amber, scale: 1)
+    drawText(renderer, "$\(displayedCredits)", centerX: sx + sidebarWidth / 2, centerY: 24, color: .green, scale: 2)
+
+    // Power bar
+    renderPowerBar(renderer, sx: sx)
 
     // Tab buttons
     let tabY: Int32 = 50
@@ -168,15 +258,16 @@ func renderSidebar(_ renderer: OpaquePointer?) {
     // Build list
     let listY: Int32 = tabY + tabH + 4
     let buttonW: Int32 = sidebarWidth - 8
-    let buttonH: Int32 = 24
+    let buttonH: Int32 = 48
     let buttonSpacing: Int32 = 2
+    let iconSize: Int32 = 40
 
     if sidebarTab == 0 {
         // Unit build list
         let available = getAvailableUnits()
         for (i, item) in available.enumerated() {
             let by = listY + Int32(i) * (buttonH + buttonSpacing)
-            if by + buttonH > windowHeight - 20 { break }
+            if by + buttonH > windowHeight - 70 { break }
 
             let isBuilding = unitBuildQueue?.typeName == item.name
             let canAfford = sidebarCredits >= item.cost
@@ -196,10 +287,23 @@ func renderSidebar(_ renderer: OpaquePointer?) {
             SDL_SetRenderDrawColor(renderer, canAfford ? 100 : 60, canAfford ? 100 : 40, canAfford ? 100 : 40, 255)
             SDL_RenderDrawRect(renderer, &btnRect)
 
-            // Label
+            // Cameo icon (sprite frame 0)
+            let house = gameWorld?.playerHouse ?? .goodGuy
+            let theater = gameWorld?.theater ?? .temperate
+            if let tex = getObjectTexture(renderer, typeName: item.name, frame: 0, house: house, theater: theater) {
+                let scale = min(Float(iconSize) / Float(tex.width), Float(iconSize) / Float(tex.height))
+                let drawW = Int32(Float(tex.width) * scale)
+                let drawH = Int32(Float(tex.height) * scale)
+                let iconX = sx + 6 + (iconSize - drawW) / 2
+                let iconY = by + (buttonH - drawH) / 2
+                var dstRect = SDL_Rect(x: iconX, y: iconY, w: drawW, h: drawH)
+                SDL_RenderCopy(renderer, tex.texture, nil, &dstRect)
+            }
+
+            // Label (offset right to make room for icon)
             let textColor: Color = canAfford ? .green : .red
-            drawText(renderer, item.name, centerX: sx + 30, centerY: by + buttonH / 2, color: textColor, scale: 1)
-            drawText(renderer, "$\(item.cost)", centerX: sx + sidebarWidth - 40, centerY: by + buttonH / 2, color: textColor, scale: 1)
+            drawText(renderer, item.name, centerX: sx + iconSize + 20, centerY: by + buttonH / 2 - 6, color: textColor, scale: 1)
+            drawText(renderer, "$\(item.cost)", centerX: sx + iconSize + 20, centerY: by + buttonH / 2 + 8, color: .gray, scale: 1)
 
             // Progress bar
             if isBuilding, let queue = unitBuildQueue {
@@ -220,7 +324,7 @@ func renderSidebar(_ renderer: OpaquePointer?) {
         let available = getAvailableStructures()
         for (i, item) in available.enumerated() {
             let by = listY + Int32(i) * (buttonH + buttonSpacing)
-            if by + buttonH > windowHeight - 20 { break }
+            if by + buttonH > windowHeight - 70 { break }
 
             let isBuilding = structureBuildQueue?.typeName == item.name
             let isReady = isBuilding && structureBuildQueue!.progress >= structureBuildQueue!.totalTicks
@@ -243,12 +347,25 @@ func renderSidebar(_ renderer: OpaquePointer?) {
             SDL_SetRenderDrawColor(renderer, canAfford ? 100 : 60, canAfford ? 100 : 40, canAfford ? 100 : 40, 255)
             SDL_RenderDrawRect(renderer, &btnRect)
 
-            // Label
+            // Cameo icon (sprite frame 0)
+            let house = gameWorld?.playerHouse ?? .goodGuy
+            let theater = gameWorld?.theater ?? .temperate
+            if let tex = getObjectTexture(renderer, typeName: item.name, frame: 0, house: house, theater: theater) {
+                let scale = min(Float(iconSize) / Float(tex.width), Float(iconSize) / Float(tex.height))
+                let drawW = Int32(Float(tex.width) * scale)
+                let drawH = Int32(Float(tex.height) * scale)
+                let iconX = sx + 6 + (iconSize - drawW) / 2
+                let iconY = by + (buttonH - drawH) / 2
+                var dstRect = SDL_Rect(x: iconX, y: iconY, w: drawW, h: drawH)
+                SDL_RenderCopy(renderer, tex.texture, nil, &dstRect)
+            }
+
+            // Label (offset right to make room for icon)
             let textColor: Color = isReady ? .amber : (canAfford ? .green : .red)
             let label = isReady ? "\(item.name) READY" : item.name
-            drawText(renderer, label, centerX: sx + 38, centerY: by + buttonH / 2, color: textColor, scale: 1)
+            drawText(renderer, label, centerX: sx + iconSize + 20, centerY: by + buttonH / 2 - 6, color: textColor, scale: 1)
             if !isReady {
-                drawText(renderer, "$\(item.cost)", centerX: sx + sidebarWidth - 40, centerY: by + buttonH / 2, color: textColor, scale: 1)
+                drawText(renderer, "$\(item.cost)", centerX: sx + iconSize + 20, centerY: by + buttonH / 2 + 8, color: .gray, scale: 1)
             }
 
             // Progress bar
@@ -267,10 +384,28 @@ func renderSidebar(_ renderer: OpaquePointer?) {
         }
     }
 
+    // Repair/Sell buttons
+    renderRepairSellButtons(renderer)
+
     // Placement mode indicator
     if isPlacingStructure, let pType = placementType {
-        drawText(renderer, "PLACE: \(pType)", centerX: sx + sidebarWidth / 2, centerY: windowHeight - 40, color: .amber, scale: 1)
-        drawText(renderer, "Click to place", centerX: sx + sidebarWidth / 2, centerY: windowHeight - 25, color: .green, scale: 1)
+        drawText(renderer, "PLACE: \(pType)", centerX: sx + sidebarWidth / 2, centerY: windowHeight - 85, color: .amber, scale: 1)
+        drawText(renderer, "Click to place", centerX: sx + sidebarWidth / 2, centerY: windowHeight - 75, color: .green, scale: 1)
+    }
+
+    // Super weapons display
+    renderSuperWeaponButtons(renderer)
+
+    // Repair/Sell mode indicators
+    if isRepairMode {
+        drawText(renderer, "Click building", centerX: sx + sidebarWidth / 2, centerY: windowHeight - 30, color: .amber, scale: 1)
+        drawText(renderer, "to REPAIR", centerX: sx + sidebarWidth / 2, centerY: windowHeight - 18, color: .green, scale: 1)
+    } else if isSellMode {
+        drawText(renderer, "Click building", centerX: sx + sidebarWidth / 2, centerY: windowHeight - 30, color: .amber, scale: 1)
+        drawText(renderer, "to SELL", centerX: sx + sidebarWidth / 2, centerY: windowHeight - 18, color: .red, scale: 1)
+    } else if superWeaponTargeting != nil {
+        drawText(renderer, "Click target", centerX: sx + sidebarWidth / 2, centerY: windowHeight - 30, color: .amber, scale: 1)
+        drawText(renderer, "for STRIKE", centerX: sx + sidebarWidth / 2, centerY: windowHeight - 18, color: .red, scale: 1)
     }
 }
 
@@ -293,7 +428,7 @@ func handleSidebarClick(_ x: Int32, _ y: Int32) {
 
     // Build list clicks
     let listY = tabY + tabH + 4
-    let buttonH: Int32 = 24
+    let buttonH: Int32 = 48
     let buttonSpacing: Int32 = 2
 
     let clickIdx = Int((y - listY) / (buttonH + buttonSpacing))
@@ -306,6 +441,10 @@ func handleSidebarClick(_ x: Int32, _ y: Int32) {
             if unitBuildQueue == nil && sidebarCredits >= item.cost {
                 unitBuildQueue = (typeName: item.name, progress: 0, cost: item.cost, totalTicks: item.buildTicks)
                 sidebarCredits -= item.cost
+                speak(.building)
+            } else if sidebarCredits < item.cost {
+                speak(.noCash)
+                soundEffect(.scold)
             }
         }
     } else {
@@ -324,6 +463,10 @@ func handleSidebarClick(_ x: Int32, _ y: Int32) {
             if structureBuildQueue == nil && sidebarCredits >= item.cost {
                 structureBuildQueue = (typeName: item.name, progress: 0, cost: item.cost, totalTicks: item.buildTicks)
                 sidebarCredits -= item.cost
+                speak(.building)
+            } else if sidebarCredits < item.cost {
+                speak(.noCash)
+                soundEffect(.scold)
             }
         }
     }
@@ -341,6 +484,8 @@ func tickProduction() {
             // Unit complete — spawn it
             spawnProducedUnit(queue.typeName, world: world)
             unitBuildQueue = nil
+            speak(.unitReady)
+            soundEffect(.construction)
         } else {
             unitBuildQueue = queue
         }
@@ -351,6 +496,10 @@ func tickProduction() {
         if queue.progress < queue.totalTicks {
             queue.progress += 1
             structureBuildQueue = queue
+            if queue.progress >= queue.totalTicks {
+                speak(.construction)
+                soundEffect(.construction)
+            }
         }
         // Don't auto-complete — wait for placement
     }
@@ -359,9 +508,32 @@ func tickProduction() {
 // MARK: - Unit Spawning
 
 func spawnProducedUnit(_ typeName: String, world: GameWorld) {
+    let upper = typeName.uppercased()
+
+    // Check if this is an aircraft
+    if let acType = AircraftType.from(iniName: upper) {
+        // Aircraft spawn at helipad or airstrip
+        let padType = world.playerHouse == .badGuy ? "AFLD" : "HPAD"
+        guard let pad = world.objects.first(where: {
+            $0.kind == .structure && $0.typeName.uppercased() == padType &&
+            $0.house == world.playerHouse && $0.strength > 0
+        }) else { return }
+
+        let obj = createAircraft(
+            world: world,
+            type: acType,
+            house: world.playerHouse,
+            worldX: pad.worldX,
+            worldY: pad.worldY,
+            facing: 0,
+            mission: .guard_
+        )
+        world.addObject(obj)
+        return
+    }
+
     // Find the producing structure
     let producerType: String
-    let upper = typeName.uppercased()
     if ["E1", "E2", "E3", "E4", "E5", "E6", "RMBO"].contains(upper) {
         producerType = getOwnedBuildingTypes().contains("PYLE") ? "PYLE" : "HAND"
     } else {
@@ -380,7 +552,7 @@ func spawnProducedUnit(_ typeName: String, world: GameWorld) {
 
     let isInfantry = ["E1", "E2", "E3", "E4", "E5", "E6", "E7", "RMBO"].contains(upper)
     let kind: ObjectKind = isInfantry ? .infantry : .unit
-    let speed = unitSpeeds[upper] ?? (isInfantry ? 0.8 : 1.5)
+    let speed = resolveSpeed(typeName: upper, kind: kind)
 
     let obj = GameObject(
         id: world.allocateId(),
@@ -389,7 +561,7 @@ func spawnProducedUnit(_ typeName: String, world: GameWorld) {
         kind: kind,
         worldX: exitX, worldY: exitY,
         facing: 128,  // Face south
-        strength: 256,
+        strength: resolveStrength(typeName: upper, kind: kind, scenarioStrength: 256),
         mission: upper == "HARV" ? .harvest : .guard_,
         speed: speed
     )
@@ -429,7 +601,7 @@ func handleStructurePlacement(_ x: Int32, _ y: Int32) {
         kind: .structure,
         worldX: cx, worldY: cy,
         facing: 0,
-        strength: 256,
+        strength: resolveStrength(typeName: pType, kind: .structure, scenarioStrength: 256),
         mission: .guard_,
         speed: 0.0
     )
@@ -447,6 +619,248 @@ func handleStructurePlacement(_ x: Int32, _ y: Int32) {
     isPlacingStructure = false
     placementType = nil
     structureBuildQueue = nil
+}
+
+// MARK: - Power Bar Rendering
+
+func renderPowerBar(_ renderer: OpaquePointer?, sx: Int32) {
+    guard let world = gameWorld else { return }
+    let playerHouse = world.playerHouse
+    let houseState = getHouseState(playerHouse)
+
+    let barX = sx + 4
+    let barY: Int32 = 36
+    let barW: Int32 = sidebarWidth - 8
+    let barH: Int32 = 12
+
+    // Background
+    SDL_SetRenderDrawColor(renderer, 20, 20, 20, 255)
+    var bgRect = SDL_Rect(x: barX, y: barY, w: barW, h: barH)
+    SDL_RenderFillRect(renderer, &bgRect)
+
+    // Power level indicator
+    let maxVal = max(1, max(houseState.powerOutput, houseState.powerDrain))
+    let outputFrac = min(1.0, Double(houseState.powerOutput) / Double(maxVal))
+    let drainFrac = min(1.0, Double(houseState.powerDrain) / Double(maxVal))
+
+    // Green bar = power output
+    let greenW = Int32(Double(barW) * outputFrac)
+    SDL_SetRenderDrawColor(renderer, 0, 180, 0, 255)
+    var greenRect = SDL_Rect(x: barX, y: barY, w: greenW, h: barH / 2)
+    SDL_RenderFillRect(renderer, &greenRect)
+
+    // Yellow/red bar = power drain
+    let drainW = Int32(Double(barW) * drainFrac)
+    let drainColor: (r: UInt8, g: UInt8, b: UInt8) = houseState.hasPower ? (180, 180, 0) : (200, 40, 0)
+    SDL_SetRenderDrawColor(renderer, drainColor.r, drainColor.g, drainColor.b, 255)
+    var drainRect = SDL_Rect(x: barX, y: barY + barH / 2, w: drainW, h: barH / 2)
+    SDL_RenderFillRect(renderer, &drainRect)
+
+    // Border
+    SDL_SetRenderDrawColor(renderer, 80, 80, 80, 255)
+    SDL_RenderDrawRect(renderer, &bgRect)
+
+    // Label
+    let powerLabel = houseState.isLowPower ? "LOW PWR" : "POWER"
+    let powerColor: Color = houseState.isLowPower ? .red : .green
+    drawText(renderer, powerLabel, centerX: sx + sidebarWidth / 2, centerY: barY + barH / 2, color: powerColor, scale: 1)
+}
+
+// MARK: - Repair / Sell Mode
+
+var isRepairMode: Bool = false
+var isSellMode: Bool = false
+
+/// Handle repair/sell button clicks (below the build list)
+func handleRepairSellClick(_ x: Int32, _ y: Int32) -> Bool {
+    let sx = windowWidth - sidebarWidth
+    let buttonY = windowHeight - 60
+    let buttonW: Int32 = (sidebarWidth - 12) / 2
+    let buttonH: Int32 = 20
+
+    // Repair button
+    if x >= sx + 4 && x < sx + 4 + buttonW && y >= buttonY && y < buttonY + buttonH {
+        isRepairMode = !isRepairMode
+        isSellMode = false
+        return true
+    }
+
+    // Sell button
+    if x >= sx + 8 + buttonW && x < sx + 8 + buttonW * 2 && y >= buttonY && y < buttonY + buttonH {
+        isSellMode = !isSellMode
+        isRepairMode = false
+        return true
+    }
+
+    return false
+}
+
+/// Apply repair/sell click to a structure in the game world
+func handleRepairSellGameClick(worldX: Double, worldY: Double) -> Bool {
+    guard let world = gameWorld else { return false }
+
+    // Find player structure under click
+    for obj in world.objects {
+        if obj.kind != .structure { continue }
+        if obj.house != world.playerHouse { continue }
+        if obj.strength <= 0 { continue }
+
+        let size = buildingSize(obj.typeName)
+        let halfW = Double(size.w * 24) / 2.0
+        let halfH = Double(size.h * 24) / 2.0
+        let dx = worldX - obj.worldX
+        let dy = worldY - obj.worldY
+
+        if abs(dx) <= halfW && abs(dy) <= halfH {
+            if isRepairMode {
+                // Toggle repair on this building
+                if obj.isRepairing {
+                    obj.isRepairing = false
+                    obj.mission = .guard_
+                } else if obj.strength < obj.maxStrength {
+                    obj.isRepairing = true
+                    obj.mission = .repair
+                }
+                isRepairMode = false
+                return true
+            } else if isSellMode {
+                // Sell this building
+                obj.mission = .selling
+                isSellMode = false
+                return true
+            }
+        }
+    }
+    return false
+}
+
+// MARK: - Repair/Sell Buttons Rendering
+
+func renderRepairSellButtons(_ renderer: OpaquePointer?) {
+    let sx = windowWidth - sidebarWidth
+    let buttonY = windowHeight - 60
+    let buttonW: Int32 = (sidebarWidth - 12) / 2
+    let buttonH: Int32 = 20
+
+    // Repair button
+    let repairColor: (r: UInt8, g: UInt8, b: UInt8) = isRepairMode ? (0, 120, 0) : (50, 50, 50)
+    SDL_SetRenderDrawColor(renderer, repairColor.r, repairColor.g, repairColor.b, 255)
+    var repairRect = SDL_Rect(x: sx + 4, y: buttonY, w: buttonW, h: buttonH)
+    SDL_RenderFillRect(renderer, &repairRect)
+    SDL_SetRenderDrawColor(renderer, 100, 100, 100, 255)
+    SDL_RenderDrawRect(renderer, &repairRect)
+    drawText(renderer, "REPAIR", centerX: sx + 4 + buttonW / 2, centerY: buttonY + buttonH / 2,
+             color: isRepairMode ? .amber : .green, scale: 1)
+
+    // Sell button
+    let sellColor: (r: UInt8, g: UInt8, b: UInt8) = isSellMode ? (120, 0, 0) : (50, 50, 50)
+    SDL_SetRenderDrawColor(renderer, sellColor.r, sellColor.g, sellColor.b, 255)
+    var sellRect = SDL_Rect(x: sx + 8 + buttonW, y: buttonY, w: buttonW, h: buttonH)
+    SDL_RenderFillRect(renderer, &sellRect)
+    SDL_SetRenderDrawColor(renderer, 100, 100, 100, 255)
+    SDL_RenderDrawRect(renderer, &sellRect)
+    drawText(renderer, "SELL", centerX: sx + 8 + buttonW + buttonW / 2, centerY: buttonY + buttonH / 2,
+             color: isSellMode ? .amber : .red, scale: 1)
+}
+
+// MARK: - Super Weapon Buttons
+
+let superWeaponButtonY: Int32 = 42  // Below credits, above tabs
+
+func renderSuperWeaponButtons(_ renderer: OpaquePointer?) {
+    let sx = windowWidth - sidebarWidth
+
+    // Only render if any super weapon is present
+    let weapons: [(SuperWeapon, String, (r: UInt8, g: UInt8, b: UInt8))] = [
+        (playerIonCannon, "ION", (r: 100, g: 180, b: 255)),
+        (playerAirStrike, "AIR", (r: 200, g: 200, b: 100)),
+        (playerNukeStrike, "NUKE", (r: 255, g: 80, b: 80)),
+    ]
+
+    var x = sx + 4
+    let y = superWeaponButtonY
+    let bw: Int32 = (sidebarWidth - 16) / 3
+    let bh: Int32 = 18
+
+    for (weapon, label, color) in weapons {
+        guard weapon.isPresent else {
+            x += bw + 2
+            continue
+        }
+
+        // Background: darker when charging, bright when ready
+        if weapon.isReady {
+            SDL_SetRenderDrawColor(renderer, color.r / 2, color.g / 2, color.b / 2, 255)
+        } else {
+            SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255)
+        }
+        var rect = SDL_Rect(x: x, y: y, w: bw, h: bh)
+        SDL_RenderFillRect(renderer, &rect)
+
+        // Charge bar
+        if !weapon.isReady {
+            let fillW = Int32(Double(bw - 2) * weapon.chargeFraction)
+            SDL_SetRenderDrawColor(renderer, color.r / 3, color.g / 3, color.b / 3, 200)
+            var fillRect = SDL_Rect(x: x + 1, y: y + 1, w: fillW, h: bh - 2)
+            SDL_RenderFillRect(renderer, &fillRect)
+        }
+
+        // Border: highlight when ready
+        if weapon.isReady {
+            SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, 255)
+        } else if weapon.isSuspended {
+            SDL_SetRenderDrawColor(renderer, 80, 80, 0, 255)
+        } else {
+            SDL_SetRenderDrawColor(renderer, 80, 80, 80, 255)
+        }
+        SDL_RenderDrawRect(renderer, &rect)
+
+        // Label
+        let textColor: Color = weapon.isReady ? .green : (weapon.isSuspended ? .red : .gray)
+        drawText(renderer, label, centerX: x + bw / 2, centerY: y + bh / 2, color: textColor, scale: 1)
+
+        x += bw + 2
+    }
+}
+
+/// Handle click on super weapon buttons, returns true if handled
+func handleSuperWeaponClick(_ screenX: Int32, _ screenY: Int32) -> Bool {
+    let sx = windowWidth - sidebarWidth
+    let y = superWeaponButtonY
+    let bw: Int32 = (sidebarWidth - 16) / 3
+    let bh: Int32 = 18
+
+    guard screenY >= y && screenY <= y + bh else { return false }
+    guard screenX >= sx + 4 else { return false }
+
+    let relX = screenX - (sx + 4)
+    let index = Int(relX / (bw + 2))
+
+    let weapons: [(SuperWeapon, SpecialWeaponType)] = [
+        (playerIonCannon, .ionCannon),
+        (playerAirStrike, .airStrike),
+        (playerNukeStrike, .nuclearStrike),
+    ]
+
+    guard index >= 0 && index < weapons.count else { return false }
+    let (weapon, type) = weapons[index]
+
+    guard weapon.isPresent else { return false }
+
+    if weapon.isReady {
+        startSuperWeaponTargeting(type)
+        return true
+    } else {
+        print("SuperWeapon: \(type) not ready yet (\(Int(weapon.chargeFraction * 100))%)")
+        return true
+    }
+}
+
+/// Handle game click when in super weapon targeting mode
+func handleSuperWeaponGameClick(worldX: Double, worldY: Double) -> Bool {
+    guard let type = superWeaponTargeting else { return false }
+    deploySuperWeapon(type, worldX: worldX, worldY: worldY)
+    return true
 }
 
 // MARK: - Placement Preview Rendering
