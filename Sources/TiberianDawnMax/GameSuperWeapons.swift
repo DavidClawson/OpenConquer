@@ -118,49 +118,47 @@ class SuperWeapon {
 // MARK: - Per-House Super Weapons
 
 /// Super weapons owned by the player house
-var playerIonCannon = SuperWeapon(type: .ionCannon, chargeTime: ionCannonChargeTime)
-var playerAirStrike = SuperWeapon(type: .airStrike, chargeTime: airStrikeChargeTime)
-var playerNukeStrike = SuperWeapon(type: .nuclearStrike, chargeTime: nuclearStrikeChargeTime)
+// session.playerIonCannon, session.playerAirStrike, session.playerNukeStrike -- now in session
 
 /// Get the super weapon instance by type for the player
 func playerSuperWeapon(_ type: SpecialWeaponType) -> SuperWeapon {
     switch type {
-    case .ionCannon:     return playerIonCannon
-    case .airStrike:     return playerAirStrike
-    case .nuclearStrike: return playerNukeStrike
+    case .ionCannon:     return session.playerIonCannon
+    case .airStrike:     return session.playerAirStrike
+    case .nuclearStrike: return session.playerNukeStrike
     }
 }
 
 /// Reset all super weapons (for new game)
 func resetSuperWeapons() {
-    playerIonCannon = SuperWeapon(type: .ionCannon, chargeTime: ionCannonChargeTime)
-    playerAirStrike = SuperWeapon(type: .airStrike, chargeTime: airStrikeChargeTime)
-    playerNukeStrike = SuperWeapon(type: .nuclearStrike, chargeTime: nuclearStrikeChargeTime)
+    session.playerIonCannon = SuperWeapon(type: .ionCannon, chargeTime: ionCannonChargeTime)
+    session.playerAirStrike = SuperWeapon(type: .airStrike, chargeTime: airStrikeChargeTime)
+    session.playerNukeStrike = SuperWeapon(type: .nuclearStrike, chargeTime: nuclearStrikeChargeTime)
 }
 
 // MARK: - Super Weapon Availability Check
 
 /// Check if player has the required buildings for each super weapon
 func updateSuperWeaponAvailability() {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
 
     // Ion Cannon requires Advanced Comm Center (EYE)
     let hasEye = world.hasBuilding(type: "EYE", house: world.playerHouse)
-    if hasEye && !playerIonCannon.isPresent {
-        playerIonCannon.enable()
+    if hasEye && !session.playerIonCannon.isPresent {
+        session.playerIonCannon.enable()
         print("SuperWeapon: Ion Cannon available — charging")
-    } else if !hasEye && playerIonCannon.isPresent && !playerIonCannon.isOneTime {
-        playerIonCannon.remove()
+    } else if !hasEye && session.playerIonCannon.isPresent && !session.playerIonCannon.isOneTime {
+        session.playerIonCannon.remove()
         print("SuperWeapon: Ion Cannon lost — building destroyed")
     }
 
     // Nuclear Strike requires Temple of Nod
     let hasTemple = world.hasBuilding(type: "TMPL", house: world.playerHouse)
-    if hasTemple && !playerNukeStrike.isPresent {
-        playerNukeStrike.enable()
+    if hasTemple && !session.playerNukeStrike.isPresent {
+        session.playerNukeStrike.enable()
         print("SuperWeapon: Nuclear Strike available — charging")
-    } else if !hasTemple && playerNukeStrike.isPresent && !playerNukeStrike.isOneTime {
-        playerNukeStrike.remove()
+    } else if !hasTemple && session.playerNukeStrike.isPresent && !session.playerNukeStrike.isOneTime {
+        session.playerNukeStrike.remove()
         print("SuperWeapon: Nuclear Strike lost — building destroyed")
     }
 
@@ -168,15 +166,15 @@ func updateSuperWeaponAvailability() {
     // Power suspension
     let houseState = getHouseState(world.playerHouse)
     if !houseState.hasPower {
-        if playerIonCannon.isPresent && !playerIonCannon.isSuspended {
-            playerIonCannon.suspend()
+        if session.playerIonCannon.isPresent && !session.playerIonCannon.isSuspended {
+            session.playerIonCannon.suspend()
         }
-        if playerNukeStrike.isPresent && !playerNukeStrike.isSuspended {
-            playerNukeStrike.suspend()
+        if session.playerNukeStrike.isPresent && !session.playerNukeStrike.isSuspended {
+            session.playerNukeStrike.suspend()
         }
     } else {
-        if playerIonCannon.isSuspended { playerIonCannon.resume() }
-        if playerNukeStrike.isSuspended { playerNukeStrike.resume() }
+        if session.playerIonCannon.isSuspended { session.playerIonCannon.resume() }
+        if session.playerNukeStrike.isSuspended { session.playerNukeStrike.resume() }
     }
 }
 
@@ -184,7 +182,7 @@ func updateSuperWeaponAvailability() {
 
 /// Tick all super weapons each game tick
 func tickSuperWeapons() {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
 
     // Check availability every 30 ticks
     if world.tickCount % 30 == 0 {
@@ -192,15 +190,15 @@ func tickSuperWeapons() {
     }
 
     // Tick charge timers
-    playerIonCannon.tick()
-    playerAirStrike.tick()
-    playerNukeStrike.tick()
+    session.playerIonCannon.tick()
+    session.playerAirStrike.tick()
+    session.playerNukeStrike.tick()
 }
 
 // MARK: - Super Weapon Deployment
 
 /// Current super weapon targeting mode
-var superWeaponTargeting: SpecialWeaponType? = nil
+// session.superWeaponTargeting -- now in session
 
 /// Start targeting mode for a super weapon
 func startSuperWeaponTargeting(_ type: SpecialWeaponType) {
@@ -209,7 +207,7 @@ func startSuperWeaponTargeting(_ type: SpecialWeaponType) {
         print("SuperWeapon: \(type) not ready")
         return
     }
-    superWeaponTargeting = type
+    session.superWeaponTargeting = type
     print("SuperWeapon: Targeting mode for \(type)")
 }
 
@@ -228,7 +226,7 @@ func deploySuperWeapon(_ type: SpecialWeaponType, worldX: Double, worldY: Double
     }
 
     weapon.discharged()
-    superWeaponTargeting = nil
+    session.superWeaponTargeting = nil
 }
 
 // MARK: - Ion Cannon
@@ -236,7 +234,7 @@ func deploySuperWeapon(_ type: SpecialWeaponType, worldX: Double, worldY: Double
 /// Deploy ion cannon beam at target location
 /// VC: 600 damage, WARHEAD_PB (particle beam), single cell
 func deployIonCannon(worldX: Double, worldY: Double) {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
 
     print("SuperWeapon: ION CANNON deployed at (\(Int(worldX)), \(Int(worldY)))")
 
@@ -275,7 +273,7 @@ func deployIonCannon(worldX: Double, worldY: Double) {
 /// VC Campaign: 1000 damage center, 4 cell radius, WARHEAD_FIRE
 /// VC Multiplayer: 200 damage center, 3 cell radius
 func deployNuclearStrike(worldX: Double, worldY: Double) {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
 
     print("SuperWeapon: NUCLEAR STRIKE deployed at (\(Int(worldX)), \(Int(worldY)))")
 
@@ -328,7 +326,7 @@ func deployNuclearStrike(worldX: Double, worldY: Double) {
                 if !scorch.isEmpty {
                     let chosen = scorch[Int.random(in: 0..<scorch.count)]
                     let smudgeCell = cy * 64 + cx
-                    mapSmudges.append(Smudge(type: chosen, cell: smudgeCell))
+                    session.world?.map.smudges.append(Smudge(type: chosen, cell: smudgeCell))
                 }
             }
         }
@@ -340,7 +338,7 @@ func deployNuclearStrike(worldX: Double, worldY: Double) {
 /// Deploy airstrike at target location
 /// VC: 1-3 A-10s fly to target and attack with napalm
 func deployAirStrike(worldX: Double, worldY: Double) {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
 
     print("SuperWeapon: AIRSTRIKE deployed at (\(Int(worldX)), \(Int(worldY)))")
 
@@ -398,10 +396,10 @@ func deployAirStrike(worldX: Double, worldY: Double) {
 
 /// AI fires super weapons when ready (called from tickAI)
 func tickAISuperWeapons() {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
 
     // Process for each AI house
-    for (house, state) in houseStates {
+    for (house, state) in session.houseStates {
         guard !state.isHuman else { continue }
 
         // AI Ion Cannon
@@ -430,7 +428,7 @@ func tickAISuperWeapons() {
 
 /// Find best target for AI super weapons (highest value enemy structure)
 func findBestAITarget(house: House) -> GameObject? {
-    guard let world = gameWorld else { return nil }
+    guard let world = session.world else { return nil }
     var bestTarget: GameObject? = nil
     var bestValue = 0
 
@@ -455,7 +453,7 @@ func findBestAITarget(house: House) -> GameObject? {
 
 /// AI deploys ion cannon (same damage, different house)
 func deployAIIonCannon(worldX: Double, worldY: Double, house: House) {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
     print("AI SuperWeapon: Ion Cannon fired by \(house.rawValue) at (\(Int(worldX)), \(Int(worldY)))")
 
     spawnAnimation(.ionCannon, worldX: worldX, worldY: worldY)
@@ -480,7 +478,7 @@ func deployAIIonCannon(worldX: Double, worldY: Double, house: House) {
 
 /// AI deploys nuclear strike
 func deployAINukeStrike(worldX: Double, worldY: Double, house: House) {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
     print("AI SuperWeapon: Nuclear Strike fired by \(house.rawValue) at (\(Int(worldX)), \(Int(worldY)))")
 
     spawnAnimation(.atomBlast, worldX: worldX, worldY: worldY)

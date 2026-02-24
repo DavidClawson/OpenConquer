@@ -14,24 +14,19 @@ let viewableShapes = [
     "ICON.SHP",
 ]
 
-var spriteViewerIndex = 0
-var spriteViewerFrame = 0
-var currentSHP: SHPFile? = nil
-var spriteViewerAnimating = true
-var spriteViewerFrameTimer: UInt32 = 0
 
 func loadCurrentSprite() {
-    let name = viewableShapes[spriteViewerIndex]
-    spriteViewerFrame = 0
+    let name = viewableShapes[renderState.spriteViewerIndex]
+    renderState.spriteViewerFrame = 0
     if let data = mixManager.retrieve(name) {
         do {
-            currentSHP = try SHPFile(data: Data(data))
+            renderState.currentSHP = try SHPFile(data: Data(data))
         } catch {
             print("Failed to parse \(name): \(error)")
-            currentSHP = nil
+            renderState.currentSHP = nil
         }
     } else {
-        currentSHP = nil
+        renderState.currentSHP = nil
     }
 }
 
@@ -40,7 +35,7 @@ func renderSHPFrame(_ renderer: OpaquePointer?, frame: SHPFrame, atX: Int32, atY
         for col in 0..<frame.width {
             let pixel = frame.pixels[row * frame.width + col]
             if pixel == 0 { continue }  // transparent
-            let color = gamePalette[Int(pixel)]
+            let color = renderState.gamePalette[Int(pixel)]
             SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, 255)
             var rect = SDL_Rect(x: atX + Int32(col) * scale, y: atY + Int32(row) * scale, w: scale, h: scale)
             SDL_RenderFillRect(renderer, &rect)

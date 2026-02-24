@@ -270,8 +270,11 @@ struct Smudge {
     let cell: Int
 }
 
-/// Persistent ground smudges (craters, scorch marks)
-var mapSmudges: [Smudge] = []
+// Backward-compatible computed property — smudges now live in GameMap
+var mapSmudges: [Smudge] {
+    get { session.world?.map.smudges ?? [] }
+    set { session.world?.map.smudges = newValue }
+}
 
 // MARK: - Animation Instance
 
@@ -299,12 +302,11 @@ class GameAnimation {
 
 // MARK: - Animation Manager
 
-var activeAnimations: [GameAnimation] = []
 
 /// Spawn a new animation at world coordinates
 func spawnAnimation(_ type: GameAnimType, worldX: Double, worldY: Double) {
     let anim = GameAnimation(type: type, worldX: worldX, worldY: worldY)
-    activeAnimations.append(anim)
+    session.activeAnimations.append(anim)
 }
 
 /// Spawn animation attached to a game object
@@ -313,14 +315,14 @@ func spawnAnimationOn(_ type: GameAnimType, target: GameObject) {
     if animTypeDataTable[type]?.isSticky == true {
         anim.attachedToId = target.id
     }
-    activeAnimations.append(anim)
+    session.activeAnimations.append(anim)
 }
 
 /// Tick all active animations
 func tickAnimations() {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
 
-    for anim in activeAnimations {
+    for anim in session.activeAnimations {
         guard !anim.isFinished else { continue }
 
         // Update position for sticky anims
@@ -374,7 +376,7 @@ func tickAnimations() {
 
     // Handle chain-to animations and smudges for finished anims
     var newAnims: [GameAnimation] = []
-    for anim in activeAnimations {
+    for anim in session.activeAnimations {
         guard anim.isFinished else { continue }
 
         // Chain to next animation
@@ -390,7 +392,7 @@ func tickAnimations() {
             if cellX >= 0 && cellX < 64 && cellY >= 0 && cellY < 64 {
                 let scorchTypes: [SmudgeType] = [.scorch1, .scorch2, .scorch3, .scorch4, .scorch5, .scorch6]
                 let smudge = Smudge(type: scorchTypes.randomElement()!, cell: cellY * 64 + cellX)
-                mapSmudges.append(smudge)
+                session.world?.map.smudges.append(smudge)
             }
         }
 
@@ -401,14 +403,14 @@ func tickAnimations() {
             if cellX >= 0 && cellX < 64 && cellY >= 0 && cellY < 64 {
                 let craterTypes: [SmudgeType] = [.crater1, .crater2, .crater3, .crater4, .crater5, .crater6]
                 let smudge = Smudge(type: craterTypes.randomElement()!, cell: cellY * 64 + cellX)
-                mapSmudges.append(smudge)
+                session.world?.map.smudges.append(smudge)
             }
         }
     }
 
     // Remove finished animations, add chain animations
-    activeAnimations.removeAll { $0.isFinished }
-    activeAnimations.append(contentsOf: newAnims)
+    session.activeAnimations.removeAll { $0.isFinished }
+    session.activeAnimations.append(contentsOf: newAnims)
 }
 
 // MARK: - Death Animation Selection
@@ -471,7 +473,7 @@ func spawnDeathEffects(_ obj: GameObject) {
 /// Determine what warhead killed an object (for death anim selection)
 func warheadThatKilled(_ obj: GameObject) -> WarheadType? {
     // Find the last attacker by searching world for objects targeting this one
-    guard let world = gameWorld else { return nil }
+    guard let world = session.world else { return nil }
     for other in world.objects {
         if other.attackTarget == obj.id, let weapon = other.primaryWeapon,
            let wData = weaponTypeData[weapon] {

@@ -10,17 +10,22 @@ enum FogLevel {
 
 // Sight ranges now come from type data tables via GameObject.sightRange
 
-/// Fog state for each of the 4096 cells
-var fogState: [FogLevel] = Array(repeating: .unexplored, count: 4096)
+// fogState is now in GameWorld.map (GameMap)
+// Backward-compatible computed property for code that still reads fogState directly
+var fogState: [FogLevel] {
+    get { session.world?.map.fogState ?? Array(repeating: .unexplored, count: 4096) }
+    set { session.world?.map.fogState = newValue }
+}
 
 /// Update fog of war based on current friendly unit positions
 func updateFog() {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
+    let map = world.map
 
     // Demote all visible cells to explored
     for i in 0..<4096 {
-        if fogState[i] == .visible {
-            fogState[i] = .explored
+        if map.fogState[i] == .visible {
+            map.fogState[i] = .explored
         }
     }
 
@@ -41,7 +46,7 @@ func updateFog() {
                 if nx < 0 || nx >= 64 || ny < 0 || ny >= 64 { continue }
                 // Circle check
                 if dx * dx + dy * dy <= sight * sight {
-                    fogState[ny * 64 + nx] = .visible
+                    map.fogState[ny * 64 + nx] = .visible
                 }
             }
         }
@@ -51,17 +56,20 @@ func updateFog() {
 /// Check if a cell is currently visible
 func isCellVisible(_ cell: Int) -> Bool {
     guard cell >= 0 && cell < 4096 else { return false }
-    return fogState[cell] == .visible
+    guard let map = session.world?.map else { return false }
+    return map.fogState[cell] == .visible
 }
 
 /// Check if a cell has been explored
 func isCellExplored(_ cell: Int) -> Bool {
     guard cell >= 0 && cell < 4096 else { return false }
-    return fogState[cell] != .unexplored
+    guard let map = session.world?.map else { return false }
+    return map.fogState[cell] != .unexplored
 }
 
 /// Initialize fog — reveal areas around starting friendly units
 func initFog() {
-    fogState = Array(repeating: .unexplored, count: 4096)
+    guard let map = session.world?.map else { return }
+    map.fogState = Array(repeating: .unexplored, count: 4096)
     updateFog()
 }

@@ -83,7 +83,7 @@ func tickAircraft(_ obj: GameObject) {
             obj.isLanding = false
 
             // When landed, check for rearm at helipad/airstrip
-            if let world = gameWorld {
+            if let world = session.world {
                 let landedCell = obj.cell
                 for other in world.objects {
                     guard other.kind == .structure && other.house == obj.house && other.strength > 0 else { continue }
@@ -118,7 +118,7 @@ func rearmAircraft(_ obj: GameObject) {
 
 /// Tick attack for aircraft — fly to target, fire, return to rearm when out of ammo
 func tickAircraftAttack(_ obj: GameObject) {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
     guard obj.isAircraft else { return }
 
     // Decrement reload timer
@@ -254,7 +254,7 @@ func tickAircraftGuard(_ obj: GameObject) {
 
 /// Send aircraft back to nearest helipad/airstrip
 func returnToBase(_ obj: GameObject) {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
 
     var bestDist = Double.infinity
     var bestTarget: GameObject? = nil

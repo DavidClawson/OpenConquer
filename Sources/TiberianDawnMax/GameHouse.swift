@@ -59,7 +59,7 @@ class HouseState {
 
     /// Recalculate power from all owned buildings
     func recalculatePower() {
-        guard let world = gameWorld else { return }
+        guard let world = session.world else { return }
         powerOutput = 0
         powerDrain = 0
         capacity = 0
@@ -79,7 +79,7 @@ class HouseState {
 
     /// Check if this house has all prerequisite buildings for a given struct flag
     func hasPrerequisites(_ prereq: StructFlag) -> Bool {
-        guard let world = gameWorld else { return false }
+        guard let world = session.world else { return false }
         if prereq == .none { return true }
 
         // Check each prerequisite building type
@@ -100,7 +100,7 @@ class HouseState {
 
     /// Get set of building type names this house owns
     func ownedBuildingTypes() -> Set<String> {
-        guard let world = gameWorld else { return [] }
+        guard let world = session.world else { return [] }
         var result = Set<String>()
         for obj in world.objects {
             if obj.house == type && obj.kind == .structure && obj.strength > 0 {
@@ -182,22 +182,21 @@ func structTypeToFlag(_ st: StructType) -> StructFlag {
 // MARK: - House Manager
 
 /// Active house states for the current game
-var houseStates: [House: HouseState] = [:]
 
 /// Get or create house state for a given house
 func getHouseState(_ house: House) -> HouseState {
-    if let state = houseStates[house] {
+    if let state = session.houseStates[house] {
         return state
     }
     let state = HouseState(type: house, credits: 0, isHuman: false)
-    houseStates[house] = state
+    session.houseStates[house] = state
     return state
 }
 
 /// Initialize house states from the current game world
 func initHouseStates() {
-    houseStates.removeAll()
-    guard let world = gameWorld else { return }
+    session.houseStates.removeAll()
+    guard let world = session.world else { return }
 
     // Create house states for all houses present in the scenario
     var housesPresent = Set<House>()
@@ -207,21 +206,21 @@ func initHouseStates() {
 
     for house in housesPresent {
         let isHuman = (house == world.playerHouse)
-        let credits = isHuman ? sidebarCredits : 5000  // AI gets default credits
+        let credits = isHuman ? session.sidebarCredits : 5000  // AI gets default credits
         let state = HouseState(type: house, credits: credits, isHuman: isHuman)
         state.recalculatePower()
-        houseStates[house] = state
+        session.houseStates[house] = state
     }
 
-    print("GameHouse: Initialized \(houseStates.count) house states")
-    for (house, state) in houseStates {
+    print("GameHouse: Initialized \(session.houseStates.count) house states")
+    for (house, state) in session.houseStates {
         print("  \(house.rawValue): credits=\(state.credits) power=\(state.powerOutput)/\(state.powerDrain)")
     }
 }
 
 /// Recalculate all house power (call after buildings change)
 func recalculateAllHousePower() {
-    for (_, state) in houseStates {
+    for (_, state) in session.houseStates {
         state.recalculatePower()
     }
 }

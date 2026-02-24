@@ -54,7 +54,7 @@ func isEnemy(_ a: GameObject, _ b: GameObject) -> Bool {
 
 /// Find the nearest enemy within range of an object
 func findNearestEnemy(_ obj: GameObject, range: Double) -> GameObject? {
-    guard let world = gameWorld else { return nil }
+    guard let world = session.world else { return nil }
     var nearest: GameObject? = nil
     var nearestDist = Double.infinity
 
@@ -76,7 +76,7 @@ func findNearestEnemy(_ obj: GameObject, range: Double) -> GameObject? {
 
 /// Find a game object by ID
 func findObjectById(_ id: Int) -> GameObject? {
-    guard let world = gameWorld else { return nil }
+    guard let world = session.world else { return nil }
     return world.objects.first { $0.id == id }
 }
 
@@ -93,7 +93,7 @@ func applyDamage(_ target: GameObject, amount: Int, warhead: WarheadType? = nil)
     }
 
     target.strength -= finalDamage
-    if let world = gameWorld {
+    if let world = session.world {
         target.lastDamagedTick = world.tickCount
         target.lastWhoHurtMe = nil  // Could set to attacker's house
     }
@@ -149,7 +149,7 @@ func rotateTurretToward(_ obj: GameObject, targetFacing: Int, rotateSpeed: Int =
 
 /// Tick the attack mission for an object
 func tickAttack(_ obj: GameObject) {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
 
     // Decrement reload timer
     if obj.reloadTimer > 0 {
@@ -272,7 +272,7 @@ let fearMaximum: UInt8 = 255
 /// Tick fear reduction for infantry — fear decays slowly when not taking damage
 func tickFear(_ obj: GameObject) {
     guard obj.kind == .infantry else { return }
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
 
     // Fear decays by 1 every 8 ticks when not recently damaged
     let ticksSinceDamage = world.tickCount - obj.lastDamagedTick
@@ -313,13 +313,13 @@ func tickFear(_ obj: GameObject) {
 
 /// Remove dead objects from the world
 func removeDeadObjects() {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
     world.objects.removeAll { $0.strength <= 0 }
 }
 
 /// Check if an object at a screen position is an enemy of the current player
 func findEnemyAtWorldPos(worldX: Double, worldY: Double) -> GameObject? {
-    guard let world = gameWorld else { return nil }
+    guard let world = session.world else { return nil }
     let hitRadius = 14.0
 
     for obj in world.objects {
@@ -348,7 +348,7 @@ func findEnemyAtWorldPos(worldX: Double, worldY: Double) -> GameObject? {
 
 /// Find the nearest friendly object of a given type
 func findNearestFriendly(_ obj: GameObject, typeName: String, maxRange: Double = Double.infinity) -> GameObject? {
-    guard let world = gameWorld else { return nil }
+    guard let world = session.world else { return nil }
     var nearest: GameObject? = nil
     var nearestDist = Double.infinity
 

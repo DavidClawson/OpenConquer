@@ -864,10 +864,10 @@ class AudioManager {
 
         if let wx = worldX, let wy = worldY {
             // Distance from camera center
-            let vpWidth = Double(windowWidth - sidebarWidth)
-            let vpHeight = Double(windowHeight)
-            let camCenterX = gameCameraX + vpWidth / 2.0
-            let camCenterY = gameCameraY + vpHeight / 2.0
+            let vpWidth = Double(renderState.windowWidth - sidebarWidth)
+            let vpHeight = Double(renderState.windowHeight)
+            let camCenterX = renderState.gameCameraX + vpWidth / 2.0
+            let camCenterY = renderState.gameCameraY + vpHeight / 2.0
             let dx = wx - camCenterX
             let dy = wy - camCenterY
             let dist = sqrt(dx * dx + dy * dy)

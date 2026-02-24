@@ -1,11 +1,42 @@
 import Foundation
 
-// MARK: - Static Passability
+// MARK: - GameMap Class
 
-/// Land passability: true = passable for ground units, false = impassable
-var landPassability: [Bool] = Array(repeating: true, count: 4096)
-/// Water passability: true = passable for naval units, false = impassable
-var waterPassability: [Bool] = Array(repeating: true, count: 4096)
+class GameMap {
+    /// The 64x64 grid of terrain template cells (loaded from .BIN file)
+    var cells: [MapCell] = []
+
+    /// Parsed scenario INI data (structures, units, infantry, overlays, etc.)
+    var scenarioData: ScenarioData? = nil
+
+    /// Land passability: true = passable for ground units, false = impassable
+    var landPassability: [Bool] = Array(repeating: true, count: 4096)
+
+    /// Water passability: true = passable for naval units, false = impassable
+    var waterPassability: [Bool] = Array(repeating: true, count: 4096)
+
+    /// Set of cell indices that contain tiberium overlays
+    var tiberiumCells: Set<Int> = Set()
+
+    /// Persistent ground smudges (craters, scorch marks)
+    var smudges: [Smudge] = []
+
+    /// Fog state for each of the 4096 cells
+    var fogState: [FogLevel] = Array(repeating: .unexplored, count: 4096)
+}
+
+// MARK: - Backward-Compatible Passability Globals
+
+/// Land passability — delegates to session.world.map; falls back to a default array
+var landPassability: [Bool] {
+    get { session.world?.map.landPassability ?? Array(repeating: true, count: 4096) }
+    set { session.world?.map.landPassability = newValue }
+}
+/// Water passability — delegates to session.world.map; falls back to a default array
+var waterPassability: [Bool] {
+    get { session.world?.map.waterPassability ?? Array(repeating: true, count: 4096) }
+    set { session.world?.map.waterPassability = newValue }
+}
 /// Legacy alias used by structure placement and MCV deploy
 var staticPassability: [Bool] {
     get { landPassability }
@@ -98,7 +129,7 @@ func passabilityMap(for speed: SpeedType) -> [Bool] {
 
 /// Rebuild occupancy grid from current object positions
 func updateOccupancy() {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
     world.occupancy.removeAll(keepingCapacity: true)
 
     for obj in world.objects {
@@ -121,7 +152,7 @@ func isCellPassable(cellX: Int, cellY: Int, ignoring: GameObject? = nil, speedTy
     if !passMap[cell] { return false }
 
     // Check dynamic occupancy
-    if let world = gameWorld, let occupantId = world.occupancy[cell] {
+    if let world = session.world, let occupantId = world.occupancy[cell] {
         if let ignoring = ignoring, occupantId == ignoring.id {
             return true
         }

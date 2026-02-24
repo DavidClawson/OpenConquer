@@ -5,40 +5,37 @@ import Foundation
 
 let ticksPerSecond = 15
 let tickDurationMs: UInt32 = 66  // ~15 FPS (1000/15)
-var tickAccumulator: UInt32 = 0
-var lastTickTime: UInt32 = 0
 
 /// Interpolation factor 0.0-1.0 between game ticks for smooth rendering.
 /// 0.0 = at previous tick position, 1.0 = at current tick position.
-var renderInterpolation: Double = 0.0
 
 // MARK: - Game Update
 
 func updateGame() {
     let now = SDL_GetTicks()
-    if lastTickTime == 0 {
-        lastTickTime = now
+    if session.lastTickTime == 0 {
+        session.lastTickTime = now
         return
     }
 
-    let elapsed = now - lastTickTime
-    lastTickTime = now
-    tickAccumulator += elapsed
+    let elapsed = now - session.lastTickTime
+    session.lastTickTime = now
+    session.tickAccumulator += elapsed
 
     // Run game ticks at fixed 15 FPS rate
-    while tickAccumulator >= tickDurationMs {
-        tickAccumulator -= tickDurationMs
+    while session.tickAccumulator >= tickDurationMs {
+        session.tickAccumulator -= tickDurationMs
         gameTick()
     }
 
     // Compute interpolation factor for smooth rendering between ticks
-    renderInterpolation = Double(tickAccumulator) / Double(tickDurationMs)
+    session.renderInterpolation = Double(session.tickAccumulator) / Double(tickDurationMs)
 }
 
 // MARK: - Game Tick
 
 func gameTick() {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
     world.tickCount += 1
 
     // Save previous positions for render interpolation
@@ -191,7 +188,7 @@ func gameTick() {
 
     // Sync sidebar credits with HouseState
     let playerState = getHouseState(world.playerHouse)
-    playerState.credits = sidebarCredits
+    playerState.credits = session.sidebarCredits
 }
 
 // MARK: - Movement Tick

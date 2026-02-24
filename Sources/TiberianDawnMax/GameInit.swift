@@ -161,7 +161,7 @@ func initGameWorld(scenario: ScenarioData, scenarioName: String) {
         world.playerHouse = .goodGuy
     }
 
-    gameWorld = world
+    session.world = world
     print("GameInit: Created \(world.objects.count) objects from \(scenarioName)")
     print("  Structures: \(scenario.structures.count), Units: \(scenario.units.count), Infantry: \(scenario.infantry.count)")
     print("  Player house: \(world.playerHouse.rawValue)")
@@ -184,7 +184,7 @@ func initGameWorld(scenario: ScenarioData, scenarioName: String) {
     case .desert: palName = "DESERT.PAL"
     case .winter: palName = "WINTER.PAL"
     }
-    gamePalette = loadPalette(palName)
+    renderState.gamePalette = loadPalette(palName)
 
     // Build static passability map
     buildPassabilityMap()
@@ -212,15 +212,15 @@ func initGameWorld(scenario: ScenarioData, scenarioName: String) {
     parseTriggers(from: scenario.ini)
 
     // Store waypoints for team AI
-    scenarioWaypoints.removeAll()
+    session.scenarioWaypoints.removeAll()
     for wp in scenario.waypoints {
-        scenarioWaypoints[wp.id] = wp.cell
+        session.scenarioWaypoints[wp.id] = wp.cell
     }
 
     // Parse team types and create initial teams
     parseTeamTypes(from: scenario.ini)
-    activeTeams.removeAll()
-    for tt in teamTypes {
+    session.activeTeams.removeAll()
+    for tt in session.teamTypes {
         for _ in 0..<tt.initNum {
             if let team = createAndRecruitTeam(type: tt) {
                 print("GameInit: Created initial team '\(tt.name)' with \(team.memberCount) members")

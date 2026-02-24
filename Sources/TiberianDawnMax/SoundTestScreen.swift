@@ -124,7 +124,7 @@ private func stopSoundTestPlayback() {
 func renderSoundTest(_ renderer: OpaquePointer?) {
     let categories = SoundLibrary.categories
     guard !categories.isEmpty else {
-        drawText(renderer, "No sound categories", centerX: windowWidth / 2, centerY: windowHeight / 2,
+        drawText(renderer, "No sound categories", centerX: renderState.windowWidth / 2, centerY: renderState.windowHeight / 2,
                  color: .red, scale: 2)
         return
     }
@@ -132,19 +132,19 @@ func renderSoundTest(_ renderer: OpaquePointer?) {
     let cat = categories[soundTestCategory]
 
     // Title
-    drawText(renderer, "SOUND TEST", centerX: windowWidth / 2, centerY: 30, color: .amber, scale: 3)
+    drawText(renderer, "SOUND TEST", centerX: renderState.windowWidth / 2, centerY: 30, color: .amber, scale: 3)
 
     // Category name
     let catLabel = "\(cat.name)  (\(soundTestCategory + 1)/\(categories.count))"
-    drawText(renderer, catLabel, centerX: windowWidth / 2, centerY: 65, color: .green, scale: 2)
+    drawText(renderer, catLabel, centerX: renderState.windowWidth / 2, centerY: 65, color: .green, scale: 2)
 
     // Source indicator
     if assetManager.hasRemasteredAudio {
-        drawText(renderer, "Remastered audio available (44kHz)", centerX: windowWidth / 2, centerY: 88, color: .brightGreen, scale: 1)
+        drawText(renderer, "Remastered audio available (44kHz)", centerX: renderState.windowWidth / 2, centerY: 88, color: .brightGreen, scale: 1)
     } else if assetManager.hasExtractedAudio {
-        drawText(renderer, "Classic extracted WAV (22kHz)", centerX: windowWidth / 2, centerY: 88, color: .green, scale: 1)
+        drawText(renderer, "Classic extracted WAV (22kHz)", centerX: renderState.windowWidth / 2, centerY: 88, color: .green, scale: 1)
     } else {
-        drawText(renderer, "No extracted WAV - using AUD from MIX", centerX: windowWidth / 2, centerY: 88, color: .amber, scale: 1)
+        drawText(renderer, "No extracted WAV - using AUD from MIX", centerX: renderState.windowWidth / 2, centerY: 88, color: .amber, scale: 1)
     }
 
     // List area
@@ -152,7 +152,7 @@ func renderSoundTest(_ renderer: OpaquePointer?) {
     let listY: Int32 = 110
     let rowH: Int32 = 22
     let maxVisible = soundTestMaxVisible()
-    let listW: Int32 = windowWidth - 120
+    let listW: Int32 = renderState.windowWidth - 120
 
     // Draw list background
     SDL_SetRenderDrawColor(renderer, 15, 15, 15, 255)
@@ -197,11 +197,11 @@ func renderSoundTest(_ renderer: OpaquePointer?) {
 
     // Scroll indicators
     if soundTestScrollOffset > 0 {
-        drawText(renderer, "^ More above", centerX: windowWidth / 2, centerY: listY - 15, color: .gray, scale: 1)
+        drawText(renderer, "^ More above", centerX: renderState.windowWidth / 2, centerY: listY - 15, color: .gray, scale: 1)
     }
     if endIdx < cat.sounds.count {
         let bottomY = listY + Int32(maxVisible) * rowH + 10
-        drawText(renderer, "v More below (\(cat.sounds.count - endIdx))", centerX: windowWidth / 2, centerY: bottomY, color: .gray, scale: 1)
+        drawText(renderer, "v More below (\(cat.sounds.count - endIdx))", centerX: renderState.windowWidth / 2, centerY: bottomY, color: .gray, scale: 1)
     }
 
     // Info panel for selected sound
@@ -211,14 +211,14 @@ func renderSoundTest(_ renderer: OpaquePointer?) {
         if let lib = audioManager.soundLibrary, let audio = lib.load(entry.id) {
             let dur = String(format: "%.2fs", audio.duration)
             let info = "Rate: \(audio.sampleRate)Hz   Duration: \(dur)   Samples: \(audio.samples.count)   Source: \(audio.source.rawValue)"
-            drawText(renderer, info, centerX: windowWidth / 2, centerY: infoY, color: .green, scale: 1)
+            drawText(renderer, info, centerX: renderState.windowWidth / 2, centerY: infoY, color: .green, scale: 1)
         } else {
-            drawText(renderer, "Sound not found: \(entry.id)", centerX: windowWidth / 2, centerY: infoY, color: .red, scale: 1)
+            drawText(renderer, "Sound not found: \(entry.id)", centerX: renderState.windowWidth / 2, centerY: infoY, color: .red, scale: 1)
         }
     }
 
     // Controls
-    let ctrlY = windowHeight - 50
-    drawText(renderer, "Tab: Category   Up/Down: Browse   Enter: Play   Space: Stop", centerX: windowWidth / 2, centerY: ctrlY, color: .gray, scale: 1)
-    drawText(renderer, "PgUp/PgDn: Scroll   Esc: Back", centerX: windowWidth / 2, centerY: ctrlY + 20, color: .gray, scale: 1)
+    let ctrlY = renderState.windowHeight - 50
+    drawText(renderer, "Tab: Category   Up/Down: Browse   Enter: Play   Space: Stop", centerX: renderState.windowWidth / 2, centerY: ctrlY, color: .gray, scale: 1)
+    drawText(renderer, "PgUp/PgDn: Scroll   Esc: Back", centerX: renderState.windowWidth / 2, centerY: ctrlY + 20, color: .gray, scale: 1)
 }

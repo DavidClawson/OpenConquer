@@ -5,7 +5,6 @@ import Foundation
 // Tracks frame timing, FPS, and per-system costs.
 // Toggle overlay with F3.
 
-var perfShowOverlay: Bool = false
 
 struct PerfMonitor {
     // Frame timing
@@ -85,7 +84,7 @@ struct PerfMonitor {
     // MARK: - Render Overlay
 
     func renderOverlay(_ renderer: OpaquePointer?) {
-        guard perfShowOverlay else { return }
+        guard renderState.perfShowOverlay else { return }
 
         // Reset scale to 1:1 for UI overlay
         SDL_RenderSetScale(renderer, 1.0, 1.0)
@@ -96,7 +95,7 @@ struct PerfMonitor {
         let lineH: Int32 = 14
         let lines = Int32(4 + sections.count)
         let panelH: Int32 = lines * lineH + 10
-        let px: Int32 = windowWidth - panelW - 5
+        let px: Int32 = renderState.windowWidth - panelW - 5
         let py: Int32 = 5
 
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 200)
@@ -119,8 +118,8 @@ struct PerfMonitor {
         y += lineH
 
         // Window size + sprite mode
-        let spriteMode = hasRemasteredSprites ? "  HD Sprites" : ""
-        drawTextLeft(renderer, "Window: \(windowWidth)x\(windowHeight)\(spriteMode)", x: px + 5, y: y, color: .green, scale: 1)
+        let spriteMode = renderState.hasRemasteredSprites ? "  HD Sprites" : ""
+        drawTextLeft(renderer, "Window: \(renderState.windowWidth)x\(renderState.windowHeight)\(spriteMode)", x: px + 5, y: y, color: .green, scale: 1)
         y += lineH
 
         // Separator
@@ -142,18 +141,18 @@ struct PerfMonitor {
         }
 
         // Active entity counts
-        let projCount = activeProjectiles.count
-        let animCount = activeAnimations.count
+        let projCount = session.activeProjectiles.count
+        let animCount = session.activeAnimations.count
         if projCount > 0 || animCount > 0 {
             drawTextLeft(renderer, "Active: \(projCount) proj  \(animCount) anim", x: px + 5, y: y, color: .gray, scale: 1)
             y += lineH
         }
 
         // Memory indicator: texture cache sizes
-        let rmCount = remasteredTextureCache.count
+        let rmCount = renderState.remasteredTextureCache.count
         let cacheInfo = rmCount > 0
-            ? "Cache: \(objectTextureCache.count) obj  \(tileTextureCache.count) tile  \(rmCount) HD"
-            : "Cache: \(objectTextureCache.count) obj  \(tileTextureCache.count) tile"
+            ? "Cache: \(renderState.objectTextureCache.count) obj  \(renderState.tileTextureCache.count) tile  \(rmCount) HD"
+            : "Cache: \(renderState.objectTextureCache.count) obj  \(renderState.tileTextureCache.count) tile"
         drawTextLeft(renderer, cacheInfo, x: px + 5, y: y, color: .gray, scale: 1)
     }
 }

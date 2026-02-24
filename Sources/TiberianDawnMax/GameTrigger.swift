@@ -149,9 +149,7 @@ class GameTrigger {
 
 // MARK: - Trigger Manager
 
-var gameTriggers: [GameTrigger] = []
-var triggerWinState: TriggerWinState = .playing
-var allowWinFlag: Bool = false  // Set by ACTION_ALLOWWIN
+// session.gameTriggers, session.triggerWinState, session.allowWinFlag -- now in session
 
 enum TriggerWinState {
     case playing
@@ -161,9 +159,9 @@ enum TriggerWinState {
 
 /// Parse triggers from scenario INI data
 func parseTriggers(from ini: INIFile) {
-    gameTriggers.removeAll()
-    triggerWinState = .playing
-    allowWinFlag = false
+    session.gameTriggers.removeAll()
+    session.triggerWinState = .playing
+    session.allowWinFlag = false
 
     // [Triggers] section: TriggerName = EventName,ActionName,Data,HouseName,TeamName,IsPersistent
     for entry in ini.entries("Triggers") {
@@ -186,12 +184,12 @@ func parseTriggers(from ini: INIFile) {
             house: house, teamName: teamName,
             persistence: persistence, data: data
         )
-        gameTriggers.append(trigger)
+        session.gameTriggers.append(trigger)
     }
 
     // Count attachments for each trigger (objects + cells referencing it)
     if let scenario = scenarioData {
-        for trigger in gameTriggers {
+        for trigger in session.gameTriggers {
             var count = 0
             for s in scenario.structures {
                 if s.trigger.caseInsensitiveCompare(trigger.name) == .orderedSame && s.trigger != "None" { count += 1 }
@@ -209,17 +207,17 @@ func parseTriggers(from ini: INIFile) {
         }
     }
 
-    print("GameTrigger: Loaded \(gameTriggers.count) triggers")
+    print("GameTrigger: Loaded \(session.gameTriggers.count) triggers")
 }
 
 // MARK: - Trigger Evaluation
 
 /// Tick all house-based triggers each game tick
 func tickTriggers() {
-    guard let world = gameWorld else { return }
-    guard triggerWinState == .playing else { return }
+    guard let world = session.world else { return }
+    guard session.triggerWinState == .playing else { return }
 
-    for trigger in gameTriggers {
+    for trigger in session.gameTriggers {
         guard trigger.isActive else { continue }
 
         switch trigger.event {
@@ -273,7 +271,7 @@ func tickTriggers() {
 
         case .credits:
             // Credits threshold reached
-            if sidebarCredits >= trigger.data {
+            if session.sidebarCredits >= trigger.data {
                 fireTrigger(trigger)
             }
 
@@ -285,9 +283,9 @@ func tickTriggers() {
 
 /// Spring a trigger by name (for object/cell events)
 func springTrigger(named triggerName: String, event: TriggerEvent) {
-    guard triggerWinState == .playing else { return }
+    guard session.triggerWinState == .playing else { return }
 
-    for trigger in gameTriggers {
+    for trigger in session.gameTriggers {
         guard trigger.isActive else { continue }
         guard trigger.name.caseInsensitiveCompare(triggerName) == .orderedSame else { continue }
         guard trigger.event == event || trigger.event == .any else { continue }
@@ -306,7 +304,7 @@ func springTrigger(named triggerName: String, event: TriggerEvent) {
 /// Spring a cell trigger when a player unit enters a cell
 func checkCellTriggers(cell: Int, enteringObject: GameObject) {
     guard let scenario = scenarioData else { return }
-    guard enteringObject.house == gameWorld?.playerHouse else { return }
+    guard enteringObject.house == session.world?.playerHouse else { return }
 
     for ct in scenario.cellTriggers {
         if ct.cell == cell {
@@ -330,15 +328,15 @@ func fireTrigger(_ trigger: GameTrigger) {
     switch trigger.action {
     case .win:
         print(">>> MISSION WON <<<")
-        triggerWinState = .won
+        session.triggerWinState = .won
 
     case .lose:
         print(">>> MISSION LOST <<<")
-        triggerWinState = .lost
+        session.triggerWinState = .lost
 
     case .allHunt:
         // Send all enemy units to hunt mode
-        guard let world = gameWorld else { return }
+        guard let world = session.world else { return }
         for obj in world.objects {
             if obj.house != world.playerHouse && obj.house != .neutral && obj.strength > 0 {
                 if obj.kind != .structure {
@@ -367,18 +365,18 @@ func fireTrigger(_ trigger: GameTrigger) {
         }
 
     case .airstrike:
-        playerAirStrike.enable()
-        playerAirStrike.forceCharge()
+        session.playerAirStrike.enable()
+        session.playerAirStrike.forceCharge()
         print("Trigger: Airstrike enabled and ready")
 
     case .nuke:
-        playerNukeStrike.enable()
-        playerNukeStrike.forceCharge()
+        session.playerNukeStrike.enable()
+        session.playerNukeStrike.forceCharge()
         print("Trigger: Nuclear strike enabled and ready")
 
     case .ionCannon:
-        playerIonCannon.enable()
-        playerIonCannon.forceCharge()
+        session.playerIonCannon.enable()
+        session.playerIonCannon.forceCharge()
         print("Trigger: Ion cannon enabled and ready")
 
     case .destroyXXXX:
@@ -398,7 +396,7 @@ func fireTrigger(_ trigger: GameTrigger) {
         print("Trigger: Win/Lose condition set")
 
     case .allowWin:
-        allowWinFlag = true
+        session.allowWinFlag = true
         print("Trigger: Allow win flag set")
 
     case .dz:
@@ -411,7 +409,7 @@ func fireTrigger(_ trigger: GameTrigger) {
 
 /// Deactivate a trigger by name
 func destroyTriggerNamed(_ name: String) {
-    for trigger in gameTriggers {
+    for trigger in session.gameTriggers {
         if trigger.name.caseInsensitiveCompare(name) == .orderedSame {
             trigger.isActive = false
             print("Trigger '\(name)' destroyed by another trigger")
@@ -423,10 +421,10 @@ func destroyTriggerNamed(_ name: String) {
 
 /// Spawn reinforcements for a team type — creates units at map edge or waypoint
 func spawnReinforcements(teamName: String) {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
 
     // Find the team type
-    guard let teamType = teamTypes.first(where: { $0.name == teamName }) else {
+    guard let teamType = session.teamTypes.first(where: { $0.name == teamName }) else {
         print("Reinforcements: Unknown team type '\(teamName)'")
         return
     }
@@ -435,7 +433,7 @@ func spawnReinforcements(teamName: String) {
     let spawnX: Double
     let spawnY: Double
 
-    if let reinfCell = scenarioWaypoints[25] {
+    if let reinfCell = session.scenarioWaypoints[25] {
         let pos = cellToPixel(reinfCell)
         spawnX = Double(pos.px) + 12.0
         spawnY = Double(pos.py) + 12.0

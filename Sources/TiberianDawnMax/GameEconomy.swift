@@ -2,8 +2,7 @@ import Foundation
 
 // MARK: - Tiberium System
 
-/// Set of cell indices that contain tiberium overlays
-var tiberiumCells: Set<Int> = Set()
+// tiberiumCells is now in GameWorld.map (GameMap)
 
 /// Maximum tiberium a harvester can carry
 let maxTiberiumLoad: Int = 20
@@ -13,7 +12,8 @@ let tiberiumValue: Int = 25
 
 /// Scan scenario overlays for tiberium
 func initTiberiumCells() {
-    tiberiumCells.removeAll()
+    guard let map = session.world?.map else { return }
+    map.tiberiumCells.removeAll()
     guard let scenario = scenarioData else { return }
     for overlay in scenario.overlays {
         let upper = overlay.typeName.uppercased()
@@ -21,17 +21,17 @@ func initTiberiumCells() {
             // TI1 through TI12 are tiberium
             let numPart = upper.dropFirst(2)
             if let num = Int(numPart), num >= 1 && num <= 12 {
-                tiberiumCells.insert(overlay.cell)
+                map.tiberiumCells.insert(overlay.cell)
             }
         }
     }
-    print("GameEconomy: Found \(tiberiumCells.count) tiberium cells")
+    print("GameEconomy: Found \(map.tiberiumCells.count) tiberium cells")
 }
 
 // MARK: - Harvester State Machine
 
 func tickHarvest(_ obj: GameObject) {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
     let upper = obj.typeName.uppercased()
     if upper != "HARV" { return }
 
@@ -49,8 +49,8 @@ func tickHarvest(_ obj: GameObject) {
                 let houseState = getHouseState(obj.house)
                 houseState.addCredits(creditsGained)
                 // Keep sidebar credits in sync for the player
-                if obj.house == gameWorld?.playerHouse {
-                    sidebarCredits += creditsGained
+                if obj.house == session.world?.playerHouse {
+                    session.sidebarCredits += creditsGained
                 }
                 obj.tiberiumLoad = 0
                 // Clear movement to go find more tiberium
@@ -76,14 +76,14 @@ func tickHarvest(_ obj: GameObject) {
             obj.moveTargetX = nil
             obj.moveTargetY = nil
         }
-    } else if tiberiumCells.contains(obj.cell) {
+    } else if world.map.tiberiumCells.contains(obj.cell) {
         // On tiberium — harvest
         // Harvest one unit every few ticks
         if world.tickCount % 4 == 0 {
             obj.tiberiumLoad += 1
             // Deplete tiberium after multiple harvests
             if obj.tiberiumLoad % 5 == 0 {
-                tiberiumCells.remove(obj.cell)
+                world.map.tiberiumCells.remove(obj.cell)
             }
         }
     } else {
@@ -123,10 +123,11 @@ func tickHarvest(_ obj: GameObject) {
 
 /// Find nearest tiberium cell to a harvester
 func findNearestTiberium(_ obj: GameObject) -> (cellX: Int, cellY: Int)? {
+    guard let map = session.world?.map else { return nil }
     var bestCell: (cellX: Int, cellY: Int)? = nil
     var bestDist = Double.infinity
 
-    for cell in tiberiumCells {
+    for cell in map.tiberiumCells {
         let cx = cell % 64
         let cy = cell / 64
         let dx = Double(cx) - Double(obj.cellX)
@@ -142,7 +143,7 @@ func findNearestTiberium(_ obj: GameObject) -> (cellX: Int, cellY: Int)? {
 
 /// Find nearest refinery owned by this object's house
 func findNearestRefinery(_ obj: GameObject) -> GameObject? {
-    guard let world = gameWorld else { return nil }
+    guard let world = session.world else { return nil }
     var nearest: GameObject? = nil
     var nearestDist = Double.infinity
 

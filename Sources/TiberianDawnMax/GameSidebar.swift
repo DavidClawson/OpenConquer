@@ -7,17 +7,11 @@ let sidebarWidth: Int32 = 160
 
 // MARK: - Credits & Production State
 
-var sidebarCredits: Int = 5000
-var displayedCredits: Int = 0  // Animated credit counter
 
 /// Unit build queue (one at a time)
-var unitBuildQueue: (typeName: String, progress: Int, cost: Int, totalTicks: Int)? = nil
 /// Structure build queue (one at a time)
-var structureBuildQueue: (typeName: String, progress: Int, cost: Int, totalTicks: Int)? = nil
 
 /// Placement mode for structures
-var isPlacingStructure: Bool = false
-var placementType: String? = nil
 
 // MARK: - Build Data (derived from type data tables)
 
@@ -162,7 +156,7 @@ var buildableStructures: [BuildableStructure] {
 
 /// Get the set of building type names owned by the player
 func getOwnedBuildingTypes() -> Set<String> {
-    guard let world = gameWorld else { return [] }
+    guard let world = session.world else { return [] }
     var owned = Set<String>()
     for obj in world.objects {
         if obj.kind == .structure && obj.house == world.playerHouse && obj.strength > 0 {
@@ -175,7 +169,7 @@ func getOwnedBuildingTypes() -> Set<String> {
 /// Get available units the player can build
 func getAvailableUnits() -> [BuildableItem] {
     let owned = getOwnedBuildingTypes()
-    let faction = gameWorld?.playerHouse == .goodGuy ? "GDI" : "NOD"
+    let faction = session.world?.playerHouse == .goodGuy ? "GDI" : "NOD"
     var seen = Set<String>()
     var result: [BuildableItem] = []
     for item in buildableUnits {
@@ -191,7 +185,7 @@ func getAvailableUnits() -> [BuildableItem] {
 /// Get available structures the player can build
 func getAvailableStructures() -> [BuildableStructure] {
     let owned = getOwnedBuildingTypes()
-    let faction = gameWorld?.playerHouse == .goodGuy ? "GDI" : "NOD"
+    let faction = session.world?.playerHouse == .goodGuy ? "GDI" : "NOD"
     // Need a construction yard to build structures
     if !owned.contains("FACT") { return [] }
     var result: [BuildableStructure] = []
@@ -205,33 +199,31 @@ func getAvailableStructures() -> [BuildableStructure] {
 // MARK: - Sidebar Rendering
 
 /// Sidebar scroll offset for the build list
-var sidebarScrollOffset: Int = 0
 /// Which tab: 0 = units, 1 = structures
-var sidebarTab: Int = 0
 
 func renderSidebar(_ renderer: OpaquePointer?) {
-    guard gameWorld != nil else { return }
-    let sx = windowWidth - sidebarWidth
+    guard session.world != nil else { return }
+    let sx = renderState.windowWidth - sidebarWidth
 
     // Background
     SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255)
-    var bg = SDL_Rect(x: sx, y: 0, w: sidebarWidth, h: windowHeight)
+    var bg = SDL_Rect(x: sx, y: 0, w: sidebarWidth, h: renderState.windowHeight)
     SDL_RenderFillRect(renderer, &bg)
 
     // Border line
     SDL_SetRenderDrawColor(renderer, 80, 80, 80, 255)
-    SDL_RenderDrawLine(renderer, sx, 0, sx, windowHeight)
+    SDL_RenderDrawLine(renderer, sx, 0, sx, renderState.windowHeight)
 
     // Credits display
     // Animate credits counter toward actual value
-    if displayedCredits < sidebarCredits {
-        displayedCredits = min(sidebarCredits, displayedCredits + max(1, (sidebarCredits - displayedCredits) / 8))
-    } else if displayedCredits > sidebarCredits {
-        displayedCredits = max(sidebarCredits, displayedCredits - max(1, (displayedCredits - sidebarCredits) / 8))
+    if session.displayedCredits < session.sidebarCredits {
+        session.displayedCredits = min(session.sidebarCredits, session.displayedCredits + max(1, (session.sidebarCredits - session.displayedCredits) / 8))
+    } else if session.displayedCredits > session.sidebarCredits {
+        session.displayedCredits = max(session.sidebarCredits, session.displayedCredits - max(1, (session.displayedCredits - session.sidebarCredits) / 8))
     }
 
     drawText(renderer, "CREDITS", centerX: sx + sidebarWidth / 2, centerY: 10, color: .amber, scale: 1)
-    drawText(renderer, "$\(displayedCredits)", centerX: sx + sidebarWidth / 2, centerY: 24, color: .green, scale: 2)
+    drawText(renderer, "$\(session.displayedCredits)", centerX: sx + sidebarWidth / 2, centerY: 24, color: .green, scale: 2)
 
     // Power bar
     renderPowerBar(renderer, sx: sx)
@@ -242,14 +234,14 @@ func renderSidebar(_ renderer: OpaquePointer?) {
     let tabH: Int32 = 20
 
     // Units tab
-    let unitTabColor: (r: UInt8, g: UInt8, b: UInt8) = sidebarTab == 0 ? (0, 180, 0) : (60, 60, 60)
+    let unitTabColor: (r: UInt8, g: UInt8, b: UInt8) = session.sidebarTab == 0 ? (0, 180, 0) : (60, 60, 60)
     SDL_SetRenderDrawColor(renderer, unitTabColor.r, unitTabColor.g, unitTabColor.b, 255)
     var unitTab = SDL_Rect(x: sx, y: tabY, w: tabW, h: tabH)
     SDL_RenderFillRect(renderer, &unitTab)
     drawText(renderer, "UNITS", centerX: sx + tabW / 2, centerY: tabY + tabH / 2, color: .white, scale: 1)
 
     // Structures tab
-    let structTabColor: (r: UInt8, g: UInt8, b: UInt8) = sidebarTab == 1 ? (0, 180, 0) : (60, 60, 60)
+    let structTabColor: (r: UInt8, g: UInt8, b: UInt8) = session.sidebarTab == 1 ? (0, 180, 0) : (60, 60, 60)
     SDL_SetRenderDrawColor(renderer, structTabColor.r, structTabColor.g, structTabColor.b, 255)
     var structTab = SDL_Rect(x: sx + tabW, y: tabY, w: tabW, h: tabH)
     SDL_RenderFillRect(renderer, &structTab)
@@ -262,15 +254,15 @@ func renderSidebar(_ renderer: OpaquePointer?) {
     let buttonSpacing: Int32 = 2
     let iconSize: Int32 = 40
 
-    if sidebarTab == 0 {
+    if session.sidebarTab == 0 {
         // Unit build list
         let available = getAvailableUnits()
         for (i, item) in available.enumerated() {
             let by = listY + Int32(i) * (buttonH + buttonSpacing)
-            if by + buttonH > windowHeight - 70 { break }
+            if by + buttonH > renderState.windowHeight - 70 { break }
 
-            let isBuilding = unitBuildQueue?.typeName == item.name
-            let canAfford = sidebarCredits >= item.cost
+            let isBuilding = session.unitBuildQueue?.typeName == item.name
+            let canAfford = session.sidebarCredits >= item.cost
 
             // Button background
             if isBuilding {
@@ -288,8 +280,8 @@ func renderSidebar(_ renderer: OpaquePointer?) {
             SDL_RenderDrawRect(renderer, &btnRect)
 
             // Cameo icon (sprite frame 0)
-            let house = gameWorld?.playerHouse ?? .goodGuy
-            let theater = gameWorld?.theater ?? .temperate
+            let house = session.world?.playerHouse ?? .goodGuy
+            let theater = session.world?.theater ?? .temperate
             if let tex = getObjectTexture(renderer, typeName: item.name, frame: 0, house: house, theater: theater) {
                 let scale = min(Float(iconSize) / Float(tex.width), Float(iconSize) / Float(tex.height))
                 let drawW = Int32(Float(tex.width) * scale)
@@ -306,7 +298,7 @@ func renderSidebar(_ renderer: OpaquePointer?) {
             drawText(renderer, "$\(item.cost)", centerX: sx + iconSize + 20, centerY: by + buttonH / 2 + 8, color: .gray, scale: 1)
 
             // Progress bar
-            if isBuilding, let queue = unitBuildQueue {
+            if isBuilding, let queue = session.unitBuildQueue {
                 let progress = Double(queue.progress) / Double(queue.totalTicks)
                 let barW = Int32(Double(buttonW - 4) * progress)
                 SDL_SetRenderDrawColor(renderer, 0, 200, 0, 100)
@@ -324,11 +316,11 @@ func renderSidebar(_ renderer: OpaquePointer?) {
         let available = getAvailableStructures()
         for (i, item) in available.enumerated() {
             let by = listY + Int32(i) * (buttonH + buttonSpacing)
-            if by + buttonH > windowHeight - 70 { break }
+            if by + buttonH > renderState.windowHeight - 70 { break }
 
-            let isBuilding = structureBuildQueue?.typeName == item.name
-            let isReady = isBuilding && structureBuildQueue!.progress >= structureBuildQueue!.totalTicks
-            let canAfford = sidebarCredits >= item.cost
+            let isBuilding = session.structureBuildQueue?.typeName == item.name
+            let isReady = isBuilding && session.structureBuildQueue!.progress >= session.structureBuildQueue!.totalTicks
+            let canAfford = session.sidebarCredits >= item.cost
 
             // Button background
             if isReady {
@@ -348,8 +340,8 @@ func renderSidebar(_ renderer: OpaquePointer?) {
             SDL_RenderDrawRect(renderer, &btnRect)
 
             // Cameo icon (sprite frame 0)
-            let house = gameWorld?.playerHouse ?? .goodGuy
-            let theater = gameWorld?.theater ?? .temperate
+            let house = session.world?.playerHouse ?? .goodGuy
+            let theater = session.world?.theater ?? .temperate
             if let tex = getObjectTexture(renderer, typeName: item.name, frame: 0, house: house, theater: theater) {
                 let scale = min(Float(iconSize) / Float(tex.width), Float(iconSize) / Float(tex.height))
                 let drawW = Int32(Float(tex.width) * scale)
@@ -369,7 +361,7 @@ func renderSidebar(_ renderer: OpaquePointer?) {
             }
 
             // Progress bar
-            if isBuilding, let queue = structureBuildQueue, !isReady {
+            if isBuilding, let queue = session.structureBuildQueue, !isReady {
                 let progress = Double(queue.progress) / Double(queue.totalTicks)
                 let barW = Int32(Double(buttonW - 4) * progress)
                 SDL_SetRenderDrawColor(renderer, 0, 200, 0, 100)
@@ -388,40 +380,40 @@ func renderSidebar(_ renderer: OpaquePointer?) {
     renderRepairSellButtons(renderer)
 
     // Placement mode indicator
-    if isPlacingStructure, let pType = placementType {
-        drawText(renderer, "PLACE: \(pType)", centerX: sx + sidebarWidth / 2, centerY: windowHeight - 85, color: .amber, scale: 1)
-        drawText(renderer, "Click to place", centerX: sx + sidebarWidth / 2, centerY: windowHeight - 75, color: .green, scale: 1)
+    if session.isPlacingStructure, let pType = session.placementType {
+        drawText(renderer, "PLACE: \(pType)", centerX: sx + sidebarWidth / 2, centerY: renderState.windowHeight - 85, color: .amber, scale: 1)
+        drawText(renderer, "Click to place", centerX: sx + sidebarWidth / 2, centerY: renderState.windowHeight - 75, color: .green, scale: 1)
     }
 
     // Super weapons display
     renderSuperWeaponButtons(renderer)
 
     // Repair/Sell mode indicators
-    if isRepairMode {
-        drawText(renderer, "Click building", centerX: sx + sidebarWidth / 2, centerY: windowHeight - 30, color: .amber, scale: 1)
-        drawText(renderer, "to REPAIR", centerX: sx + sidebarWidth / 2, centerY: windowHeight - 18, color: .green, scale: 1)
-    } else if isSellMode {
-        drawText(renderer, "Click building", centerX: sx + sidebarWidth / 2, centerY: windowHeight - 30, color: .amber, scale: 1)
-        drawText(renderer, "to SELL", centerX: sx + sidebarWidth / 2, centerY: windowHeight - 18, color: .red, scale: 1)
-    } else if superWeaponTargeting != nil {
-        drawText(renderer, "Click target", centerX: sx + sidebarWidth / 2, centerY: windowHeight - 30, color: .amber, scale: 1)
-        drawText(renderer, "for STRIKE", centerX: sx + sidebarWidth / 2, centerY: windowHeight - 18, color: .red, scale: 1)
+    if session.isRepairMode {
+        drawText(renderer, "Click building", centerX: sx + sidebarWidth / 2, centerY: renderState.windowHeight - 30, color: .amber, scale: 1)
+        drawText(renderer, "to REPAIR", centerX: sx + sidebarWidth / 2, centerY: renderState.windowHeight - 18, color: .green, scale: 1)
+    } else if session.isSellMode {
+        drawText(renderer, "Click building", centerX: sx + sidebarWidth / 2, centerY: renderState.windowHeight - 30, color: .amber, scale: 1)
+        drawText(renderer, "to SELL", centerX: sx + sidebarWidth / 2, centerY: renderState.windowHeight - 18, color: .red, scale: 1)
+    } else if session.superWeaponTargeting != nil {
+        drawText(renderer, "Click target", centerX: sx + sidebarWidth / 2, centerY: renderState.windowHeight - 30, color: .amber, scale: 1)
+        drawText(renderer, "for STRIKE", centerX: sx + sidebarWidth / 2, centerY: renderState.windowHeight - 18, color: .red, scale: 1)
     }
 }
 
 // MARK: - Sidebar Click Handling
 
 func handleSidebarClick(_ x: Int32, _ y: Int32) {
-    let sx = windowWidth - sidebarWidth
+    let sx = renderState.windowWidth - sidebarWidth
 
     // Tab selection
     let tabY: Int32 = 50
     let tabH: Int32 = 20
     if y >= tabY && y < tabY + tabH {
         if x < sx + sidebarWidth / 2 {
-            sidebarTab = 0
+            session.sidebarTab = 0
         } else {
-            sidebarTab = 1
+            session.sidebarTab = 1
         }
         return
     }
@@ -434,15 +426,15 @@ func handleSidebarClick(_ x: Int32, _ y: Int32) {
     let clickIdx = Int((y - listY) / (buttonH + buttonSpacing))
     if clickIdx < 0 { return }
 
-    if sidebarTab == 0 {
+    if session.sidebarTab == 0 {
         let available = getAvailableUnits()
         if clickIdx < available.count {
             let item = available[clickIdx]
-            if unitBuildQueue == nil && sidebarCredits >= item.cost {
-                unitBuildQueue = (typeName: item.name, progress: 0, cost: item.cost, totalTicks: item.buildTicks)
-                sidebarCredits -= item.cost
+            if session.unitBuildQueue == nil && session.sidebarCredits >= item.cost {
+                session.unitBuildQueue = (typeName: item.name, progress: 0, cost: item.cost, totalTicks: item.buildTicks)
+                session.sidebarCredits -= item.cost
                 speak(.building)
-            } else if sidebarCredits < item.cost {
+            } else if session.sidebarCredits < item.cost {
                 speak(.noCash)
                 soundEffect(.scold)
             }
@@ -453,18 +445,18 @@ func handleSidebarClick(_ x: Int32, _ y: Int32) {
             let item = available[clickIdx]
 
             // If structure is ready, enter placement mode
-            if let queue = structureBuildQueue, queue.typeName == item.name,
+            if let queue = session.structureBuildQueue, queue.typeName == item.name,
                queue.progress >= queue.totalTicks {
-                isPlacingStructure = true
-                placementType = item.name
+                session.isPlacingStructure = true
+                session.placementType = item.name
                 return
             }
 
-            if structureBuildQueue == nil && sidebarCredits >= item.cost {
-                structureBuildQueue = (typeName: item.name, progress: 0, cost: item.cost, totalTicks: item.buildTicks)
-                sidebarCredits -= item.cost
+            if session.structureBuildQueue == nil && session.sidebarCredits >= item.cost {
+                session.structureBuildQueue = (typeName: item.name, progress: 0, cost: item.cost, totalTicks: item.buildTicks)
+                session.sidebarCredits -= item.cost
                 speak(.building)
-            } else if sidebarCredits < item.cost {
+            } else if session.sidebarCredits < item.cost {
                 speak(.noCash)
                 soundEffect(.scold)
             }
@@ -475,27 +467,27 @@ func handleSidebarClick(_ x: Int32, _ y: Int32) {
 // MARK: - Production Tick
 
 func tickProduction() {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
 
     // Advance unit production
-    if var queue = unitBuildQueue {
+    if var queue = session.unitBuildQueue {
         queue.progress += 1
         if queue.progress >= queue.totalTicks {
             // Unit complete — spawn it
             spawnProducedUnit(queue.typeName, world: world)
-            unitBuildQueue = nil
+            session.unitBuildQueue = nil
             speak(.unitReady)
             soundEffect(.construction)
         } else {
-            unitBuildQueue = queue
+            session.unitBuildQueue = queue
         }
     }
 
     // Advance structure production
-    if var queue = structureBuildQueue {
+    if var queue = session.structureBuildQueue {
         if queue.progress < queue.totalTicks {
             queue.progress += 1
-            structureBuildQueue = queue
+            session.structureBuildQueue = queue
             if queue.progress >= queue.totalTicks {
                 speak(.construction)
                 soundEffect(.construction)
@@ -571,7 +563,7 @@ func spawnProducedUnit(_ typeName: String, world: GameWorld) {
 // MARK: - Structure Placement
 
 func handleStructurePlacement(_ x: Int32, _ y: Int32) {
-    guard let world = gameWorld, let pType = placementType else { return }
+    guard let world = session.world, let pType = session.placementType else { return }
     let worldPos = gameScreenToWorld(x, y)
 
     let cellX = Int(worldPos.worldX) / 24
@@ -616,15 +608,15 @@ func handleStructurePlacement(_ x: Int32, _ y: Int32) {
     }
 
     // Clear placement mode
-    isPlacingStructure = false
-    placementType = nil
-    structureBuildQueue = nil
+    session.isPlacingStructure = false
+    session.placementType = nil
+    session.structureBuildQueue = nil
 }
 
 // MARK: - Power Bar Rendering
 
 func renderPowerBar(_ renderer: OpaquePointer?, sx: Int32) {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
     let playerHouse = world.playerHouse
     let houseState = getHouseState(playerHouse)
 
@@ -668,27 +660,25 @@ func renderPowerBar(_ renderer: OpaquePointer?, sx: Int32) {
 
 // MARK: - Repair / Sell Mode
 
-var isRepairMode: Bool = false
-var isSellMode: Bool = false
 
 /// Handle repair/sell button clicks (below the build list)
 func handleRepairSellClick(_ x: Int32, _ y: Int32) -> Bool {
-    let sx = windowWidth - sidebarWidth
-    let buttonY = windowHeight - 60
+    let sx = renderState.windowWidth - sidebarWidth
+    let buttonY = renderState.windowHeight - 60
     let buttonW: Int32 = (sidebarWidth - 12) / 2
     let buttonH: Int32 = 20
 
     // Repair button
     if x >= sx + 4 && x < sx + 4 + buttonW && y >= buttonY && y < buttonY + buttonH {
-        isRepairMode = !isRepairMode
-        isSellMode = false
+        session.isRepairMode = !session.isRepairMode
+        session.isSellMode = false
         return true
     }
 
     // Sell button
     if x >= sx + 8 + buttonW && x < sx + 8 + buttonW * 2 && y >= buttonY && y < buttonY + buttonH {
-        isSellMode = !isSellMode
-        isRepairMode = false
+        session.isSellMode = !session.isSellMode
+        session.isRepairMode = false
         return true
     }
 
@@ -697,7 +687,7 @@ func handleRepairSellClick(_ x: Int32, _ y: Int32) -> Bool {
 
 /// Apply repair/sell click to a structure in the game world
 func handleRepairSellGameClick(worldX: Double, worldY: Double) -> Bool {
-    guard let world = gameWorld else { return false }
+    guard let world = session.world else { return false }
 
     // Find player structure under click
     for obj in world.objects {
@@ -712,7 +702,7 @@ func handleRepairSellGameClick(worldX: Double, worldY: Double) -> Bool {
         let dy = worldY - obj.worldY
 
         if abs(dx) <= halfW && abs(dy) <= halfH {
-            if isRepairMode {
+            if session.isRepairMode {
                 // Toggle repair on this building
                 if obj.isRepairing {
                     obj.isRepairing = false
@@ -721,12 +711,12 @@ func handleRepairSellGameClick(worldX: Double, worldY: Double) -> Bool {
                     obj.isRepairing = true
                     obj.mission = .repair
                 }
-                isRepairMode = false
+                session.isRepairMode = false
                 return true
-            } else if isSellMode {
+            } else if session.isSellMode {
                 // Sell this building
                 obj.mission = .selling
-                isSellMode = false
+                session.isSellMode = false
                 return true
             }
         }
@@ -737,30 +727,30 @@ func handleRepairSellGameClick(worldX: Double, worldY: Double) -> Bool {
 // MARK: - Repair/Sell Buttons Rendering
 
 func renderRepairSellButtons(_ renderer: OpaquePointer?) {
-    let sx = windowWidth - sidebarWidth
-    let buttonY = windowHeight - 60
+    let sx = renderState.windowWidth - sidebarWidth
+    let buttonY = renderState.windowHeight - 60
     let buttonW: Int32 = (sidebarWidth - 12) / 2
     let buttonH: Int32 = 20
 
     // Repair button
-    let repairColor: (r: UInt8, g: UInt8, b: UInt8) = isRepairMode ? (0, 120, 0) : (50, 50, 50)
+    let repairColor: (r: UInt8, g: UInt8, b: UInt8) = session.isRepairMode ? (0, 120, 0) : (50, 50, 50)
     SDL_SetRenderDrawColor(renderer, repairColor.r, repairColor.g, repairColor.b, 255)
     var repairRect = SDL_Rect(x: sx + 4, y: buttonY, w: buttonW, h: buttonH)
     SDL_RenderFillRect(renderer, &repairRect)
     SDL_SetRenderDrawColor(renderer, 100, 100, 100, 255)
     SDL_RenderDrawRect(renderer, &repairRect)
     drawText(renderer, "REPAIR", centerX: sx + 4 + buttonW / 2, centerY: buttonY + buttonH / 2,
-             color: isRepairMode ? .amber : .green, scale: 1)
+             color: session.isRepairMode ? .amber : .green, scale: 1)
 
     // Sell button
-    let sellColor: (r: UInt8, g: UInt8, b: UInt8) = isSellMode ? (120, 0, 0) : (50, 50, 50)
+    let sellColor: (r: UInt8, g: UInt8, b: UInt8) = session.isSellMode ? (120, 0, 0) : (50, 50, 50)
     SDL_SetRenderDrawColor(renderer, sellColor.r, sellColor.g, sellColor.b, 255)
     var sellRect = SDL_Rect(x: sx + 8 + buttonW, y: buttonY, w: buttonW, h: buttonH)
     SDL_RenderFillRect(renderer, &sellRect)
     SDL_SetRenderDrawColor(renderer, 100, 100, 100, 255)
     SDL_RenderDrawRect(renderer, &sellRect)
     drawText(renderer, "SELL", centerX: sx + 8 + buttonW + buttonW / 2, centerY: buttonY + buttonH / 2,
-             color: isSellMode ? .amber : .red, scale: 1)
+             color: session.isSellMode ? .amber : .red, scale: 1)
 }
 
 // MARK: - Super Weapon Buttons
@@ -768,13 +758,13 @@ func renderRepairSellButtons(_ renderer: OpaquePointer?) {
 let superWeaponButtonY: Int32 = 42  // Below credits, above tabs
 
 func renderSuperWeaponButtons(_ renderer: OpaquePointer?) {
-    let sx = windowWidth - sidebarWidth
+    let sx = renderState.windowWidth - sidebarWidth
 
     // Only render if any super weapon is present
     let weapons: [(SuperWeapon, String, (r: UInt8, g: UInt8, b: UInt8))] = [
-        (playerIonCannon, "ION", (r: 100, g: 180, b: 255)),
-        (playerAirStrike, "AIR", (r: 200, g: 200, b: 100)),
-        (playerNukeStrike, "NUKE", (r: 255, g: 80, b: 80)),
+        (session.playerIonCannon, "ION", (r: 100, g: 180, b: 255)),
+        (session.playerAirStrike, "AIR", (r: 200, g: 200, b: 100)),
+        (session.playerNukeStrike, "NUKE", (r: 255, g: 80, b: 80)),
     ]
 
     var x = sx + 4
@@ -825,7 +815,7 @@ func renderSuperWeaponButtons(_ renderer: OpaquePointer?) {
 
 /// Handle click on super weapon buttons, returns true if handled
 func handleSuperWeaponClick(_ screenX: Int32, _ screenY: Int32) -> Bool {
-    let sx = windowWidth - sidebarWidth
+    let sx = renderState.windowWidth - sidebarWidth
     let y = superWeaponButtonY
     let bw: Int32 = (sidebarWidth - 16) / 3
     let bh: Int32 = 18
@@ -837,9 +827,9 @@ func handleSuperWeaponClick(_ screenX: Int32, _ screenY: Int32) -> Bool {
     let index = Int(relX / (bw + 2))
 
     let weapons: [(SuperWeapon, SpecialWeaponType)] = [
-        (playerIonCannon, .ionCannon),
-        (playerAirStrike, .airStrike),
-        (playerNukeStrike, .nuclearStrike),
+        (session.playerIonCannon, .ionCannon),
+        (session.playerAirStrike, .airStrike),
+        (session.playerNukeStrike, .nuclearStrike),
     ]
 
     guard index >= 0 && index < weapons.count else { return false }
@@ -858,7 +848,7 @@ func handleSuperWeaponClick(_ screenX: Int32, _ screenY: Int32) -> Bool {
 
 /// Handle game click when in super weapon targeting mode
 func handleSuperWeaponGameClick(worldX: Double, worldY: Double) -> Bool {
-    guard let type = superWeaponTargeting else { return false }
+    guard let type = session.superWeaponTargeting else { return false }
     deploySuperWeapon(type, worldX: worldX, worldY: worldY)
     return true
 }
@@ -866,13 +856,13 @@ func handleSuperWeaponGameClick(worldX: Double, worldY: Double) -> Bool {
 // MARK: - Placement Preview Rendering
 
 func renderPlacementPreview(_ renderer: OpaquePointer?, mouseScreenX: Int32, mouseScreenY: Int32) {
-    guard let pType = placementType else { return }
+    guard let pType = session.placementType else { return }
     let worldPos = gameScreenToWorld(mouseScreenX, mouseScreenY)
     let cellX = Int(worldPos.worldX) / 24
     let cellY = Int(worldPos.worldY) / 24
     let size = buildingSize(pType)
-    let camX = Int(gameCameraX)
-    let camY = Int(gameCameraY)
+    let camX = Int(renderState.gameCameraX)
+    let camY = Int(renderState.gameCameraY)
 
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
 

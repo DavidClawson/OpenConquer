@@ -144,7 +144,7 @@ class ActiveTeam {
 
     /// Current member count (living)
     var memberCount: Int {
-        guard let world = gameWorld else { return 0 }
+        guard let world = session.world else { return 0 }
         return members.filter { id in
             world.objects.contains { $0.id == id && $0.strength > 0 }
         }.count
@@ -153,13 +153,11 @@ class ActiveTeam {
 
 // MARK: - Team Manager
 
-var teamTypes: [TeamType] = []
-var activeTeams: [ActiveTeam] = []
 
 // MARK: - Parse Team Types from Scenario INI
 
 func parseTeamTypes(from ini: INIFile) {
-    teamTypes.removeAll()
+    session.teamTypes.removeAll()
 
     // [TeamTypes] section: key=name, value=full definition string
     for entry in ini.entries("TEAMTYPES") {
@@ -237,11 +235,11 @@ func parseTeamTypes(from ini: INIFile) {
             teamType.isPrebuilt = parts[idx].trimmingCharacters(in: .whitespaces) == "1"
         }
 
-        teamTypes.append(teamType)
+        session.teamTypes.append(teamType)
     }
 
-    print("TeamTypes: Parsed \(teamTypes.count) team types")
-    for tt in teamTypes {
+    print("TeamTypes: Parsed \(session.teamTypes.count) team types")
+    for tt in session.teamTypes {
         print("  \(tt.name): \(tt.house.rawValue), \(tt.classSlots.count) classes, \(tt.missionList.count) missions")
     }
 }
@@ -252,12 +250,12 @@ func parseTeamTypes(from ini: INIFile) {
 func createTeam(type: TeamType) -> ActiveTeam? {
     // Check max allowed
     if type.maxAllowed > 0 {
-        let currentCount = activeTeams.filter { $0.type.name == type.name }.count
+        let currentCount = session.activeTeams.filter { $0.type.name == type.name }.count
         if currentCount >= type.maxAllowed { return nil }
     }
 
     let team = ActiveTeam(type: type)
-    activeTeams.append(team)
+    session.activeTeams.append(team)
     return team
 }
 
@@ -272,7 +270,7 @@ func createAndRecruitTeam(type: TeamType) -> ActiveTeam? {
 
 /// Recruit members for a team from available units
 func recruitMembers(_ team: ActiveTeam) {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
 
     for (slotIndex, slot) in team.type.classSlots.enumerated() {
         let currentCount = countMembersOfSlot(team, slotIndex: slotIndex)
@@ -323,7 +321,7 @@ func recruitMembers(_ team: ActiveTeam) {
 func countMembersOfSlot(_ team: ActiveTeam, slotIndex: Int) -> Int {
     guard slotIndex < team.type.classSlots.count else { return 0 }
     let slot = team.type.classSlots[slotIndex]
-    guard let world = gameWorld else { return 0 }
+    guard let world = session.world else { return 0 }
 
     return team.members.filter { id in
         if let obj = world.findObject(id: id) {
@@ -337,12 +335,12 @@ func countMembersOfSlot(_ team: ActiveTeam, slotIndex: Int) -> Int {
 
 /// Check if an object is in any team
 func isInTeam(_ objectId: Int) -> Bool {
-    return activeTeams.contains { $0.members.contains(objectId) }
+    return session.activeTeams.contains { $0.members.contains(objectId) }
 }
 
 /// Get the team an object belongs to
 func teamForObject(_ objectId: Int) -> ActiveTeam? {
-    return activeTeams.first { $0.members.contains(objectId) }
+    return session.activeTeams.first { $0.members.contains(objectId) }
 }
 
 /// Remove an object from a team
@@ -354,7 +352,7 @@ func removeFromTeam(_ objectId: Int, team: ActiveTeam) {
 
 /// Calculate the average position of team members
 func calcTeamCenter(_ team: ActiveTeam) {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
     var x = 0.0, y = 0.0, count = 0
 
     for id in team.members {
@@ -375,29 +373,29 @@ func calcTeamCenter(_ team: ActiveTeam) {
 
 /// Main team AI processing — called every game tick
 func tickTeams() {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
 
     // Only process teams every 4 ticks for performance
     guard world.tickCount % 4 == 0 else { return }
 
     // Remove dead members from all teams
-    for team in activeTeams {
+    for team in session.activeTeams {
         team.members.removeAll { id in
             !world.objects.contains { $0.id == id && $0.strength > 0 }
         }
     }
 
-    for team in activeTeams {
+    for team in session.activeTeams {
         tickTeam(team)
     }
 
     // Remove empty teams that have been activated
-    activeTeams.removeAll { $0.members.isEmpty && $0.isHasBeen }
+    session.activeTeams.removeAll { $0.members.isEmpty && $0.isHasBeen }
 }
 
 /// Process a single team's AI
 func tickTeam(_ team: ActiveTeam) {
-    guard gameWorld != nil else { return }
+    guard session.world != nil else { return }
 
     // Suspension check
     if team.isSuspended {
@@ -571,7 +569,7 @@ func tickTeam(_ team: ActiveTeam) {
 
 /// Coordinate attack: all team members attack the same target
 func coordinateAttack(_ team: ActiveTeam) {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
     guard let targetId = team.target else {
         team.isNextMission = true
         return
@@ -597,7 +595,7 @@ func coordinateAttack(_ team: ActiveTeam) {
 
 /// Coordinate move: all team members move to same destination
 func coordinateMove(_ team: ActiveTeam, targetX: Double, targetY: Double) {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
     var allArrived = true
 
     for id in team.members {
@@ -625,7 +623,7 @@ func coordinateMove(_ team: ActiveTeam, targetX: Double, targetY: Double) {
 
 /// Coordinate regroup: gather all units to team center
 func coordinateRegroup(_ team: ActiveTeam) {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
 
     for id in team.members {
         guard let obj = world.findObject(id: id), obj.strength > 0, !obj.isInLimbo else { continue }
@@ -661,7 +659,7 @@ func coordinateUnload(_ team: ActiveTeam) {
 
 /// Find nearest enemy building for team to attack
 func findNearestEnemyBuilding(_ team: ActiveTeam) -> GameObject? {
-    guard let world = gameWorld else { return nil }
+    guard let world = session.world else { return nil }
     var best: GameObject? = nil
     var bestDist = Double.infinity
 
@@ -682,7 +680,7 @@ func findNearestEnemyBuilding(_ team: ActiveTeam) -> GameObject? {
 
 /// Find nearest enemy unit
 func findNearestEnemyUnit(_ team: ActiveTeam) -> GameObject? {
-    guard let world = gameWorld else { return nil }
+    guard let world = session.world else { return nil }
     var best: GameObject? = nil
     var bestDist = Double.infinity
 
@@ -703,7 +701,7 @@ func findNearestEnemyUnit(_ team: ActiveTeam) -> GameObject? {
 
 /// Find nearest civilian
 func findNearestCivilian(_ team: ActiveTeam) -> GameObject? {
-    guard let world = gameWorld else { return nil }
+    guard let world = session.world else { return nil }
     var best: GameObject? = nil
     var bestDist = Double.infinity
 
@@ -724,7 +722,7 @@ func findNearestCivilian(_ team: ActiveTeam) -> GameObject? {
 
 /// Find nearest enemy of any type
 func findNearestEnemyAny(_ team: ActiveTeam) -> GameObject? {
-    guard let world = gameWorld else { return nil }
+    guard let world = session.world else { return nil }
     var best: GameObject? = nil
     var bestDist = Double.infinity
 
@@ -745,7 +743,7 @@ func findNearestEnemyAny(_ team: ActiveTeam) -> GameObject? {
 
 /// Find regroup position (nearest friendly building)
 func findRegroupPosition(_ team: ActiveTeam) -> (x: Double, y: Double)? {
-    guard let world = gameWorld else { return nil }
+    guard let world = session.world else { return nil }
     var bestDist = Double.infinity
     var bestPos: (x: Double, y: Double)? = nil
 
@@ -765,7 +763,7 @@ func findRegroupPosition(_ team: ActiveTeam) -> (x: Double, y: Double)? {
 
 /// Dissolve team: release all members back to individual control
 func dissolveTeam(_ team: ActiveTeam) {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
 
     for id in team.members {
         if let obj = world.findObject(id: id), obj.strength > 0 {
@@ -784,17 +782,16 @@ func dissolveTeam(_ team: ActiveTeam) {
 
 /// Get cell number for a waypoint index
 func waypointCell(_ index: Int) -> Int? {
-    return scenarioWaypoints[index]
+    return session.scenarioWaypoints[index]
 }
 
 /// Global waypoint storage (populated during scenario load)
-var scenarioWaypoints: [Int: Int] = [:]
 
 // MARK: - Trigger Integration
 
 /// Create a team from trigger action (CREATE_TEAM)
 func triggerCreateTeam(named name: String) {
-    guard let type = teamTypes.first(where: { $0.name == name }) else {
+    guard let type = session.teamTypes.first(where: { $0.name == name }) else {
         print("TeamAI: Cannot create team '\(name)' — type not found")
         return
     }
@@ -806,9 +803,9 @@ func triggerCreateTeam(named name: String) {
 
 /// Destroy all instances of a team type
 func triggerDestroyTeam(named name: String) {
-    for team in activeTeams where team.type.name == name {
+    for team in session.activeTeams where team.type.name == name {
         dissolveTeam(team)
     }
-    activeTeams.removeAll { $0.type.name == name }
+    session.activeTeams.removeAll { $0.type.name == name }
     print("TeamAI: Destroyed all teams named '\(name)'")
 }

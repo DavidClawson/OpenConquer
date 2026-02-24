@@ -3,18 +3,17 @@ import Foundation
 // MARK: - Enemy AI
 // Enhanced AI with squad coordination, hunt behavior, and guard leash
 
-var aiTickCounter: Int = 0
 
 /// Maximum distance a guarding unit will chase before returning (in pixels)
 let guardLeashRange: Double = 10.0 * 24.0  // 10 cells
 
 /// AI update — called every game tick but only acts periodically
 func tickAI() {
-    guard let world = gameWorld else { return }
-    aiTickCounter += 1
+    guard let world = session.world else { return }
+    session.aiTickCounter += 1
 
     // AI acts every 30 ticks (~2 seconds)
-    guard aiTickCounter % 30 == 0 else { return }
+    guard session.aiTickCounter % 30 == 0 else { return }
 
     let aggroRange: Double = 8.0 * 24.0  // 8 cells in pixels
 
@@ -69,17 +68,17 @@ func tickAI() {
     }
 
     // Rally idle enemy units toward player base every ~20 seconds
-    if aiTickCounter % 300 == 0 {
+    if session.aiTickCounter % 300 == 0 {
         rallyEnemyUnits(world: world)
     }
 
     // Periodically create autocreate teams (every ~45 seconds)
-    if aiTickCounter % 675 == 0 && aiTickCounter > 300 {
+    if session.aiTickCounter % 675 == 0 && session.aiTickCounter > 300 {
         tryAutocreateTeam()
     }
 
     // Escalation: after 5 minutes, send all idle units to hunt
-    if aiTickCounter == 15 * 60 * 5 {
+    if session.aiTickCounter == 15 * 60 * 5 {
         escalateAI(world: world)
     }
 }
@@ -171,7 +170,7 @@ func escalateAI(world: GameWorld) {
 
 /// Try to create an autocreate team from available team types
 func tryAutocreateTeam() {
-    let autocreateTypes = teamTypes.filter { $0.isAutocreate }
+    let autocreateTypes = session.teamTypes.filter { $0.isAutocreate }
     guard !autocreateTypes.isEmpty else { return }
 
     // Pick a random autocreate team type
@@ -182,7 +181,7 @@ func tryAutocreateTeam() {
             print("AI: Auto-created team '\(type.name)' with \(team.memberCount) members")
         } else {
             // No units to recruit — remove the empty team
-            activeTeams.removeAll { $0 === team }
+            session.activeTeams.removeAll { $0 === team }
         }
     }
 }

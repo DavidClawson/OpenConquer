@@ -248,6 +248,7 @@ class GameWorld {
     var mapBounds: MapBounds?
     var occupancy: [Int: Int] = [:]  // cell -> object id occupying it
     var playerHouse: House = .goodGuy
+    var map: GameMap = GameMap()
 
     // Control groups (0-9), each can hold multiple object IDs
     var controlGroups: [[Int]] = Array(repeating: [], count: 10)
@@ -306,5 +307,3 @@ class GameWorld {
     }
 }
 
-// Module-level game world instance
-var gameWorld: GameWorld? = nil

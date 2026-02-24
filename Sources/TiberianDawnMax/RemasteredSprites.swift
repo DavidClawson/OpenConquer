@@ -15,7 +15,6 @@ private var remasteredManifests: [String: RemasteredManifest] = [:]
 private var remasteredManifestFailed: Set<String> = []
 
 /// Cache of remastered SDL textures: "TYPENAME_frame" -> texture
-var remasteredTextureCache: [String: OpaquePointer] = [:]
 
 /// Scale factor: remastered uses 128px tiles, classic uses 24px tiles.
 /// At zoom 1.0 this maps remastered sprites to classic-compatible sizes.
@@ -25,7 +24,6 @@ var remasteredTextureCache: [String: OpaquePointer] = [:]
 let remasteredScale: Double = 24.0 / 128.0
 
 /// Whether remastered sprites are available
-var hasRemasteredSprites: Bool = false
 
 struct RemasteredManifest {
     let name: String
@@ -46,7 +44,7 @@ func initRemasteredSprites() {
     var isDir: ObjCBool = false
     guard FileManager.default.fileExists(atPath: spritesPath.path, isDirectory: &isDir),
           isDir.boolValue else {
-        hasRemasteredSprites = false
+        renderState.hasRemasteredSprites = false
         return
     }
 
@@ -67,8 +65,8 @@ func initRemasteredSprites() {
         }
     }
 
-    hasRemasteredSprites = totalFound > 0
-    if hasRemasteredSprites {
+    renderState.hasRemasteredSprites = totalFound > 0
+    if renderState.hasRemasteredSprites {
         print("Remastered sprites: \(totalFound) manifests loaded")
     }
 }
@@ -104,13 +102,13 @@ private func loadManifest(name: String, category: String, catPath: URL) -> Bool 
 func getRemasteredTexture(_ renderer: OpaquePointer?, typeName: String, frame: Int)
     -> (texture: OpaquePointer, width: Int, height: Int)? {
 
-    guard hasRemasteredSprites else { return nil }
+    guard renderState.hasRemasteredSprites else { return nil }
 
     let upperName = typeName.uppercased()
     let key = "RM_\(upperName)_\(frame)"
 
     // Check texture cache
-    if let cached = remasteredTextureCache[key] {
+    if let cached = renderState.remasteredTextureCache[key] {
         if let manifest = remasteredManifests[upperName] {
             let displayW = Int(Double(manifest.canvasWidth) * remasteredScale)
             let displayH = Int(Double(manifest.canvasHeight) * remasteredScale)
@@ -134,7 +132,7 @@ func getRemasteredTexture(_ renderer: OpaquePointer?, typeName: String, frame: I
     let pngPath = "\(manifest.basePath)/\(upperName)-\(String(format: "%04d", frame)).png"
     guard let texture = loadPNGTexture(renderer, path: pngPath) else { return nil }
 
-    remasteredTextureCache[key] = texture
+    renderState.remasteredTextureCache[key] = texture
 
     let displayW = Int(Double(manifest.canvasWidth) * remasteredScale)
     let displayH = Int(Double(manifest.canvasHeight) * remasteredScale)
@@ -206,8 +204,8 @@ private func loadPNGTexture(_ renderer: OpaquePointer?, path: String) -> OpaqueP
 
 /// Clear all remastered sprite textures (e.g., on theater change)
 func clearRemasteredTextureCache() {
-    for (_, texture) in remasteredTextureCache {
+    for (_, texture) in renderState.remasteredTextureCache {
         SDL_DestroyTexture(texture)
     }
-    remasteredTextureCache.removeAll()
+    renderState.remasteredTextureCache.removeAll()
 }

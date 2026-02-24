@@ -3,28 +3,34 @@ import Foundation
 
 // MARK: - Map Viewer State
 
-var mapCells: [MapCell] = []
-var cameraX: Int = 0
-var cameraY: Int = 0
-var zoomLevel: Double = 1.0
-var icnCache: [String: ICNFile] = [:]
-var tileTextureCache: [String: OpaquePointer] = [:]
-var mapFailedICNs: Set<String> = []
-var scenarioData: ScenarioData? = nil
-var terrainSHPCache: [String: SHPFile] = [:]
-var terrainTextureCache: [String: OpaquePointer] = [:]
-var terrainFailedSHPs: Set<String> = []
-var objectSHPCache: [String: SHPFile] = [:]
-var objectTextureCache: [String: OpaquePointer] = [:]
-var objectFailedSHPs: Set<String> = []
-var showGrid: Bool = false
+/// Standalone map used in map-viewer mode (no GameWorld)
+var mapViewerMap = GameMap()
+
+/// Backward-compatible accessor — delegates to world.map when in game, mapViewerMap otherwise
+var mapCells: [MapCell] {
+    get { session.world?.map.cells ?? mapViewerMap.cells }
+    set {
+        if let world = session.world {
+            world.map.cells = newValue
+        } else {
+            mapViewerMap.cells = newValue
+        }
+    }
+}
+
+/// Backward-compatible accessor — delegates to world.map when in game, mapViewerMap otherwise
+var scenarioData: ScenarioData? {
+    get { session.world?.map.scenarioData ?? mapViewerMap.scenarioData }
+    set {
+        if let world = session.world {
+            world.map.scenarioData = newValue
+        } else {
+            mapViewerMap.scenarioData = newValue
+        }
+    }
+}
 
 // Info panel & overlay toggle state
-var showInfoPanel: Bool = false
-var showCellTriggers: Bool = false
-var showBaseList: Bool = false
-var mouseWorldX: Int = 0
-var mouseWorldY: Int = 0
 
 // MARK: - Facing & Remap Lookup Tables (from Vanilla Conquer tiberiandawn/const.cpp)
 
@@ -95,31 +101,30 @@ func remapTable(for house: House) -> [UInt8]? {
 }
 
 /// Animation frame counter, incremented each render frame
-var animationFrame: Int = 0
 
 // MARK: - Loading
 
 func loadMapViewerData(_ scenarioName: String = "SCG01EA") {
-    cameraX = 0
-    cameraY = 0
-    zoomLevel = 1.0
+    renderState.cameraX = 0
+    renderState.cameraY = 0
+    renderState.zoomLevel = 1.0
 
     // Clear texture caches since different theaters use different palettes/art
-    for (_, texture) in objectTextureCache { SDL_DestroyTexture(texture) }
-    objectTextureCache.removeAll()
-    objectSHPCache.removeAll()
-    objectFailedSHPs.removeAll()
+    for (_, texture) in renderState.objectTextureCache { SDL_DestroyTexture(texture) }
+    renderState.objectTextureCache.removeAll()
+    renderState.objectSHPCache.removeAll()
+    renderState.objectFailedSHPs.removeAll()
     clearRemasteredTextureCache()
 
-    for (_, texture) in terrainTextureCache { SDL_DestroyTexture(texture) }
-    terrainTextureCache.removeAll()
-    terrainSHPCache.removeAll()
-    terrainFailedSHPs.removeAll()
+    for (_, texture) in renderState.terrainTextureCache { SDL_DestroyTexture(texture) }
+    renderState.terrainTextureCache.removeAll()
+    renderState.terrainSHPCache.removeAll()
+    renderState.terrainFailedSHPs.removeAll()
 
-    for (_, texture) in tileTextureCache { SDL_DestroyTexture(texture) }
-    tileTextureCache.removeAll()
-    icnCache.removeAll()
-    mapFailedICNs.removeAll()
+    for (_, texture) in renderState.tileTextureCache { SDL_DestroyTexture(texture) }
+    renderState.tileTextureCache.removeAll()
+    renderState.icnCache.removeAll()
+    renderState.mapFailedICNs.removeAll()
 
     let binName = scenarioName + ".BIN"
     let iniName = scenarioName + ".INI"
@@ -135,12 +140,12 @@ func loadMapViewerData(_ scenarioName: String = "SCG01EA") {
 
     // Reload palette for the scenario's theater (desert/winter/temperate)
     if let theater = scenarioData?.theater {
-        gamePalette = loadPalette(theater.paletteName)
+        renderState.gamePalette = loadPalette(theater.paletteName)
     }
 
     if let bounds = scenarioData?.mapBounds {
-        cameraX = bounds.x * 24
-        cameraY = bounds.y * 24
+        renderState.cameraX = bounds.x * 24
+        renderState.cameraY = bounds.y * 24
     }
 
 }
@@ -156,7 +161,7 @@ func createTileTexture(_ renderer: OpaquePointer?, pixels: [UInt8]) -> OpaquePoi
     var argb = [UInt32](repeating: 0, count: 576)
     for i in 0..<576 {
         let palIdx = Int(pixels[i])
-        let c = gamePalette[palIdx]
+        let c = renderState.gamePalette[palIdx]
         argb[i] = 0xFF000000 | (UInt32(c.r) << 16) | (UInt32(c.g) << 8) | UInt32(c.b)
     }
 
@@ -184,7 +189,7 @@ func createSpriteTexture(_ renderer: OpaquePointer?, frame: SHPFrame) -> OpaqueP
         } else if palIdx == 4 {
             argb[i] = 0x80000000  // Shadow: 50% transparent black
         } else {
-            let c = gamePalette[palIdx]
+            let c = renderState.gamePalette[palIdx]
             argb[i] = 0xFF000000 | (UInt32(c.r) << 16) | (UInt32(c.g) << 8) | UInt32(c.b)
         }
     }
@@ -217,7 +222,7 @@ func createRemappedSpriteTexture(_ renderer: OpaquePointer?, frame: SHPFrame, ho
             if let remap = remap, palIdx >= 176 && palIdx <= 191 {
                 palIdx = Int(remap[palIdx - 176])
             }
-            let c = gamePalette[palIdx]
+            let c = renderState.gamePalette[palIdx]
             argb[i] = 0xFF000000 | (UInt32(c.r) << 16) | (UInt32(c.g) << 8) | UInt32(c.b)
         }
     }
@@ -235,28 +240,28 @@ func getTerrainTexture(_ renderer: OpaquePointer?, typeName: String, theater: Th
     let upperName = typeName.uppercased()
 
     // Load SHP into cache if needed
-    if terrainSHPCache[upperName] == nil && !terrainFailedSHPs.contains(upperName) {
+    if renderState.terrainSHPCache[upperName] == nil && !renderState.terrainFailedSHPs.contains(upperName) {
         let filename = upperName + theater.suffix
         guard let data = mixManager.retrieve(filename) else {
-            terrainFailedSHPs.insert(upperName)
+            renderState.terrainFailedSHPs.insert(upperName)
             return nil
         }
         do {
             let shp = try SHPFile(data: data)
             guard !shp.frames.isEmpty else {
-                terrainFailedSHPs.insert(upperName)
+                renderState.terrainFailedSHPs.insert(upperName)
                 return nil
             }
-            terrainSHPCache[upperName] = shp
+            renderState.terrainSHPCache[upperName] = shp
         } catch {
-            terrainFailedSHPs.insert(upperName)
+            renderState.terrainFailedSHPs.insert(upperName)
             return nil
         }
     }
 
-    if terrainFailedSHPs.contains(upperName) { return nil }
+    if renderState.terrainFailedSHPs.contains(upperName) { return nil }
 
-    guard let shp = terrainSHPCache[upperName] else { return nil }
+    guard let shp = renderState.terrainSHPCache[upperName] else { return nil }
 
     // Terrain SHPs have normal frames in the first half, shadow frames in the second half
     let normalFrameCount = max(1, shp.frames.count / 2)
@@ -268,14 +273,14 @@ func getTerrainTexture(_ renderer: OpaquePointer?, typeName: String, theater: Th
     }
 
     let key = "\(upperName)_\(frameIdx)"
-    if let cached = terrainTextureCache[key] {
+    if let cached = renderState.terrainTextureCache[key] {
         let frame = shp.frames[frameIdx]
         return (texture: cached, width: frame.width, height: frame.height)
     }
 
     let frame = shp.frames[frameIdx]
     if let texture = createSpriteTexture(renderer, frame: frame) {
-        terrainTextureCache[key] = texture
+        renderState.terrainTextureCache[key] = texture
         return (texture: texture, width: frame.width, height: frame.height)
     }
     return nil
@@ -292,15 +297,15 @@ func getObjectTexture(_ renderer: OpaquePointer?, typeName: String, frame: Int, 
     // Fall back to classic SHP from MIX archives
     let key = "\(upperName)_\(frame)_\(house.rawValue)"
 
-    if let cached = objectTextureCache[key] {
-        let shp = objectSHPCache[upperName]!
+    if let cached = renderState.objectTextureCache[key] {
+        let shp = renderState.objectSHPCache[upperName]!
         let f = shp.frames[frame]
         return (texture: cached, width: f.width, height: f.height)
     }
 
-    if objectFailedSHPs.contains(upperName) { return nil }
+    if renderState.objectFailedSHPs.contains(upperName) { return nil }
 
-    if objectSHPCache[upperName] == nil {
+    if renderState.objectSHPCache[upperName] == nil {
         var data: Data? = nil
         // Buildings/overlays use theater-specific extensions (.TEM, .DES, .WIN)
         if let theater = theater {
@@ -311,25 +316,25 @@ func getObjectTexture(_ renderer: OpaquePointer?, typeName: String, frame: Int, 
             data = mixManager.retrieve(upperName + ".SHP")
         }
         guard let fileData = data else {
-            objectFailedSHPs.insert(upperName)
+            renderState.objectFailedSHPs.insert(upperName)
             return nil
         }
         do {
-            objectSHPCache[upperName] = try SHPFile(data: fileData)
+            renderState.objectSHPCache[upperName] = try SHPFile(data: fileData)
         } catch {
-            objectFailedSHPs.insert(upperName)
+            renderState.objectFailedSHPs.insert(upperName)
             return nil
         }
     }
 
-    guard let shp = objectSHPCache[upperName],
+    guard let shp = renderState.objectSHPCache[upperName],
           frame < shp.frames.count else {
         return nil
     }
 
     let f = shp.frames[frame]
     if let texture = createRemappedSpriteTexture(renderer, frame: f, house: house) {
-        objectTextureCache[key] = texture
+        renderState.objectTextureCache[key] = texture
         return (texture: texture, width: f.width, height: f.height)
     }
     return nil
@@ -337,30 +342,30 @@ func getObjectTexture(_ renderer: OpaquePointer?, typeName: String, frame: Int, 
 
 func getTileTexture(_ renderer: OpaquePointer?, icnName: String, iconIndex: Int, theater: TheaterType = .temperate) -> OpaquePointer? {
     let key = "\(icnName)_\(iconIndex)"
-    if let cached = tileTextureCache[key] {
+    if let cached = renderState.tileTextureCache[key] {
         return cached
     }
 
-    if icnCache[icnName] == nil && !mapFailedICNs.contains(icnName) {
+    if renderState.icnCache[icnName] == nil && !renderState.mapFailedICNs.contains(icnName) {
         let filename = icnName + theater.suffix
         if let data = mixManager.retrieve(filename) {
             do {
-                icnCache[icnName] = try ICNFile(data: data)
+                renderState.icnCache[icnName] = try ICNFile(data: data)
             } catch {
                 print("MapViewer: Failed to parse \(filename): \(error)")
-                mapFailedICNs.insert(icnName)
+                renderState.mapFailedICNs.insert(icnName)
             }
         } else {
-            mapFailedICNs.insert(icnName)
+            renderState.mapFailedICNs.insert(icnName)
         }
     }
 
-    guard let icn = icnCache[icnName], let pixels = icn.tile(icon: iconIndex) else {
+    guard let icn = renderState.icnCache[icnName], let pixels = icn.tile(icon: iconIndex) else {
         return nil
     }
 
     if let texture = createTileTexture(renderer, pixels: pixels) {
-        tileTextureCache[key] = texture
+        renderState.tileTextureCache[key] = texture
         return texture
     }
     return nil
@@ -402,16 +407,16 @@ func renderMapViewer(_ renderer: OpaquePointer?) {
     let mapSize = 64
 
     // Apply zoom scaling to all rendering
-    SDL_RenderSetScale(renderer, Float(zoomLevel), Float(zoomLevel))
+    SDL_RenderSetScale(renderer, Float(renderState.zoomLevel), Float(renderState.zoomLevel))
 
     // Visible area shrinks/grows with zoom
-    let visibleWidth = Int(Double(windowWidth) / zoomLevel)
-    let visibleHeight = Int(Double(windowHeight) / zoomLevel)
+    let visibleWidth = Int(Double(renderState.windowWidth) / renderState.zoomLevel)
+    let visibleHeight = Int(Double(renderState.windowHeight) / renderState.zoomLevel)
 
-    let startCellX = max(0, cameraX / tileSize)
-    let startCellY = max(0, cameraY / tileSize)
-    let endCellX = min(mapSize - 1, (cameraX + visibleWidth) / tileSize)
-    let endCellY = min(mapSize - 1, (cameraY + visibleHeight) / tileSize)
+    let startCellX = max(0, renderState.cameraX / tileSize)
+    let startCellY = max(0, renderState.cameraY / tileSize)
+    let endCellX = min(mapSize - 1, (renderState.cameraX + visibleWidth) / tileSize)
+    let endCellY = min(mapSize - 1, (renderState.cameraY + visibleHeight) / tileSize)
 
     let theater = scenarioData?.theater ?? .temperate
 
@@ -435,13 +440,13 @@ func renderMapViewer(_ renderer: OpaquePointer?) {
             }
 
             if let texture = getTileTexture(renderer, icnName: icnName, iconIndex: actualIconIndex, theater: theater) {
-                let screenX = Int32(cellX * tileSize - cameraX)
-                let screenY = Int32(cellY * tileSize - cameraY)
+                let screenX = Int32(cellX * tileSize - renderState.cameraX)
+                let screenY = Int32(cellY * tileSize - renderState.cameraY)
                 var dstRect = SDL_Rect(x: screenX, y: screenY, w: Int32(tileSize), h: Int32(tileSize))
                 SDL_RenderCopy(renderer, texture, nil, &dstRect)
             } else {
-                let screenX = Int32(cellX * tileSize - cameraX)
-                let screenY = Int32(cellY * tileSize - cameraY)
+                let screenX = Int32(cellX * tileSize - renderState.cameraX)
+                let screenY = Int32(cellY * tileSize - renderState.cameraY)
                 SDL_SetRenderDrawColor(renderer, 0, 100, 0, 255)
                 var rect = SDL_Rect(x: screenX, y: screenY, w: Int32(tileSize), h: Int32(tileSize))
                 SDL_RenderFillRect(renderer, &rect)
@@ -470,8 +475,8 @@ func renderMapViewer(_ renderer: OpaquePointer?) {
 
     for overlay in scenario.overlays {
         let pos = cellToPixel(overlay.cell)
-        let screenX = Int32(pos.px - cameraX)
-        let screenY = Int32(pos.py - cameraY)
+        let screenX = Int32(pos.px - renderState.cameraX)
+        let screenY = Int32(pos.py - renderState.cameraY)
 
         if screenX > vw || screenY > vh || screenX + 24 < 0 || screenY + 24 < 0 { continue }
 
@@ -507,9 +512,9 @@ func renderMapViewer(_ renderer: OpaquePointer?) {
     for terrainObj in scenario.terrain {
         let pos = cellToPixel(terrainObj.cell)
 
-        if let info = getTerrainTexture(renderer, typeName: terrainObj.typeName, theater: theater, animFrame: animationFrame) {
-            let screenX = Int32(pos.px - cameraX)
-            let screenY = Int32(pos.py + 24 - info.height - cameraY)
+        if let info = getTerrainTexture(renderer, typeName: terrainObj.typeName, theater: theater, animFrame: renderState.animationFrame) {
+            let screenX = Int32(pos.px - renderState.cameraX)
+            let screenY = Int32(pos.py + 24 - info.height - renderState.cameraY)
 
             if screenX > vw || screenY > vh ||
                screenX + Int32(info.width) < 0 || screenY + Int32(info.height) < 0 { continue }
@@ -517,8 +522,8 @@ func renderMapViewer(_ renderer: OpaquePointer?) {
             var dstRect = SDL_Rect(x: screenX, y: screenY, w: Int32(info.width), h: Int32(info.height))
             SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
         } else {
-            let screenX = Int32(pos.px - cameraX)
-            let screenY = Int32(pos.py - cameraY)
+            let screenX = Int32(pos.px - renderState.cameraX)
+            let screenY = Int32(pos.py - renderState.cameraY)
             if screenX > vw || screenY > vh || screenX + 24 < 0 || screenY + 24 < 0 { continue }
             SDL_SetRenderDrawColor(renderer, 0, 80, 0, 200)
             var rect = SDL_Rect(x: screenX + 4, y: screenY + 4, w: 16, h: 16)
@@ -532,8 +537,8 @@ func renderMapViewer(_ renderer: OpaquePointer?) {
         let size = buildingSize(structure.typeName)
         let pixW = Int32(size.w * 24)
         let pixH = Int32(size.h * 24)
-        let screenX = Int32(pos.px - cameraX)
-        let screenY = Int32(pos.py - cameraY)
+        let screenX = Int32(pos.px - renderState.cameraX)
+        let screenY = Int32(pos.py - renderState.cameraY)
 
         if screenX > vw || screenY > vh ||
            screenX + pixW < 0 || screenY + pixH < 0 { continue }
@@ -546,8 +551,8 @@ func renderMapViewer(_ renderer: OpaquePointer?) {
                 for bibCol in 0..<bib.bibW {
                     let bibCell = bibOriginCell + bibRow * 64 + bibCol
                     let bibPos = cellToPixel(bibCell)
-                    let bibScreenX = Int32(bibPos.px - cameraX)
-                    let bibScreenY = Int32(bibPos.py - cameraY)
+                    let bibScreenX = Int32(bibPos.px - renderState.cameraX)
+                    let bibScreenY = Int32(bibPos.py - renderState.cameraY)
                     // SHP frame index = col + row * width
                     let bibFrame = bibCol + bibRow * bib.bibW
                     if let bibInfo = getObjectTexture(renderer, typeName: bib.bibName, frame: bibFrame, house: .neutral, theater: theater) {
@@ -588,15 +593,15 @@ func renderMapViewer(_ renderer: OpaquePointer?) {
         let frameIdx = bodyShape[facingIdx]
 
         if let info = getObjectTexture(renderer, typeName: unit.typeName, frame: frameIdx, house: unit.house) {
-            let screenX = Int32(pos.px - cameraX) + 12 - Int32(info.width) / 2
-            let screenY = Int32(pos.py - cameraY) + 12 - Int32(info.height) / 2
+            let screenX = Int32(pos.px - renderState.cameraX) + 12 - Int32(info.width) / 2
+            let screenY = Int32(pos.py - renderState.cameraY) + 12 - Int32(info.height) / 2
             if screenX > vw || screenY > vh ||
                screenX + Int32(info.width) < 0 || screenY + Int32(info.height) < 0 { continue }
             var dstRect = SDL_Rect(x: screenX, y: screenY, w: Int32(info.width), h: Int32(info.height))
             SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
         } else {
-            let screenX = Int32(pos.px - cameraX) + 4
-            let screenY = Int32(pos.py - cameraY) + 4
+            let screenX = Int32(pos.px - renderState.cameraX) + 4
+            let screenY = Int32(pos.py - renderState.cameraY) + 4
             let unitSize: Int32 = 16
             if screenX > vw || screenY > vh ||
                screenX + unitSize < 0 || screenY + unitSize < 0 { continue }
@@ -617,15 +622,15 @@ func renderMapViewer(_ renderer: OpaquePointer?) {
         let frameIdx = humanShape[facingIdx]
 
         if let info = getObjectTexture(renderer, typeName: inf.typeName, frame: frameIdx, house: inf.house) {
-            let screenX = Int32(pos.px + sub.dx - cameraX) + 3 - Int32(info.width) / 2
-            let screenY = Int32(pos.py + sub.dy - cameraY) + 3 - Int32(info.height) / 2
+            let screenX = Int32(pos.px + sub.dx - renderState.cameraX) + 3 - Int32(info.width) / 2
+            let screenY = Int32(pos.py + sub.dy - renderState.cameraY) + 3 - Int32(info.height) / 2
             if screenX > vw || screenY > vh ||
                screenX + Int32(info.width) < 0 || screenY + Int32(info.height) < 0 { continue }
             var dstRect = SDL_Rect(x: screenX, y: screenY, w: Int32(info.width), h: Int32(info.height))
             SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
         } else {
-            let screenX = Int32(pos.px + sub.dx - cameraX)
-            let screenY = Int32(pos.py + sub.dy - cameraY)
+            let screenX = Int32(pos.px + sub.dx - renderState.cameraX)
+            let screenY = Int32(pos.py + sub.dy - renderState.cameraY)
             let dotSize: Int32 = 6
             if screenX > vw || screenY > vh ||
                screenX + dotSize < 0 || screenY + dotSize < 0 { continue }
@@ -639,8 +644,8 @@ func renderMapViewer(_ renderer: OpaquePointer?) {
     // === Pass 7: Waypoint markers ===
     for wp in scenario.waypoints {
         let pos = cellToPixel(wp.cell)
-        let cx = Int32(pos.px - cameraX) + 12  // Center of cell
-        let cy = Int32(pos.py - cameraY) + 12
+        let cx = Int32(pos.px - renderState.cameraX) + 12  // Center of cell
+        let cy = Int32(pos.py - renderState.cameraY) + 12
 
         if cx < -12 || cy < -12 || cx > vw + 12 || cy > vh + 12 { continue }
 
@@ -677,12 +682,12 @@ func renderMapViewer(_ renderer: OpaquePointer?) {
     }
 
     // === Pass 7b: CellTrigger visualization ===
-    if showCellTriggers {
+    if renderState.showCellTriggers {
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
         for ct in scenario.cellTriggers {
             let pos = cellToPixel(ct.cell)
-            let screenX = Int32(pos.px - cameraX)
-            let screenY = Int32(pos.py - cameraY)
+            let screenX = Int32(pos.px - renderState.cameraX)
+            let screenY = Int32(pos.py - renderState.cameraY)
             if screenX > vw || screenY > vh || screenX + 24 < 0 || screenY + 24 < 0 { continue }
 
             // Semi-transparent orange fill
@@ -700,15 +705,15 @@ func renderMapViewer(_ renderer: OpaquePointer?) {
     }
 
     // === Pass 7c: Base rebuild list visualization ===
-    if showBaseList {
+    if renderState.showBaseList {
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
         for base in scenario.baseBuildings {
             let pos = cellToPixel(base.cell)
             let size = buildingSize(base.typeName)
             let pixW = Int32(size.w * 24)
             let pixH = Int32(size.h * 24)
-            let screenX = Int32(pos.px - cameraX)
-            let screenY = Int32(pos.py - cameraY)
+            let screenX = Int32(pos.px - renderState.cameraX)
+            let screenY = Int32(pos.py - renderState.cameraY)
 
             if screenX > vw || screenY > vh || screenX + pixW < 0 || screenY + pixH < 0 { continue }
 
@@ -730,12 +735,12 @@ func renderMapViewer(_ renderer: OpaquePointer?) {
     }
 
     // === Pass 7d: Info panel cell highlight ===
-    if showInfoPanel {
-        let hovCellX = mouseWorldX / 24
-        let hovCellY = mouseWorldY / 24
+    if renderState.showInfoPanel {
+        let hovCellX = input.mouseWorldX / 24
+        let hovCellY = input.mouseWorldY / 24
         if hovCellX >= 0 && hovCellX < 64 && hovCellY >= 0 && hovCellY < 64 {
-            let screenX = Int32(hovCellX * 24 - cameraX)
-            let screenY = Int32(hovCellY * 24 - cameraY)
+            let screenX = Int32(hovCellX * 24 - renderState.cameraX)
+            let screenY = Int32(hovCellY * 24 - renderState.cameraY)
             SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
             SDL_SetRenderDrawColor(renderer, 255, 255, 255, 120)
             var rect = SDL_Rect(x: screenX, y: screenY, w: 24, h: 24)
@@ -746,29 +751,29 @@ func renderMapViewer(_ renderer: OpaquePointer?) {
     }
 
     // === Pass 8: Cell Grid overlay ===
-    if showGrid {
+    if renderState.showGrid {
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 30)
         // Vertical lines at cell boundaries
         for cellX in startCellX...(endCellX + 1) {
-            let screenX = Int32(cellX * tileSize - cameraX)
-            let topY = Int32(startCellY * tileSize - cameraY)
-            let botY = Int32((endCellY + 1) * tileSize - cameraY)
+            let screenX = Int32(cellX * tileSize - renderState.cameraX)
+            let topY = Int32(startCellY * tileSize - renderState.cameraY)
+            let botY = Int32((endCellY + 1) * tileSize - renderState.cameraY)
             SDL_RenderDrawLine(renderer, screenX, topY, screenX, botY)
         }
         // Horizontal lines at cell boundaries
         for cellY in startCellY...(endCellY + 1) {
-            let screenY = Int32(cellY * tileSize - cameraY)
-            let leftX = Int32(startCellX * tileSize - cameraX)
-            let rightX = Int32((endCellX + 1) * tileSize - cameraX)
+            let screenY = Int32(cellY * tileSize - renderState.cameraY)
+            let leftX = Int32(startCellX * tileSize - renderState.cameraX)
+            let rightX = Int32((endCellX + 1) * tileSize - renderState.cameraX)
             SDL_RenderDrawLine(renderer, leftX, screenY, rightX, screenY)
         }
     }
 
     // === Pass 9: Shroud (darken areas outside map bounds) ===
     if let bounds = scenario.mapBounds {
-        let bx = Int32(bounds.x * tileSize - cameraX)
-        let by = Int32(bounds.y * tileSize - cameraY)
+        let bx = Int32(bounds.x * tileSize - renderState.cameraX)
+        let by = Int32(bounds.y * tileSize - renderState.cameraY)
         let bw = Int32(bounds.width * tileSize)
         let bh = Int32(bounds.height * tileSize)
 
@@ -809,8 +814,8 @@ func renderMapViewer(_ renderer: OpaquePointer?) {
     let minimapCellSize: Int32 = 2
     let minimapSize: Int32 = 64 * minimapCellSize  // 128x128
     let minimapPad: Int32 = 10
-    let minimapX = windowWidth - minimapSize - minimapPad
-    let minimapY = windowHeight - minimapSize - minimapPad
+    let minimapX = renderState.windowWidth - minimapSize - minimapPad
+    let minimapY = renderState.windowHeight - minimapSize - minimapPad
 
     // Build quick lookup sets for structures and overlays by cell
     var structureCells: [Int: House] = [:]
@@ -917,16 +922,16 @@ func renderMapViewer(_ renderer: OpaquePointer?) {
     }
 
     // Draw white outline showing current camera viewport on minimap
-    let vpX = minimapX + Int32(cameraX / tileSize) * minimapCellSize
-    let vpY = minimapY + Int32(cameraY / tileSize) * minimapCellSize
-    let vpW = Int32(Double(windowWidth) / zoomLevel / Double(tileSize)) * minimapCellSize
-    let vpH = Int32(Double(windowHeight) / zoomLevel / Double(tileSize)) * minimapCellSize
+    let vpX = minimapX + Int32(renderState.cameraX / tileSize) * minimapCellSize
+    let vpY = minimapY + Int32(renderState.cameraY / tileSize) * minimapCellSize
+    let vpW = Int32(Double(renderState.windowWidth) / renderState.zoomLevel / Double(tileSize)) * minimapCellSize
+    let vpH = Int32(Double(renderState.windowHeight) / renderState.zoomLevel / Double(tileSize)) * minimapCellSize
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255)
     var vpRect = SDL_Rect(x: vpX, y: vpY, w: vpW, h: vpH)
     SDL_RenderDrawRect(renderer, &vpRect)
 
     // === Info Panel (rendered at native resolution after scale reset) ===
-    if showInfoPanel {
+    if renderState.showInfoPanel {
         renderInfoPanel(renderer, scenario: scenario, tileSize: tileSize)
     }
 }
@@ -935,9 +940,9 @@ func renderMapViewer(_ renderer: OpaquePointer?) {
 
 func renderInfoPanel(_ renderer: OpaquePointer?, scenario: ScenarioData, tileSize: Int) {
     let panelW: Int32 = 210
-    let panelX = windowWidth - panelW
+    let panelX = renderState.windowWidth - panelW
     let panelY: Int32 = 0
-    let panelH = windowHeight
+    let panelH = renderState.windowHeight
 
     // Semi-transparent dark background
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
@@ -949,8 +954,8 @@ func renderInfoPanel(_ renderer: OpaquePointer?, scenario: ScenarioData, tileSiz
     SDL_SetRenderDrawColor(renderer, 0, 180, 0, 255)
     SDL_RenderDrawLine(renderer, panelX, panelY, panelX, panelY + panelH)
 
-    let hovCellX = mouseWorldX / tileSize
-    let hovCellY = mouseWorldY / tileSize
+    let hovCellX = input.mouseWorldX / tileSize
+    let hovCellY = input.mouseWorldY / tileSize
     let hovCell = hovCellY * 64 + hovCellX
 
     var lineY: Int32 = 10

@@ -3,58 +3,50 @@ import Foundation
 
 // MARK: - Game Camera
 
-var gameCameraX: Double = 0.0
-var gameCameraY: Double = 0.0
-var gameZoomLevel: Double = 1.0
 
 // MARK: - Selection State
 
-var selectionBoxStartX: Int32? = nil
-var selectionBoxStartY: Int32? = nil
-var selectionBoxEndX: Int32? = nil
-var selectionBoxEndY: Int32? = nil
-var isDragging = false
 
 // MARK: - Coordinate Conversion
 
 func gameScreenToWorld(_ screenX: Int32, _ screenY: Int32) -> (worldX: Double, worldY: Double) {
-    let wx = gameCameraX + Double(screenX) / gameZoomLevel
-    let wy = gameCameraY + Double(screenY) / gameZoomLevel
+    let wx = renderState.gameCameraX + Double(screenX) / renderState.gameZoomLevel
+    let wy = renderState.gameCameraY + Double(screenY) / renderState.gameZoomLevel
     return (wx, wy)
 }
 
 func gameWorldToScreen(_ worldX: Double, _ worldY: Double) -> (screenX: Int32, screenY: Int32) {
-    let sx = Int32((worldX - gameCameraX) * gameZoomLevel)
-    let sy = Int32((worldY - gameCameraY) * gameZoomLevel)
+    let sx = Int32((worldX - renderState.gameCameraX) * renderState.gameZoomLevel)
+    let sy = Int32((worldY - renderState.gameCameraY) * renderState.gameZoomLevel)
     return (sx, sy)
 }
 
 // MARK: - Input Handling
 
 func handleGameLeftDown(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
-    selectionBoxStartX = x
-    selectionBoxStartY = y
-    selectionBoxEndX = x
-    selectionBoxEndY = y
-    isDragging = false
+    input.selectionBoxStartX = x
+    input.selectionBoxStartY = y
+    input.selectionBoxEndX = x
+    input.selectionBoxEndY = y
+    input.isDragging = false
 }
 
 func handleGameLeftDrag(_ x: Int32, _ y: Int32) {
-    selectionBoxEndX = x
-    selectionBoxEndY = y
-    if let sx = selectionBoxStartX, let sy = selectionBoxStartY {
+    input.selectionBoxEndX = x
+    input.selectionBoxEndY = y
+    if let sx = input.selectionBoxStartX, let sy = input.selectionBoxStartY {
         let dx = abs(Int(x) - Int(sx))
         let dy = abs(Int(y) - Int(sy))
         if dx > 4 || dy > 4 {
-            isDragging = true
+            input.isDragging = true
         }
     }
 }
 
 func handleGameLeftUp(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
 
-    if isDragging, let sx = selectionBoxStartX, let sy = selectionBoxStartY {
+    if input.isDragging, let sx = input.selectionBoxStartX, let sy = input.selectionBoxStartY {
         // Box select: find all units/infantry within the screen-space rectangle
         let minSX = min(Int(sx), Int(x))
         let maxSX = max(Int(sx), Int(x))
@@ -78,7 +70,7 @@ func handleGameLeftUp(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
     } else {
         // Single click: find nearest unit/infantry within hit radius
         let worldPos = gameScreenToWorld(x, y)
-        let hitRadius = 14.0 / gameZoomLevel
+        let hitRadius = 14.0 / renderState.gameZoomLevel
 
         var nearest: GameObject? = nil
         var nearestDist = Double.infinity
@@ -107,15 +99,15 @@ func handleGameLeftUp(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
     }
 
     // Clear drag state
-    selectionBoxStartX = nil
-    selectionBoxStartY = nil
-    selectionBoxEndX = nil
-    selectionBoxEndY = nil
-    isDragging = false
+    input.selectionBoxStartX = nil
+    input.selectionBoxStartY = nil
+    input.selectionBoxEndX = nil
+    input.selectionBoxEndY = nil
+    input.isDragging = false
 }
 
 func handleGameRightClick(_ x: Int32, _ y: Int32) {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
     let worldPos = gameScreenToWorld(x, y)
 
     let selected = world.selectedObjects()
@@ -162,7 +154,7 @@ func handleGameRightClick(_ x: Int32, _ y: Int32) {
 // MARK: - Game Renderer
 
 func renderGame(_ renderer: OpaquePointer?) {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
     let tileSize = 24
     let mapSize = 64
     let theater = world.theater
@@ -171,17 +163,17 @@ func renderGame(_ renderer: OpaquePointer?) {
     loadUISprites(renderer)
 
     // Clip game rendering to viewport area (left of sidebar)
-    let gameViewportWidth = windowWidth - sidebarWidth
-    var clipRect = SDL_Rect(x: 0, y: 0, w: gameViewportWidth, h: windowHeight)
+    let gameViewportWidth = renderState.windowWidth - sidebarWidth
+    var clipRect = SDL_Rect(x: 0, y: 0, w: gameViewportWidth, h: renderState.windowHeight)
     SDL_RenderSetClipRect(renderer, &clipRect)
 
     // Apply zoom scaling
-    SDL_RenderSetScale(renderer, Float(gameZoomLevel), Float(gameZoomLevel))
+    SDL_RenderSetScale(renderer, Float(renderState.gameZoomLevel), Float(renderState.gameZoomLevel))
 
-    let visibleWidth = Int(Double(gameViewportWidth) / gameZoomLevel)
-    let visibleHeight = Int(Double(windowHeight) / gameZoomLevel)
-    let camX = Int(gameCameraX)
-    let camY = Int(gameCameraY)
+    let visibleWidth = Int(Double(gameViewportWidth) / renderState.gameZoomLevel)
+    let visibleHeight = Int(Double(renderState.windowHeight) / renderState.gameZoomLevel)
+    let camX = Int(renderState.gameCameraX)
+    let camY = Int(renderState.gameCameraY)
 
     let startCellX = max(0, camX / tileSize)
     let startCellY = max(0, camY / tileSize)
@@ -357,7 +349,7 @@ func renderGame(_ renderer: OpaquePointer?) {
     }
 
     // Draw mobile game objects (units and infantry) from interpolated positions
-    let interp = renderInterpolation
+    let interp = session.renderInterpolation
     for obj in mobileObjects {
         // Skip enemy objects on non-visible cells (fog of war)
         if obj.house != world.playerHouse && !isCellVisible(obj.cell) { continue }
@@ -566,8 +558,8 @@ func renderGame(_ renderer: OpaquePointer?) {
     }
 
     // === Pass 6: Drag-select rectangle (in world space since we have zoom scaling active) ===
-    if isDragging, let sx = selectionBoxStartX, let sy = selectionBoxStartY,
-       let ex = selectionBoxEndX, let ey = selectionBoxEndY {
+    if input.isDragging, let sx = input.selectionBoxStartX, let sy = input.selectionBoxStartY,
+       let ex = input.selectionBoxEndX, let ey = input.selectionBoxEndY {
         // Convert screen coords to world coords for drawing
         let startWorld = gameScreenToWorld(sx, sy)
         let endWorld = gameScreenToWorld(ex, ey)
@@ -617,8 +609,8 @@ func renderGame(_ renderer: OpaquePointer?) {
     }
 
     // Placement preview (rendered in world space with zoom)
-    if isPlacingStructure {
-        renderPlacementPreview(renderer, mouseScreenX: mouseX, mouseScreenY: mouseY)
+    if session.isPlacingStructure {
+        renderPlacementPreview(renderer, mouseScreenX: input.mouseX, mouseScreenY: input.mouseY)
     }
 
     // Reset scale for HUD and minimap
@@ -634,7 +626,7 @@ func renderGame(_ renderer: OpaquePointer?) {
     renderSidebar(renderer)
 
     // === HUD ===
-    let gameViewportCenter = (windowWidth - sidebarWidth) / 2
+    let gameViewportCenter = (renderState.windowWidth - sidebarWidth) / 2
     let selectedCount = world.selectedObjects().count
     let scenarioLabel = scenarioList[scenarioIndex]
     drawText(renderer, "PLAYING - \(scenarioLabel)", centerX: gameViewportCenter, centerY: 15, color: .amber, scale: 2)
@@ -644,20 +636,20 @@ func renderGame(_ renderer: OpaquePointer?) {
     }
 
     // Win/Lose state display
-    if triggerWinState == .won {
-        drawText(renderer, "MISSION ACCOMPLISHED", centerX: gameViewportCenter, centerY: windowHeight / 2 - 40, color: .green, scale: 3)
+    if session.triggerWinState == .won {
+        drawText(renderer, "MISSION ACCOMPLISHED", centerX: gameViewportCenter, centerY: renderState.windowHeight / 2 - 40, color: .green, scale: 3)
         let scoreData = generateScoreScreen(won: true)
-        drawText(renderer, "Score: \(scoreData.score)  Time: \(scoreData.elapsedTime)", centerX: gameViewportCenter, centerY: windowHeight / 2, color: .amber, scale: 1)
-        drawText(renderer, "N: Next Mission  R: Restart  ESC: Menu", centerX: gameViewportCenter, centerY: windowHeight / 2 + 25, color: .gray, scale: 1)
-    } else if triggerWinState == .lost {
-        drawText(renderer, "MISSION FAILED", centerX: gameViewportCenter, centerY: windowHeight / 2 - 40, color: .red, scale: 3)
+        drawText(renderer, "Score: \(scoreData.score)  Time: \(scoreData.elapsedTime)", centerX: gameViewportCenter, centerY: renderState.windowHeight / 2, color: .amber, scale: 1)
+        drawText(renderer, "N: Next Mission  R: Restart  ESC: Menu", centerX: gameViewportCenter, centerY: renderState.windowHeight / 2 + 25, color: .gray, scale: 1)
+    } else if session.triggerWinState == .lost {
+        drawText(renderer, "MISSION FAILED", centerX: gameViewportCenter, centerY: renderState.windowHeight / 2 - 40, color: .red, scale: 3)
         let scoreData = generateScoreScreen(won: false)
-        drawText(renderer, "Score: \(scoreData.score)  Time: \(scoreData.elapsedTime)", centerX: gameViewportCenter, centerY: windowHeight / 2, color: .amber, scale: 1)
-        drawText(renderer, "R: Restart  ESC: Menu", centerX: gameViewportCenter, centerY: windowHeight / 2 + 25, color: .gray, scale: 1)
+        drawText(renderer, "Score: \(scoreData.score)  Time: \(scoreData.elapsedTime)", centerX: gameViewportCenter, centerY: renderState.windowHeight / 2, color: .amber, scale: 1)
+        drawText(renderer, "R: Restart  ESC: Menu", centerX: gameViewportCenter, centerY: renderState.windowHeight / 2 + 25, color: .gray, scale: 1)
     }
 
     drawText(renderer, "RClick: Move/Attack  F3: Perf  F5: Save  F9: Load  Esc: Menu",
-             centerX: gameViewportCenter, centerY: windowHeight - 15, color: .gray, scale: 1)
+             centerX: gameViewportCenter, centerY: renderState.windowHeight - 15, color: .gray, scale: 1)
 
     // === Custom Cursor Rendering ===
     renderGameCursor(renderer, world: world)
@@ -683,27 +675,27 @@ let cursorEnter     = CursorDef(startFrame: 119, frameCount: 3,  hotX: 15, hotY:
 let cursorAreaGuard = CursorDef(startFrame: 153, frameCount: 1,  hotX: 15, hotY: 12)
 
 func renderGameCursor(_ renderer: OpaquePointer?, world: GameWorld) {
-    guard let shp = mouseSHP, !shp.frames.isEmpty else { return }
+    guard let shp = renderState.mouseSHP, !shp.frames.isEmpty else { return }
 
     // Hide system cursor when playing
-    if !systemCursorHidden {
+    if !renderState.systemCursorHidden {
         SDL_ShowCursor(SDL_DISABLE)
-        systemCursorHidden = true
+        renderState.systemCursorHidden = true
     }
 
     // Animate cursor (cycle every ~66ms = 15 FPS like the game tick rate)
     let now = SDL_GetTicks()
-    if now - cursorAnimTimer > 66 {
-        cursorAnimTimer = now
-        cursorAnimFrame += 1
+    if now - renderState.cursorAnimTimer > 66 {
+        renderState.cursorAnimTimer = now
+        renderState.cursorAnimFrame += 1
     }
 
     // Determine cursor type based on what's under the mouse
     var cursor = cursorNormal
 
     // Only apply game cursor logic when mouse is in the game viewport
-    if mouseX < windowWidth - sidebarWidth {
-        let worldPos = gameScreenToWorld(mouseX, mouseY)
+    if input.mouseX < renderState.windowWidth - sidebarWidth {
+        let worldPos = gameScreenToWorld(input.mouseX, input.mouseY)
         let selected = world.selectedObjects()
 
         if !selected.isEmpty {
@@ -716,7 +708,7 @@ func renderGameCursor(_ renderer: OpaquePointer?, world: GameWorld) {
             }
         } else {
             // Check for own selectable unit under cursor
-            let hitRadius = 14.0 / gameZoomLevel
+            let hitRadius = 14.0 / renderState.gameZoomLevel
             var foundOwn = false
             for obj in world.objects {
                 if obj.kind == .structure { continue }
@@ -738,16 +730,16 @@ func renderGameCursor(_ renderer: OpaquePointer?, world: GameWorld) {
     // Compute the display frame
     let cursorFrame: Int
     if cursor.frameCount > 1 {
-        cursorFrame = cursor.startFrame + (cursorAnimFrame % cursor.frameCount)
+        cursorFrame = cursor.startFrame + (renderState.cursorAnimFrame % cursor.frameCount)
     } else {
         cursorFrame = cursor.startFrame
     }
 
     // Render the cursor frame centered on hotspot
     if cursorFrame < shp.frames.count,
-       let info = getUITexture(renderer, shp: shp, frame: cursorFrame, cache: &mouseTextures) {
-        let drawX = mouseX - cursor.hotX
-        let drawY = mouseY - cursor.hotY
+       let info = getUITexture(renderer, shp: shp, frame: cursorFrame, cache: &renderState.mouseTextures) {
+        let drawX = input.mouseX - cursor.hotX
+        let drawY = input.mouseY - cursor.hotY
         var dstRect = SDL_Rect(x: drawX, y: drawY, w: Int32(info.width), h: Int32(info.height))
         SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
     }
@@ -755,27 +747,17 @@ func renderGameCursor(_ renderer: OpaquePointer?, world: GameWorld) {
 
 // MARK: - UI Sprite Cache (SELECT.SHP, PIPS.SHP, MOUSE.SHP)
 
-var selectSHP: SHPFile? = nil
-var selectTextures: [Int: OpaquePointer] = [:]
-var pipsSHP: SHPFile? = nil
-var pipsTextures: [Int: OpaquePointer] = [:]
-var mouseSHP: SHPFile? = nil
-var mouseTextures: [Int: OpaquePointer] = [:]
-var uiSpritesLoaded = false
-var cursorAnimFrame: Int = 0
-var cursorAnimTimer: UInt32 = 0
-var systemCursorHidden = false
 
 func loadUISprites(_ renderer: OpaquePointer?) {
-    guard !uiSpritesLoaded else { return }
-    uiSpritesLoaded = true
+    guard !renderState.uiSpritesLoaded else { return }
+    renderState.uiSpritesLoaded = true
 
     // SELECT.SHP — selection brackets
     if let data = mixManager.retrieve("SELECT.SHP") {
         do {
-            selectSHP = try SHPFile(data: data)
-            print("Loaded SELECT.SHP: \(selectSHP!.frames.count) frames")
-            for (i, f) in selectSHP!.frames.enumerated() {
+            renderState.selectSHP = try SHPFile(data: data)
+            print("Loaded SELECT.SHP: \(renderState.selectSHP!.frames.count) frames")
+            for (i, f) in renderState.selectSHP!.frames.enumerated() {
                 let nonZero = f.pixels.filter { $0 != 0 }.count
                 print("  SELECT.SHP frame \(i): \(f.width)x\(f.height), \(nonZero) visible pixels")
             }
@@ -787,8 +769,8 @@ func loadUISprites(_ renderer: OpaquePointer?) {
     // PIPS.SHP — health pips
     if let data = mixManager.retrieve("PIPS.SHP") {
         do {
-            pipsSHP = try SHPFile(data: data)
-            print("Loaded PIPS.SHP: \(pipsSHP!.frames.count) frames")
+            renderState.pipsSHP = try SHPFile(data: data)
+            print("Loaded PIPS.SHP: \(renderState.pipsSHP!.frames.count) frames")
         } catch {
             print("Failed to parse PIPS.SHP: \(error)")
         }
@@ -797,8 +779,8 @@ func loadUISprites(_ renderer: OpaquePointer?) {
     // MOUSE.SHP — cursor shapes
     if let data = mixManager.retrieve("MOUSE.SHP") {
         do {
-            mouseSHP = try SHPFile(data: data)
-            print("Loaded MOUSE.SHP: \(mouseSHP!.frames.count) frames")
+            renderState.mouseSHP = try SHPFile(data: data)
+            print("Loaded MOUSE.SHP: \(renderState.mouseSHP!.frames.count) frames")
         } catch {
             print("Failed to parse MOUSE.SHP: \(error)")
         }
@@ -878,7 +860,7 @@ func renderHealthPips(_ renderer: OpaquePointer?, x: Int32, y: Int32, w: Int32, 
 func renderAnimations(_ renderer: OpaquePointer?, camX: Int, camY: Int, vw: Int32, vh: Int32) {
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
 
-    for anim in activeAnimations {
+    for anim in session.activeAnimations {
         if anim.isFinished { continue }
 
         let screenX = Int32(anim.worldX) - Int32(camX)
@@ -890,7 +872,7 @@ func renderAnimations(_ renderer: OpaquePointer?, camX: Int, camY: Int, vw: Int3
            screenX - maxSize > vw || screenY - maxSize > vh { continue }
 
         // Try to render from SHP sprite
-        let theater = gameWorld?.theater ?? .temperate
+        let theater = session.world?.theater ?? .temperate
         if let info = getObjectTexture(renderer, typeName: anim.data.name,
                                        frame: anim.currentFrame, house: .neutral,
                                        theater: theater) {
@@ -905,7 +887,7 @@ func renderAnimations(_ renderer: OpaquePointer?, camX: Int, camY: Int, vw: Int3
     }
 
     // Render smudges (scorch marks, craters)
-    for smudge in mapSmudges {
+    for smudge in (session.world?.map.smudges ?? []) {
         let cellX = smudge.cell % 64
         let cellY = smudge.cell / 64
         let screenX = Int32(cellX * 24 - camX)
@@ -913,7 +895,7 @@ func renderAnimations(_ renderer: OpaquePointer?, camX: Int, camY: Int, vw: Int3
         if screenX > vw || screenY > vh || screenX + 24 < 0 || screenY + 24 < 0 { continue }
 
         // Try SHP first
-        let theater = gameWorld?.theater ?? .temperate
+        let theater = session.world?.theater ?? .temperate
         if let info = getObjectTexture(renderer, typeName: smudge.type.rawValue,
                                        frame: 0, house: .neutral, theater: theater) {
             var dstRect = SDL_Rect(x: screenX, y: screenY, w: Int32(info.width), h: Int32(info.height))
@@ -977,8 +959,8 @@ func renderGameMinimap(_ renderer: OpaquePointer?, world: GameWorld) {
     let minimapCellSize: Int32 = 2
     let minimapSize: Int32 = 64 * minimapCellSize
     let minimapPad: Int32 = 10
-    let minimapX = windowWidth - sidebarWidth - minimapSize - minimapPad
-    let minimapY = windowHeight - minimapSize - minimapPad
+    let minimapX = renderState.windowWidth - sidebarWidth - minimapSize - minimapPad
+    let minimapY = renderState.windowHeight - minimapSize - minimapPad
     let mapSize = 64
     let tileSize = 24
 
@@ -1088,10 +1070,10 @@ func renderGameMinimap(_ renderer: OpaquePointer?, world: GameWorld) {
     }
 
     // Camera viewport indicator
-    let vpX = minimapX + Int32(gameCameraX / Double(tileSize)) * minimapCellSize
-    let vpY = minimapY + Int32(gameCameraY / Double(tileSize)) * minimapCellSize
-    let vpW = Int32(Double(windowWidth - sidebarWidth) / gameZoomLevel / Double(tileSize)) * minimapCellSize
-    let vpH = Int32(Double(windowHeight) / gameZoomLevel / Double(tileSize)) * minimapCellSize
+    let vpX = minimapX + Int32(renderState.gameCameraX / Double(tileSize)) * minimapCellSize
+    let vpY = minimapY + Int32(renderState.gameCameraY / Double(tileSize)) * minimapCellSize
+    let vpW = Int32(Double(renderState.windowWidth - sidebarWidth) / renderState.gameZoomLevel / Double(tileSize)) * minimapCellSize
+    let vpH = Int32(Double(renderState.windowHeight) / renderState.gameZoomLevel / Double(tileSize)) * minimapCellSize
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255)
     var vpRect = SDL_Rect(x: vpX, y: vpY, w: vpW, h: vpH)
     SDL_RenderDrawRect(renderer, &vpRect)

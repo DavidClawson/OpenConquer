@@ -48,8 +48,7 @@ class CampaignState {
     }
 }
 
-/// Global campaign state
-var campaignState = CampaignState()
+// session.campaignState -- now in session
 
 // MARK: - Score Tracking
 
@@ -94,23 +93,23 @@ class MissionScore {
     }
 }
 
-var missionScore = MissionScore()
+// session.missionScore -- now in session
 
 /// Track a kill for scoring purposes
 func trackKill(victimHouse: House, victimKind: ObjectKind) {
     switch victimKind {
     case .structure:
         switch victimHouse {
-        case .goodGuy: missionScore.gdiBuildingsKilled += 1
-        case .badGuy: missionScore.nodBuildingsKilled += 1
-        case .neutral: missionScore.civBuildingsKilled += 1
+        case .goodGuy: session.missionScore.gdiBuildingsKilled += 1
+        case .badGuy: session.missionScore.nodBuildingsKilled += 1
+        case .neutral: session.missionScore.civBuildingsKilled += 1
         default: break
         }
     case .unit, .infantry:
         switch victimHouse {
-        case .goodGuy: missionScore.gdiUnitsKilled += 1
-        case .badGuy: missionScore.nodUnitsKilled += 1
-        case .neutral: missionScore.civUnitsKilled += 1
+        case .goodGuy: session.missionScore.gdiUnitsKilled += 1
+        case .badGuy: session.missionScore.nodUnitsKilled += 1
+        case .neutral: session.missionScore.civUnitsKilled += 1
         default: break
         }
     }
@@ -203,12 +202,12 @@ let saveDirectory: URL = {
 // MARK: - Save Game
 
 func saveGame(slot: Int, description: String = "") -> Bool {
-    guard let world = gameWorld else {
+    guard let world = session.world else {
         print("SaveGame: No world to save")
         return false
     }
 
-    let desc = description.isEmpty ? "Save \(slot) - \(campaignState.scenarioName)" : description
+    let desc = description.isEmpty ? "Save \(slot) - \(session.campaignState.scenarioName)" : description
 
     // Serialize objects
     var savedObjects: [SavedObject] = []
@@ -236,7 +235,7 @@ func saveGame(slot: Int, description: String = "") -> Bool {
 
     // Serialize trigger state
     var savedTriggers: [SavedTrigger] = []
-    for trigger in gameTriggers {
+    for trigger in session.gameTriggers {
         savedTriggers.append(SavedTrigger(
             name: trigger.name,
             isActive: trigger.isActive,
@@ -251,7 +250,7 @@ func saveGame(slot: Int, description: String = "") -> Bool {
         version: 1,
         description: desc,
         saveDate: Date(),
-        scenarioName: currentScenarioName ?? campaignState.scenarioName,
+        scenarioName: session.currentScenarioName ?? session.campaignState.scenarioName,
         tickCount: world.tickCount,
         playerHouse: world.playerHouse.rawValue,
         theater: world.theater.rawValue,
@@ -259,24 +258,24 @@ func saveGame(slot: Int, description: String = "") -> Bool {
         mapBoundsY: bounds.y,
         mapBoundsW: bounds.width,
         mapBoundsH: bounds.height,
-        credits: sidebarCredits,
+        credits: session.sidebarCredits,
         objects: savedObjects,
-        campaignFaction: campaignState.currentFaction,
-        campaignMission: campaignState.currentMission,
-        campaignVariant: campaignState.currentVariant,
-        campaignDifficulty: campaignState.difficulty,
-        carryOverCredits: campaignState.carryOverCredits,
-        scoreGDIKills: missionScore.gdiUnitsKilled,
-        scoreNodKills: missionScore.nodUnitsKilled,
-        scoreCivKills: missionScore.civUnitsKilled,
-        scoreGDIBuildings: missionScore.gdiBuildingsKilled,
-        scoreNodBuildings: missionScore.nodBuildingsKilled,
-        scoreCivBuildings: missionScore.civBuildingsKilled,
-        scoreCreditsHarvested: missionScore.creditsHarvested,
-        scoreElapsedTicks: missionScore.elapsedTicks,
+        campaignFaction: session.campaignState.currentFaction,
+        campaignMission: session.campaignState.currentMission,
+        campaignVariant: session.campaignState.currentVariant,
+        campaignDifficulty: session.campaignState.difficulty,
+        carryOverCredits: session.campaignState.carryOverCredits,
+        scoreGDIKills: session.missionScore.gdiUnitsKilled,
+        scoreNodKills: session.missionScore.nodUnitsKilled,
+        scoreCivKills: session.missionScore.civUnitsKilled,
+        scoreGDIBuildings: session.missionScore.gdiBuildingsKilled,
+        scoreNodBuildings: session.missionScore.nodBuildingsKilled,
+        scoreCivBuildings: session.missionScore.civBuildingsKilled,
+        scoreCreditsHarvested: session.missionScore.creditsHarvested,
+        scoreElapsedTicks: session.missionScore.elapsedTicks,
         triggers: savedTriggers,
-        cameraX: gameCameraX,
-        cameraY: gameCameraY
+        cameraX: renderState.gameCameraX,
+        cameraY: renderState.gameCameraY
     )
 
     do {
@@ -354,33 +353,33 @@ func loadGame(slot: Int) -> Bool {
             world.nextObjectId = max(world.nextObjectId, saved.id + 1)
         }
 
-        gameWorld = world
-        sidebarCredits = saveData.credits
-        gameCameraX = saveData.cameraX
-        gameCameraY = saveData.cameraY
-        currentScenarioName = scenName
+        session.world = world
+        session.sidebarCredits = saveData.credits
+        renderState.gameCameraX = saveData.cameraX
+        renderState.gameCameraY = saveData.cameraY
+        session.currentScenarioName = scenName
 
         // Restore campaign state
-        campaignState.currentFaction = saveData.campaignFaction
-        campaignState.currentMission = saveData.campaignMission
-        campaignState.currentVariant = saveData.campaignVariant
-        campaignState.difficulty = saveData.campaignDifficulty
-        campaignState.carryOverCredits = saveData.carryOverCredits
-        campaignState.isActive = true
+        session.campaignState.currentFaction = saveData.campaignFaction
+        session.campaignState.currentMission = saveData.campaignMission
+        session.campaignState.currentVariant = saveData.campaignVariant
+        session.campaignState.difficulty = saveData.campaignDifficulty
+        session.campaignState.carryOverCredits = saveData.carryOverCredits
+        session.campaignState.isActive = true
 
         // Restore score
-        missionScore.gdiUnitsKilled = saveData.scoreGDIKills
-        missionScore.nodUnitsKilled = saveData.scoreNodKills
-        missionScore.civUnitsKilled = saveData.scoreCivKills
-        missionScore.gdiBuildingsKilled = saveData.scoreGDIBuildings
-        missionScore.nodBuildingsKilled = saveData.scoreNodBuildings
-        missionScore.civBuildingsKilled = saveData.scoreCivBuildings
-        missionScore.creditsHarvested = saveData.scoreCreditsHarvested
-        missionScore.elapsedTicks = saveData.scoreElapsedTicks
+        session.missionScore.gdiUnitsKilled = saveData.scoreGDIKills
+        session.missionScore.nodUnitsKilled = saveData.scoreNodKills
+        session.missionScore.civUnitsKilled = saveData.scoreCivKills
+        session.missionScore.gdiBuildingsKilled = saveData.scoreGDIBuildings
+        session.missionScore.nodBuildingsKilled = saveData.scoreNodBuildings
+        session.missionScore.civBuildingsKilled = saveData.scoreCivBuildings
+        session.missionScore.creditsHarvested = saveData.scoreCreditsHarvested
+        session.missionScore.elapsedTicks = saveData.scoreElapsedTicks
 
         // Restore trigger states
         for savedTrigger in saveData.triggers {
-            if let trigger = gameTriggers.first(where: { $0.name == savedTrigger.name }) {
+            if let trigger = session.gameTriggers.first(where: { $0.name == savedTrigger.name }) {
                 trigger.isActive = savedTrigger.isActive
                 trigger.data = savedTrigger.data
                 trigger.attachCount = savedTrigger.attachCount
@@ -401,7 +400,7 @@ func loadGame(slot: Int) -> Bool {
         case .desert: palName = "DESERT.PAL"
         case .winter: palName = "WINTER.PAL"
         }
-        gamePalette = loadPalette(palName)
+        renderState.gamePalette = loadPalette(palName)
 
         print("LoadGame: Loaded slot \(slot) - '\(saveData.description)' (\(world.objects.count) objects)")
         return true
@@ -473,65 +472,65 @@ func quickLoad() -> Bool {
 
 /// Handle mission win
 func handleMissionWin() {
-    guard campaignState.isActive else { return }
+    guard session.campaignState.isActive else { return }
 
-    print("Campaign: Mission \(campaignState.scenarioName) WON!")
+    print("Campaign: Mission \(session.campaignState.scenarioName) WON!")
     speak(.accomplished)
 
     // Save carry-over credits
-    campaignState.carryOverCredits = sidebarCredits * campaignState.carryOverPercent / 100
+    session.campaignState.carryOverCredits = session.sidebarCredits * session.campaignState.carryOverPercent / 100
 
     // Record score
-    missionScore.elapsedTicks = gameWorld?.tickCount ?? 0
+    session.missionScore.elapsedTicks = session.world?.tickCount ?? 0
 
     // Advance campaign
-    campaignState.advanceMission()
+    session.campaignState.advanceMission()
 
-    if campaignState.isComplete {
-        print("Campaign: \(campaignState.currentFaction) campaign COMPLETE!")
+    if session.campaignState.isComplete {
+        print("Campaign: \(session.campaignState.currentFaction) campaign COMPLETE!")
     } else {
-        print("Campaign: Next mission is \(campaignState.scenarioName)")
+        print("Campaign: Next mission is \(session.campaignState.scenarioName)")
     }
 }
 
 /// Handle mission loss
 func handleMissionLoss() {
-    guard campaignState.isActive else { return }
+    guard session.campaignState.isActive else { return }
 
-    print("Campaign: Mission \(campaignState.scenarioName) LOST!")
+    print("Campaign: Mission \(session.campaignState.scenarioName) LOST!")
     speak(.fail)
 }
 
 /// Restart current mission
 func restartMission() {
-    guard let scenName = currentScenarioName else { return }
+    guard let scenName = session.currentScenarioName else { return }
 
     // Reload the scenario
     if let scenario = loadScenario(scenName + ".INI", from: mixManager) {
         scenarioData = scenario
         initGameWorld(scenario: scenario, scenarioName: scenName)
-        missionScore.reset()
-        lastTickTime = 0
-        tickAccumulator = 0
+        session.missionScore.reset()
+        session.lastTickTime = 0
+        session.tickAccumulator = 0
         print("Campaign: Restarted mission \(scenName)")
     }
 }
 
 /// Start the next campaign mission
 func startNextMission() -> Bool {
-    guard campaignState.isActive && !campaignState.isComplete else { return false }
+    guard session.campaignState.isActive && !session.campaignState.isComplete else { return false }
 
-    let scenName = campaignState.scenarioName
+    let scenName = session.campaignState.scenarioName
 
     // Check if the scenario exists
     guard mixManager.contains("\(scenName).INI") else {
         // Try alternate variants
         for variant in ["EA", "EB", "EC"] {
-            let prefix = campaignState.currentFaction == "GDI" ? "SCG" : "SCB"
-            let num = String(format: "%02d", campaignState.currentMission)
+            let prefix = session.campaignState.currentFaction == "GDI" ? "SCG" : "SCB"
+            let num = String(format: "%02d", session.campaignState.currentMission)
             let altName = "\(prefix)\(num)\(variant)"
             if mixManager.contains("\(altName).INI") {
-                campaignState.currentVariant = variant
+                session.campaignState.currentVariant = variant
                 return startNextMission()
             }
         }
@@ -548,21 +547,20 @@ func startNextMission() -> Bool {
     initGameWorld(scenario: scenario, scenarioName: scenName)
 
     // Apply carry-over credits
-    sidebarCredits += campaignState.carryOverCredits
+    session.sidebarCredits += session.campaignState.carryOverCredits
 
     // Reset score for new mission
-    missionScore.reset()
-    lastTickTime = 0
-    tickAccumulator = 0
+    session.missionScore.reset()
+    session.lastTickTime = 0
+    session.tickAccumulator = 0
 
-    print("Campaign: Started mission \(scenName) with \(campaignState.carryOverCredits) carry-over credits")
+    print("Campaign: Started mission \(scenName) with \(session.campaignState.carryOverCredits) carry-over credits")
     return true
 }
 
 // MARK: - Helper Functions
 
-/// Current scenario name tracking
-var currentScenarioName: String? = nil
+// session.currentScenarioName -- now in session
 
 func objectKindString(_ kind: ObjectKind) -> String {
     switch kind {
@@ -664,23 +662,23 @@ struct ScoreScreenData {
 
 /// Generate score screen data for the completed mission
 func generateScoreScreen(won: Bool) -> ScoreScreenData {
-    let ticks = missionScore.elapsedTicks
+    let ticks = session.missionScore.elapsedTicks
     let minutes = ticks / (15 * 60)
     let seconds = (ticks / 15) % 60
     let timeStr = String(format: "%d:%02d", minutes, seconds)
 
     return ScoreScreenData(
-        scenarioName: currentScenarioName ?? "Unknown",
+        scenarioName: session.currentScenarioName ?? "Unknown",
         won: won,
-        score: missionScore.totalScore,
-        stars: missionScore.starRating,
-        gdiKills: missionScore.gdiUnitsKilled,
-        nodKills: missionScore.nodUnitsKilled,
-        civKills: missionScore.civUnitsKilled,
-        gdiBuildings: missionScore.gdiBuildingsKilled,
-        nodBuildings: missionScore.nodBuildingsKilled,
-        creditsHarvested: missionScore.creditsHarvested,
+        score: session.missionScore.totalScore,
+        stars: session.missionScore.starRating,
+        gdiKills: session.missionScore.gdiUnitsKilled,
+        nodKills: session.missionScore.nodUnitsKilled,
+        civKills: session.missionScore.civUnitsKilled,
+        gdiBuildings: session.missionScore.gdiBuildingsKilled,
+        nodBuildings: session.missionScore.nodBuildingsKilled,
+        creditsHarvested: session.missionScore.creditsHarvested,
         elapsedTime: timeStr,
-        briefing: getBriefingText(scenarioName: currentScenarioName ?? "")
+        briefing: getBriefingText(scenarioName: session.currentScenarioName ?? "")
     )
 }

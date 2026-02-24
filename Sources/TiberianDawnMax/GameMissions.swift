@@ -7,7 +7,7 @@ import Foundation
 
 /// Guard area: patrol around initial position, return if strayed too far
 func tickGuardArea(_ obj: GameObject) {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
 
     // Save home position on first tick of this mission
     if obj.missionStatus == 0 {
@@ -102,7 +102,7 @@ func tickHunt(_ obj: GameObject) {
 
 /// Retreat: flee to nearest friendly building
 func tickRetreat(_ obj: GameObject) {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
 
     // If we have a move target, keep moving
     if obj.moveTargetX != nil {
@@ -201,7 +201,7 @@ func tickReturn(_ obj: GameObject) {
 
 /// Capture: engineer moves to and captures enemy building
 func tickCapture(_ obj: GameObject) {
-    guard gameWorld != nil else { return }
+    guard session.world != nil else { return }
 
     // Only infantry can capture
     guard obj.kind == .infantry else {
@@ -285,7 +285,7 @@ func tickUnload(_ obj: GameObject) {
 
 /// MCV deployment: transform into a Construction Yard
 func tickMCVDeploy(_ obj: GameObject) {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
 
     // Check if the 3x3 area is clear for the construction yard
     let centerCellX = obj.cellX
@@ -378,7 +378,7 @@ func tickBuildingRepair(_ obj: GameObject) {
     }
 
     // Only process every 4 ticks
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
     guard world.tickCount % 4 == 0 else { return }
 
     // Cost per repair step: proportional to building cost
@@ -396,8 +396,8 @@ func tickBuildingRepair(_ obj: GameObject) {
         obj.strength = min(obj.maxStrength, obj.strength + repairStep)
 
         // Deduct from sidebar credits if player building
-        if obj.house == gameWorld?.playerHouse {
-            sidebarCredits = houseState.credits
+        if obj.house == session.world?.playerHouse {
+            session.sidebarCredits = houseState.credits
         }
     } else {
         // Can't afford — stop repairing
@@ -422,12 +422,12 @@ func tickBuildingSell(_ obj: GameObject) {
     houseState.addCredits(refundAmount)
 
     // Update sidebar credits if player
-    if obj.house == gameWorld?.playerHouse {
-        sidebarCredits += refundAmount
+    if obj.house == session.world?.playerHouse {
+        session.sidebarCredits += refundAmount
     }
 
     // Spawn crew (1-5 minigunners based on building cost)
-    if let world = gameWorld {
+    if let world = session.world {
         let crewCount = min(5, max(1, obj.cost / 400))
         for i in 0..<crewCount {
             let offset = Double(i) * 12.0 - Double(crewCount - 1) * 6.0

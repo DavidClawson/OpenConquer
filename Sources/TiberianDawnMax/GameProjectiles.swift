@@ -49,8 +49,6 @@ class Projectile {
 
 // MARK: - Projectile Manager
 
-var activeProjectiles: [Projectile] = []
-private var nextProjectileId: Int = 1
 
 /// Spawn a visible projectile from attacker toward target
 func spawnProjectile(bulletType: BulletType, from attacker: GameObject,
@@ -93,7 +91,7 @@ func spawnProjectile(bulletType: BulletType, from attacker: GameObject,
     let facing = directionToFacing(dx: dx, dy: dy)
 
     let proj = Projectile(
-        id: nextProjectileId,
+        id: session.nextProjectileId,
         bulletType: bulletType,
         data: bData,
         startX: startX, startY: startY,
@@ -104,15 +102,15 @@ func spawnProjectile(bulletType: BulletType, from attacker: GameObject,
         warhead: warhead,
         sourceHouse: attacker.house
     )
-    nextProjectileId += 1
-    activeProjectiles.append(proj)
+    session.nextProjectileId += 1
+    session.activeProjectiles.append(proj)
 }
 
 /// Tick all active projectiles
 func tickProjectiles() {
-    guard let world = gameWorld else { return }
+    guard let world = session.world else { return }
 
-    for proj in activeProjectiles {
+    for proj in session.activeProjectiles {
         guard !proj.isFinished else { continue }
         proj.age += 1
 
@@ -199,7 +197,7 @@ func tickProjectiles() {
     }
 
     // Remove finished projectiles
-    activeProjectiles.removeAll { $0.isFinished }
+    session.activeProjectiles.removeAll { $0.isFinished }
 }
 
 // MARK: - Projectile Rendering
@@ -207,7 +205,7 @@ func tickProjectiles() {
 func renderProjectiles(_ renderer: OpaquePointer?, camX: Int, camY: Int, vw: Int32, vh: Int32) {
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
 
-    for proj in activeProjectiles {
+    for proj in session.activeProjectiles {
         if proj.isFinished { continue }
 
         let screenX = Int32(proj.worldX) - Int32(camX)
@@ -218,7 +216,7 @@ func renderProjectiles(_ renderer: OpaquePointer?, camX: Int, camY: Int, vw: Int
 
         // Try to render from remastered/SHP sprite
         let spriteName = proj.bulletData.iniName
-        let theater = gameWorld?.theater ?? .temperate
+        let theater = session.world?.theater ?? .temperate
 
         // For facing-based projectiles (missiles), compute the sprite frame
         let spriteFrame: Int
