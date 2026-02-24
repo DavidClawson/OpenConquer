@@ -473,10 +473,13 @@ class AudioManager {
     // Music state
     var currentTheme: ThemeType = .none
     var musicSamples: [Int16] = []
+    var musicSampleRate: Int = 22050
     var musicOffset: Int = 0
     var isMusicPlaying: Bool = false
     var isMusicLooping: Bool = false  // Don't loop single tracks; advance playlist
     var musicEnabled: Bool = true
+    var musicLoading: Bool = false  // True while async loading in progress
+    var needsNextTrack: Bool = false  // Flag to advance track outside tick()
 
     // Playlist
     var musicPlaylist: [ThemeType] = []
@@ -665,24 +668,75 @@ class AudioManager {
 
     // MARK: - Music
 
-    /// Start playing a theme track
+    /// Start playing a theme track (loads asynchronously to avoid blocking UI)
     func playTheme(_ theme: ThemeType) {
         guard isInitialized && theme != .none else { return }
 
         let name = theme.filename
         guard !name.isEmpty else { return }
 
-        if !loadSound(name) {
-            print("AudioManager: Theme '\(name)' not found")
+        // Stop current music while loading
+        isMusicPlaying = false
+        musicLoading = true
+        currentTheme = theme
+
+        // Check cache first (already decoded)
+        if let samples = soundCache[name] {
+            musicSamples = samples
+            musicSampleRate = soundSampleRates[name] ?? outputSampleRate
+            musicOffset = 0
+            musicLoading = false
+            isMusicPlaying = true
+            print("AudioManager: Playing theme '\(theme.title)' (cached)")
             return
         }
 
-        guard let samples = soundCache[name] else { return }
-        musicSamples = samples
-        musicOffset = 0
-        currentTheme = theme
-        isMusicPlaying = true
-        print("AudioManager: Playing theme '\(theme.title)'")
+        // Load asynchronously on background thread
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+
+            var loaded = false
+            var decodedSamples: [Int16] = []
+            var sampleRate = self.outputSampleRate
+
+            // Try SoundLibrary (WAV) first
+            if let lib = self.soundLibrary, let audio = lib.load(name) {
+                decodedSamples = audio.samples
+                sampleRate = audio.sampleRate
+                loaded = true
+            }
+
+            // Try AUD from MIX
+            if !loaded {
+                let audName = "\(name).AUD"
+                if let data = mixManager.retrieve(audName) {
+                    if let decoded = decodeAUD(Data(data)) {
+                        decodedSamples = decoded.samples
+                        sampleRate = decoded.sampleRate
+                        loaded = true
+                    }
+                }
+            }
+
+            // Apply on main thread
+            DispatchQueue.main.async {
+                if loaded && self.currentTheme == theme {
+                    self.soundCache[name] = decodedSamples
+                    self.soundSampleRates[name] = sampleRate
+                    self.musicSamples = decodedSamples
+                    self.musicSampleRate = sampleRate
+                    self.musicOffset = 0
+                    self.musicLoading = false
+                    self.isMusicPlaying = true
+                    print("AudioManager: Playing theme '\(theme.title)' (\(decodedSamples.count) samples, \(sampleRate)Hz)")
+                } else {
+                    self.musicLoading = false
+                    if !loaded {
+                        print("AudioManager: Theme '\(name)' not found")
+                    }
+                }
+            }
+        }
     }
 
     /// Stop music
@@ -759,6 +813,12 @@ class AudioManager {
     func tick() {
         guard isInitialized else { return }
 
+        // Handle deferred track advance (loaded outside the mixing loop)
+        if needsNextTrack && !musicLoading {
+            needsNextTrack = false
+            nextTrack()
+        }
+
         // Only queue audio when there's something to play — avoids latency buildup
         let hasAudio = !activeSounds.isEmpty || activeSpeech != nil ||
                        (isMusicPlaying && !musicSamples.isEmpty)
@@ -767,11 +827,13 @@ class AudioManager {
         // Keep the queue fed but not overstuffed — target ~100ms of buffered audio.
         // If the queue already has enough, skip this frame to avoid latency buildup.
         let queued = SDL_GetQueuedAudioSize(audioDevice)
-        let targetQueueBytes = UInt32(outputSampleRate / 10 * 2)  // ~100ms in bytes
+        let targetQueueBytes = UInt32(outputSampleRate / 5 * 2)  // ~200ms in bytes
         if queued > targetQueueBytes { return }
 
-        // Generate output buffer (~1/30th second at output rate)
-        let bufferSize = outputSampleRate / 30
+        // Generate enough audio to cover the gap until next tick.
+        // At 15 FPS game loop, we need ~67ms of audio per tick.
+        // Generate ~100ms to provide headroom against frame time variation.
+        let bufferSize = outputSampleRate / 10
         var mixBuffer = [Float](repeating: 0.0, count: bufferSize)
 
         // Mix active sound effects
@@ -800,24 +862,31 @@ class AudioManager {
             }
         }
 
-        // Mix music
+        // Mix music (with proper resampling for sample rate differences)
         if isMusicPlaying && !musicSamples.isEmpty {
             let musicVol = musicVolume * masterVolume
+            let ratio = Double(musicSampleRate) / Double(outputSampleRate)
+            var srcPos = Double(musicOffset)
+
             for i in 0..<bufferSize {
-                if musicOffset < musicSamples.count {
-                    mixBuffer[i] += Float(musicSamples[musicOffset]) * musicVol
-                    musicOffset += 1
+                let srcIdx = Int(srcPos)
+                if srcIdx < musicSamples.count {
+                    // Linear interpolation for smoother resampling
+                    let frac = Float(srcPos - Double(srcIdx))
+                    let s0 = Float(musicSamples[srcIdx])
+                    let s1 = srcIdx + 1 < musicSamples.count ? Float(musicSamples[srcIdx + 1]) : s0
+                    mixBuffer[i] += (s0 + (s1 - s0) * frac) * musicVol
+                    srcPos += ratio
                 } else if isMusicLooping {
-                    musicOffset = 0
+                    srcPos = 0
                 } else {
                     isMusicPlaying = false
-                    // Auto-play next track from playlist
-                    if !musicPlaylist.isEmpty {
-                        nextTrack()
-                    }
+                    // Flag for next track — don't load synchronously inside tick()
+                    needsNextTrack = !musicPlaylist.isEmpty
                     break
                 }
             }
+            musicOffset = Int(srcPos)
         }
 
         // Convert to Int16 and queue
