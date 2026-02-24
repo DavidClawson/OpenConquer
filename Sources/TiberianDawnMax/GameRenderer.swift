@@ -210,9 +210,6 @@ func renderGame(_ renderer: OpaquePointer?) {
         let screenX = Int32(drawX - Double(camX))
         let screenY = Int32(drawY - Double(camY))
 
-        // Check if damaged recently (red flash for 3 ticks)
-        let isDamageFlash = (world.tickCount - obj.lastDamagedTick) < 3 && obj.lastDamagedTick > 0
-
         if obj.kind == .unit {
             let facingIdx = facing32[min(255, max(0, obj.facing))]
             let frameIdx = bodyShape[facingIdx]
@@ -235,10 +232,8 @@ func renderGame(_ renderer: OpaquePointer?) {
                 if let info = getObjectTexture(renderer, typeName: obj.typeName, frame: frameIdx, house: obj.house) {
                     let drawX = screenX - Int32(info.width) / 2
                     let drawY = elevatedY - Int32(info.height) / 2
-                    if isDamageFlash { SDL_SetTextureColorMod(info.texture, 255, 80, 80) }
                     var dstRect = SDL_Rect(x: drawX, y: drawY, w: Int32(info.width), h: Int32(info.height))
                     SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
-                    if isDamageFlash { SDL_SetTextureColorMod(info.texture, 255, 255, 255) }
                 } else {
                     // Procedural aircraft: diamond shape
                     let hc = obj.house.displayColor
@@ -262,14 +257,8 @@ func renderGame(_ renderer: OpaquePointer?) {
                 let drawY = screenY - Int32(info.height) / 2
                 if drawX > vw || drawY > vh ||
                    drawX + Int32(info.width) < 0 || drawY + Int32(info.height) < 0 { continue }
-                if isDamageFlash {
-                    SDL_SetTextureColorMod(info.texture, 255, 80, 80)
-                }
                 var dstRect = SDL_Rect(x: drawX, y: drawY, w: Int32(info.width), h: Int32(info.height))
                 SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
-                if isDamageFlash {
-                    SDL_SetTextureColorMod(info.texture, 255, 255, 255)
-                }
             } else {
                 let unitSize: Int32 = 16
                 let hc = obj.house.displayColor
@@ -320,14 +309,8 @@ func renderGame(_ renderer: OpaquePointer?) {
                 let drawY = screenY - Int32(info.height) / 2
                 if drawX > vw || drawY > vh ||
                    drawX + Int32(info.width) < 0 || drawY + Int32(info.height) < 0 { continue }
-                if isDamageFlash {
-                    SDL_SetTextureColorMod(info.texture, 255, 80, 80)
-                }
                 var dstRect = SDL_Rect(x: drawX, y: drawY, w: Int32(info.width), h: Int32(info.height))
                 SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
-                if isDamageFlash {
-                    SDL_SetTextureColorMod(info.texture, 255, 255, 255)
-                }
             } else {
                 let dotSize: Int32 = 6
                 let hc = obj.house.displayColor
@@ -341,37 +324,7 @@ func renderGame(_ renderer: OpaquePointer?) {
     // === Pass 4a: Animations (explosions, fires, effects) ===
     renderAnimations(renderer, camX: camX, camY: camY, vw: vw, vh: vh)
 
-    // === Pass 4b: Muzzle flash effects ===
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
-    for obj in world.objects {
-        let flashDuration = (world.tickCount - obj.lastFireTick)
-        guard flashDuration < 3 && obj.lastFireTick > 0 else { continue }
-        if obj.house != world.playerHouse && !isCellVisible(obj.cell) { continue }
-
-        let screenX = Int32(obj.worldX - Double(camX))
-        let screenY = Int32(obj.worldY - Double(camY))
-
-        // Offset flash toward the facing direction
-        let faceRad = Double(obj.facing) / 256.0 * 2.0 * Double.pi
-        let flashDist = (obj.kind == .infantry) ? 6.0 : 10.0
-        let fx = screenX + Int32(sin(faceRad) * flashDist)
-        let fy = screenY - Int32(cos(faceRad) * flashDist)
-
-        let alpha = UInt8(max(0, 255 - flashDuration * 80))
-        let radius: Int32 = (obj.kind == .infantry) ? 3 : 5
-
-        // Bright yellow-white core
-        SDL_SetRenderDrawColor(renderer, 255, 255, 200, alpha)
-        var coreRect = SDL_Rect(x: fx - radius, y: fy - radius, w: radius * 2, h: radius * 2)
-        SDL_RenderFillRect(renderer, &coreRect)
-
-        // Outer glow
-        SDL_SetRenderDrawColor(renderer, 255, 200, 50, alpha / 2)
-        var glowRect = SDL_Rect(x: fx - radius - 1, y: fy - radius - 1, w: radius * 2 + 2, h: radius * 2 + 2)
-        SDL_RenderDrawRect(renderer, &glowRect)
-    }
-
-    // === Pass 4c: In-flight projectiles (missiles, shells, grenades) ===
+    // === Pass 4b: In-flight projectiles (missiles, shells, grenades) ===
     renderProjectiles(renderer, camX: camX, camY: camY, vw: vw, vh: vh)
 
     // === Pass 5: Selection highlights ===
@@ -487,15 +440,11 @@ func renderGame(_ renderer: OpaquePointer?) {
 
     // Win/Lose state display
     if session.triggerWinState == .won {
-        drawText(renderer, "MISSION ACCOMPLISHED", centerX: gameViewportCenter, centerY: renderState.windowHeight / 2 - 40, color: .green, scale: 3)
-        let scoreData = generateScoreScreen(won: true)
-        drawText(renderer, "Score: \(scoreData.score)  Time: \(scoreData.elapsedTime)", centerX: gameViewportCenter, centerY: renderState.windowHeight / 2, color: .amber, scale: 1)
-        drawText(renderer, "N: Next Mission  R: Restart  ESC: Menu", centerX: gameViewportCenter, centerY: renderState.windowHeight / 2 + 25, color: .gray, scale: 1)
+        drawText(renderer, "MISSION ACCOMPLISHED", centerX: gameViewportCenter, centerY: renderState.windowHeight / 2 - 20, color: .green, scale: 3)
+        drawText(renderer, "Press Enter for Score", centerX: gameViewportCenter, centerY: renderState.windowHeight / 2 + 20, color: .amber, scale: 2)
     } else if session.triggerWinState == .lost {
-        drawText(renderer, "MISSION FAILED", centerX: gameViewportCenter, centerY: renderState.windowHeight / 2 - 40, color: .red, scale: 3)
-        let scoreData = generateScoreScreen(won: false)
-        drawText(renderer, "Score: \(scoreData.score)  Time: \(scoreData.elapsedTime)", centerX: gameViewportCenter, centerY: renderState.windowHeight / 2, color: .amber, scale: 1)
-        drawText(renderer, "R: Restart  ESC: Menu", centerX: gameViewportCenter, centerY: renderState.windowHeight / 2 + 25, color: .gray, scale: 1)
+        drawText(renderer, "MISSION FAILED", centerX: gameViewportCenter, centerY: renderState.windowHeight / 2 - 20, color: .red, scale: 3)
+        drawText(renderer, "Press Enter for Score  R: Restart", centerX: gameViewportCenter, centerY: renderState.windowHeight / 2 + 20, color: .amber, scale: 2)
     }
 
     drawText(renderer, "RClick: Move/Attack  F3: Perf  F5: Save  F9: Load  Esc: Menu",

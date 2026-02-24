@@ -4,7 +4,7 @@ import Foundation
 
 enum Faction: String { case gdi = "GDI"; case nod = "NOD" }
 enum Difficulty: String, CaseIterable { case easy = "Easy"; case normal = "Normal"; case hard = "Hard" }
-enum MenuState { case main, chooseDifficulty, chooseFaction, launching(Faction, Difficulty), spriteViewer, soundTest, mapViewer, playing }
+enum MenuState { case main, chooseDifficulty, chooseFaction, launching(Faction, Difficulty), missionBriefing, spriteViewer, soundTest, mapViewer, playing, scoreScreen(won: Bool) }
 
 // MARK: - Sub-Containers
 

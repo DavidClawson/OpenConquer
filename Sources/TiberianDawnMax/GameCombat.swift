@@ -210,6 +210,13 @@ extension GameObject {
                 reloadTimer = resolved.reloadTicks
                 lastFireTick = world.tickCount
 
+                // Spawn muzzle flash animation at barrel position
+                let faceRad = Double(facing) / 256.0 * 2.0 * Double.pi
+                let flashDist = (kind == .infantry) ? 6.0 : 10.0
+                let mfx = worldX + sin(faceRad) * flashDist
+                let mfy = worldY - cos(faceRad) * flashDist
+                spawnAnimation(.muzzleFlash, worldX: mfx, worldY: mfy)
+
                 // Decrement ammo if limited
                 if ammo > 0 {
                     ammo -= 1

@@ -152,31 +152,14 @@ func renderMenuState(_ renderer: OpaquePointer?, state: MenuState) {
         session.campaignState.carryOverCredits = 0
         session.campaignState.completedMissions.removeAll()
 
-        // Load first scenario using existing startNextMission()
-        if startNextMission() {
-            // Initialize game camera — center on player start waypoint 98, or map bounds
-            if let scenario = scenarioData,
-               let startWP = scenario.waypoints.first(where: { $0.id == 98 }) {
-                let pos = cellToPixel(startWP.cell)
-                let vpW = Double(renderState.windowWidth - sidebarWidth)
-                let vpH = Double(renderState.windowHeight)
-                renderState.gameCameraX = Double(pos.px) - vpW / 2.0
-                renderState.gameCameraY = Double(pos.py) - vpH / 2.0
-            } else if let bounds = session.world?.mapBounds {
-                renderState.gameCameraX = Double(bounds.x * 24)
-                renderState.gameCameraY = Double(bounds.y * 24)
-            }
-            renderState.gameZoomLevel = 1.0
-            session.lastTickTime = 0
-            session.tickAccumulator = 0
-            session.missionScore.reset()
-            session.triggerWinState = .playing
-            session.menuState = .playing
-        } else {
-            // Fallback if scenario not found
-            print("Failed to load first mission for \(faction.rawValue)")
-            session.menuState = .main
-        }
+        // Show mission briefing before starting
+        session.menuState = .missionBriefing
+
+    case .missionBriefing:
+        renderMissionBriefing(renderer)
+
+    case .scoreScreen(let won):
+        renderScoreScreen(renderer, won: won)
 
     case .spriteViewer:
         let shapeName = viewableShapes[renderState.spriteViewerIndex]
@@ -251,4 +234,126 @@ func renderMenuState(_ renderer: OpaquePointer?, state: MenuState) {
     case .playing:
         renderGame(renderer)
     }
+}
+
+// MARK: - Mission Briefing Screen
+
+func renderMissionBriefing(_ renderer: OpaquePointer?) {
+    let cx = renderState.windowWidth / 2
+    let faction = session.campaignState.currentFaction
+    let missionNum = session.campaignState.currentMission
+    let scenName = session.campaignState.scenarioName
+
+    // Title
+    let factionColor: Color = faction == "GDI" ? .amber : .red
+    drawText(renderer, "\(faction) Campaign", centerX: cx, centerY: 50, color: factionColor, scale: 3)
+    drawText(renderer, "Mission \(missionNum)", centerX: cx, centerY: 100, color: .green, scale: 3)
+
+    // Briefing text
+    let briefing = getBriefingText(scenarioName: scenName)
+    if let briefing = briefing, !briefing.isEmpty {
+        // Word-wrap briefing text to fit screen
+        let maxCharsPerLine = Int((renderState.windowWidth - 100) / 12)  // scale 2 chars are ~12px wide
+        let lines = wordWrap(briefing, maxWidth: maxCharsPerLine)
+        var y: Int32 = 160
+        for line in lines {
+            drawText(renderer, line, centerX: cx, centerY: y, color: .green, scale: 2)
+            y += 22
+            if y > renderState.windowHeight - 100 { break }
+        }
+    } else {
+        drawText(renderer, "No briefing available", centerX: cx, centerY: 200, color: .gray, scale: 2)
+    }
+
+    // Difficulty
+    let diffLabel = session.campaignState.difficulty == 0 ? "Easy" :
+                    session.campaignState.difficulty == 1 ? "Normal" : "Hard"
+    drawText(renderer, "Difficulty: \(diffLabel)", centerX: cx, centerY: renderState.windowHeight - 80, color: .gray, scale: 1)
+
+    // Prompt
+    drawText(renderer, "Press Enter to Begin", centerX: cx, centerY: renderState.windowHeight - 50, color: .amber, scale: 2)
+    drawText(renderer, "Esc: Cancel", centerX: cx, centerY: renderState.windowHeight - 25, color: .gray, scale: 1)
+}
+
+// MARK: - Score Screen
+
+func renderScoreScreen(_ renderer: OpaquePointer?, won: Bool) {
+    let cx = renderState.windowWidth / 2
+    let scoreData = generateScoreScreen(won: won)
+
+    // Title
+    if won {
+        drawText(renderer, "MISSION ACCOMPLISHED", centerX: cx, centerY: 50, color: .green, scale: 3)
+    } else {
+        drawText(renderer, "MISSION FAILED", centerX: cx, centerY: 50, color: .red, scale: 3)
+    }
+
+    // Scenario name
+    drawText(renderer, scoreData.scenarioName, centerX: cx, centerY: 95, color: .amber, scale: 2)
+
+    // Score and time
+    drawText(renderer, "Score: \(scoreData.score)", centerX: cx, centerY: 140, color: .green, scale: 3)
+
+    // Star rating
+    let stars = String(repeating: "*", count: scoreData.stars)
+    let emptyStars = String(repeating: "-", count: 3 - scoreData.stars)
+    drawText(renderer, "Rating: \(stars)\(emptyStars)", centerX: cx, centerY: 180, color: .amber, scale: 2)
+
+    // Time
+    drawText(renderer, "Time: \(scoreData.elapsedTime)", centerX: cx, centerY: 215, color: .green, scale: 2)
+
+    // Stats table
+    let statY: Int32 = 260
+    let leftX = cx - 160
+    let rightX = cx + 60
+
+    drawText(renderer, "-- STATISTICS --", centerX: cx, centerY: statY, color: .amber, scale: 2)
+
+    drawTextLeft(renderer, "GDI Units Destroyed:", x: leftX, y: statY + 35, color: .green, scale: 1)
+    drawTextLeft(renderer, "\(scoreData.gdiKills)", x: rightX + 100, y: statY + 35, color: .green, scale: 1)
+
+    drawTextLeft(renderer, "NOD Units Destroyed:", x: leftX, y: statY + 55, color: .green, scale: 1)
+    drawTextLeft(renderer, "\(scoreData.nodKills)", x: rightX + 100, y: statY + 55, color: .green, scale: 1)
+
+    drawTextLeft(renderer, "Civilians Killed:", x: leftX, y: statY + 75, color: .green, scale: 1)
+    drawTextLeft(renderer, "\(scoreData.civKills)", x: rightX + 100, y: statY + 75, color: .green, scale: 1)
+
+    drawTextLeft(renderer, "Buildings Destroyed:", x: leftX, y: statY + 95, color: .green, scale: 1)
+    drawTextLeft(renderer, "\(scoreData.gdiBuildings + scoreData.nodBuildings)", x: rightX + 100, y: statY + 95, color: .green, scale: 1)
+
+    drawTextLeft(renderer, "Credits Harvested:", x: leftX, y: statY + 115, color: .green, scale: 1)
+    drawTextLeft(renderer, "\(scoreData.creditsHarvested)", x: rightX + 100, y: statY + 115, color: .green, scale: 1)
+
+    // Controls
+    if won && session.campaignState.isActive && !session.campaignState.isComplete {
+        drawText(renderer, "N: Next Mission  R: Restart  Esc: Menu", centerX: cx, centerY: renderState.windowHeight - 40, color: .amber, scale: 2)
+    } else if won && session.campaignState.isComplete {
+        drawText(renderer, "Campaign Complete!", centerX: cx, centerY: renderState.windowHeight - 70, color: .green, scale: 2)
+        drawText(renderer, "Esc: Main Menu", centerX: cx, centerY: renderState.windowHeight - 40, color: .amber, scale: 2)
+    } else {
+        drawText(renderer, "R: Restart  Esc: Menu", centerX: cx, centerY: renderState.windowHeight - 40, color: .amber, scale: 2)
+    }
+}
+
+// MARK: - Word Wrap Helper
+
+func wordWrap(_ text: String, maxWidth: Int) -> [String] {
+    let words = text.components(separatedBy: " ")
+    var lines: [String] = []
+    var currentLine = ""
+
+    for word in words {
+        if currentLine.isEmpty {
+            currentLine = word
+        } else if currentLine.count + 1 + word.count <= maxWidth {
+            currentLine += " " + word
+        } else {
+            lines.append(currentLine)
+            currentLine = word
+        }
+    }
+    if !currentLine.isEmpty {
+        lines.append(currentLine)
+    }
+    return lines
 }

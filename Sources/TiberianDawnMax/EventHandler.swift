@@ -14,6 +14,8 @@ func handleKeyDown(_ key: Int32) {
             session.menuState = .chooseDifficulty
         case .launching:
             session.menuState = .chooseFaction
+        case .missionBriefing:
+            session.menuState = .main
         case .spriteViewer:
             session.menuState = .main
         case .soundTest:
@@ -32,6 +34,8 @@ func handleKeyDown(_ key: Int32) {
                 SDL_ShowCursor(SDL_ENABLE)
                 renderState.systemCursorHidden = false
             }
+        case .scoreScreen:
+            session.menuState = .main
         }
     }
     // Global: F3 toggles performance overlay
@@ -114,6 +118,50 @@ func handleKeyDown(_ key: Int32) {
             }
         }
     }
+    // Mission briefing: any key to start
+    if case .missionBriefing = session.menuState {
+        if key == Int32(SDLK_RETURN.rawValue) || key == Int32(SDLK_SPACE.rawValue) {
+            // Launch the mission
+            if startNextMission() {
+                // Initialize game camera
+                if let scenario = scenarioData,
+                   let startWP = scenario.waypoints.first(where: { $0.id == 98 }) {
+                    let pos = cellToPixel(startWP.cell)
+                    let vpW = Double(renderState.windowWidth - sidebarWidth)
+                    let vpH = Double(renderState.windowHeight)
+                    renderState.gameCameraX = Double(pos.px) - vpW / 2.0
+                    renderState.gameCameraY = Double(pos.py) - vpH / 2.0
+                } else if let bounds = session.world?.mapBounds {
+                    renderState.gameCameraX = Double(bounds.x * 24)
+                    renderState.gameCameraY = Double(bounds.y * 24)
+                }
+                renderState.gameZoomLevel = 1.0
+                session.lastTickTime = 0
+                session.tickAccumulator = 0
+                session.missionScore.reset()
+                session.triggerWinState = .playing
+                session.menuState = .playing
+            } else {
+                session.menuState = .main
+            }
+        }
+    }
+    // Score screen: N for next mission, R for restart, ESC for menu
+    if case .scoreScreen(let won) = session.menuState {
+        if key == Int32(SDLK_n.rawValue) && won && session.campaignState.isActive {
+            handleMissionWin()
+            if !session.campaignState.isComplete {
+                // Show briefing for next mission
+                session.menuState = .missionBriefing
+            } else {
+                session.menuState = .main
+            }
+        } else if key == Int32(SDLK_r.rawValue) {
+            restartMission()
+            session.triggerWinState = .playing
+            session.menuState = .playing
+        }
+    }
     // Playing state key controls
     if case .playing = session.menuState {
         if key == Int32(SDLK_EQUALS.rawValue) {
@@ -128,23 +176,20 @@ func handleKeyDown(_ key: Int32) {
             if quickLoad() {
                 print("Quick loaded!")
             }
+        } else if key == Int32(SDLK_RETURN.rawValue) || key == Int32(SDLK_SPACE.rawValue) {
+            // Transition to score screen on win/loss
+            if session.triggerWinState == .won {
+                session.missionScore.elapsedTicks = session.world?.tickCount ?? 0
+                session.menuState = .scoreScreen(won: true)
+            } else if session.triggerWinState == .lost {
+                session.missionScore.elapsedTicks = session.world?.tickCount ?? 0
+                session.menuState = .scoreScreen(won: false)
+            }
         } else if key == Int32(SDLK_r.rawValue) {
-            // Restart mission
+            // Restart mission (quick shortcut)
             if session.triggerWinState != .playing {
                 restartMission()
                 session.triggerWinState = .playing
-            }
-        } else if key == Int32(SDLK_n.rawValue) {
-            // Next mission (after win)
-            if session.triggerWinState == .won && session.campaignState.isActive {
-                handleMissionWin()
-                if !session.campaignState.isComplete {
-                    if startNextMission() {
-                        session.triggerWinState = .playing
-                    }
-                } else {
-                    session.menuState = .main
-                }
             }
         }
     }
@@ -242,6 +287,8 @@ func handleMouseButtonDown(_ event: SDL_Event) {
         case .soundTest: buttons = []
         case .mapViewer: buttons = []
         case .launching: buttons = []
+        case .missionBriefing: buttons = []
+        case .scoreScreen: buttons = []
         case .playing: buttons = []
         }
         for btn in buttons {

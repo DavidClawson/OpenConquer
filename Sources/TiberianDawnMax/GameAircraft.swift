@@ -221,6 +221,10 @@ extension GameObject {
                 }
 
                 lastFireTick = world.tickCount
+
+                // Spawn muzzle flash at aircraft position
+                spawnAnimation(.muzzleFlash, worldX: worldX, worldY: worldY)
+
                 let died = target.applyDamage(amount: resolved.damage, warhead: resolved.warhead)
                 target.lastWhoHurtMe = house
 
