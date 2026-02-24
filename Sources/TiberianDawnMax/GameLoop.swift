@@ -100,7 +100,7 @@ func gameTick() {
         case .attack:
             obj.tickAttack()
         case .harvest:
-            tickHarvest(obj)
+            obj.tickHarvest()
         case .guard_:
             // Auto-target enemies for armed units/structures
             if obj.isArmed {

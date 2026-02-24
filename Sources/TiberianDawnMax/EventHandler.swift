@@ -5,21 +5,21 @@ import Foundation
 
 func handleKeyDown(_ key: Int32) {
     if key == Int32(SDLK_ESCAPE.rawValue) {
-        switch menuState {
+        switch session.menuState {
         case .main:
-            running = false
+            session.running = false
         case .chooseDifficulty:
-            menuState = .main
+            session.menuState = .main
         case .chooseFaction:
-            menuState = .chooseDifficulty
+            session.menuState = .chooseDifficulty
         case .launching:
-            menuState = .chooseFaction
+            session.menuState = .chooseFaction
         case .spriteViewer:
-            menuState = .main
+            session.menuState = .main
         case .soundTest:
-            menuState = .main
+            session.menuState = .main
         case .mapViewer:
-            menuState = .main
+            session.menuState = .main
         case .playing:
             if session.isPlacingStructure {
                 session.isPlacingStructure = false
@@ -27,7 +27,7 @@ func handleKeyDown(_ key: Int32) {
             } else if let world = session.world, !world.selectedObjects().isEmpty {
                 world.deselectAll()
             } else {
-                menuState = .mapViewer
+                session.menuState = .mapViewer
                 // Restore system cursor when leaving game
                 SDL_ShowCursor(SDL_ENABLE)
                 renderState.systemCursorHidden = false
@@ -39,7 +39,7 @@ func handleKeyDown(_ key: Int32) {
         renderState.perfShowOverlay.toggle()
     }
     // Sprite viewer controls
-    if case .spriteViewer = menuState {
+    if case .spriteViewer = session.menuState {
         if key == Int32(SDLK_RIGHT.rawValue) || key == Int32(SDLK_d.rawValue) {
             renderState.spriteViewerIndex = (renderState.spriteViewerIndex + 1) % viewableShapes.count
             loadCurrentSprite()
@@ -59,17 +59,17 @@ func handleKeyDown(_ key: Int32) {
         }
     }
     // Sound test controls
-    if case .soundTest = menuState {
-        handleSoundTestKey(key)
+    if case .soundTest = session.menuState {
+        session.soundTest.handleKey(key)
     }
     // Map viewer controls: [ and ] to cycle scenarios, +/- to zoom
-    if case .mapViewer = menuState {
+    if case .mapViewer = session.menuState {
         if key == Int32(SDLK_RIGHTBRACKET.rawValue) {
-            scenarioIndex = (scenarioIndex + 1) % scenarioList.count
-            loadMapViewerData(scenarioList[scenarioIndex])
+            session.scenarioIndex = (session.scenarioIndex + 1) % session.scenarioList.count
+            loadMapViewerData(session.scenarioList[session.scenarioIndex])
         } else if key == Int32(SDLK_LEFTBRACKET.rawValue) {
-            scenarioIndex = (scenarioIndex - 1 + scenarioList.count) % scenarioList.count
-            loadMapViewerData(scenarioList[scenarioIndex])
+            session.scenarioIndex = (session.scenarioIndex - 1 + session.scenarioList.count) % session.scenarioList.count
+            loadMapViewerData(session.scenarioList[session.scenarioIndex])
         } else if key == Int32(SDLK_EQUALS.rawValue) {
             renderState.zoomLevel = min(3.0, renderState.zoomLevel + 0.25)
         } else if key == Int32(SDLK_MINUS.rawValue) {
@@ -85,7 +85,7 @@ func handleKeyDown(_ key: Int32) {
         } else if key == Int32(SDLK_p.rawValue) {
             // Enter playing mode
             if let sd = scenarioData {
-                let scenName = scenarioList[scenarioIndex]
+                let scenName = session.scenarioList[session.scenarioIndex]
                 initGameWorld(scenario: sd, scenarioName: scenName)
                 session.currentScenarioName = scenName
                 // Initialize game camera to match map viewer camera
@@ -95,7 +95,7 @@ func handleKeyDown(_ key: Int32) {
                 session.lastTickTime = 0
                 session.tickAccumulator = 0
                 session.missionScore.reset()
-                menuState = .playing
+                session.menuState = .playing
             }
         } else if key >= Int32(SDLK_0.rawValue) && key <= Int32(SDLK_9.rawValue) {
             let wpId = Int(key - Int32(SDLK_0.rawValue))
@@ -115,7 +115,7 @@ func handleKeyDown(_ key: Int32) {
         }
     }
     // Playing state key controls
-    if case .playing = menuState {
+    if case .playing = session.menuState {
         if key == Int32(SDLK_EQUALS.rawValue) {
             renderState.gameZoomLevel = min(3.0, renderState.gameZoomLevel + 0.25)
         } else if key == Int32(SDLK_MINUS.rawValue) {
@@ -143,7 +143,7 @@ func handleKeyDown(_ key: Int32) {
                         session.triggerWinState = .playing
                     }
                 } else {
-                    menuState = .main
+                    session.menuState = .main
                 }
             }
         }
@@ -154,18 +154,18 @@ func handleMouseMotion(_ event: SDL_Event) {
     input.mouseX = event.motion.x
     input.mouseY = event.motion.y
     // Update world coordinates for info panel
-    if case .mapViewer = menuState {
+    if case .mapViewer = session.menuState {
         input.mouseWorldX = renderState.cameraX + Int(Double(event.motion.x) / renderState.zoomLevel)
         input.mouseWorldY = renderState.cameraY + Int(Double(event.motion.y) / renderState.zoomLevel)
     }
     // Drag select tracking in playing mode
-    if case .playing = menuState {
+    if case .playing = session.menuState {
         if input.selectionBoxStartX != nil {
             handleGameLeftDrag(event.motion.x, event.motion.y)
         }
     }
     // Mouse panning in map viewer
-    if case .mapViewer = menuState, input.isPanning {
+    if case .mapViewer = session.menuState, input.isPanning {
         let dx = event.motion.xrel
         let dy = event.motion.yrel
         renderState.cameraX -= Int(Double(dx) / renderState.zoomLevel)
@@ -183,7 +183,7 @@ func handleMouseMotion(_ event: SDL_Event) {
 func handleMouseButtonUp(_ event: SDL_Event) {
     if event.button.button == UInt8(SDL_BUTTON_LEFT) {
         input.isPanning = false
-        if case .playing = menuState {
+        if case .playing = session.menuState {
             if event.button.x < renderState.windowWidth - sidebarWidth && !session.isPlacingStructure {
                 let shiftHeld = (SDL_GetModState().rawValue & UInt32(KMOD_SHIFT.rawValue)) != 0
                 handleGameLeftUp(event.button.x, event.button.y, shiftHeld: shiftHeld)
@@ -195,14 +195,14 @@ func handleMouseButtonUp(_ event: SDL_Event) {
 func handleMouseButtonDown(_ event: SDL_Event) {
     if event.button.button == UInt8(SDL_BUTTON_LEFT) {
         // Start mouse panning in map viewer
-        if case .mapViewer = menuState {
+        if case .mapViewer = session.menuState {
             input.isPanning = true
             input.lastMouseX = event.button.x
             input.lastMouseY = event.button.y
         }
 
         // Start selection in playing mode
-        if case .playing = menuState {
+        if case .playing = session.menuState {
             // Check if click is in sidebar area
             if event.button.x >= renderState.windowWidth - sidebarWidth {
                 // Check super weapon buttons first
@@ -234,7 +234,7 @@ func handleMouseButtonDown(_ event: SDL_Event) {
         }
 
         let buttons: [Button]
-        switch menuState {
+        switch session.menuState {
         case .main: buttons = makeMainButtons()
         case .chooseDifficulty: buttons = makeDifficultyButtons()
         case .chooseFaction: buttons = makeFactionButtons()
@@ -253,7 +253,7 @@ func handleMouseButtonDown(_ event: SDL_Event) {
     }
     // Right click for move order in playing mode (or cancel placement)
     if event.button.button == UInt8(SDL_BUTTON_RIGHT) {
-        if case .playing = menuState {
+        if case .playing = session.menuState {
             if session.superWeaponTargeting != nil {
                 session.superWeaponTargeting = nil
             } else if session.isRepairMode || session.isSellMode {
@@ -280,7 +280,7 @@ func handleWindowEvent(_ event: SDL_Event) {
 
 func handleContinuousInput() {
     // Map viewer camera panning (continuous key state)
-    if case .mapViewer = menuState {
+    if case .mapViewer = session.menuState {
         let panSpeed = max(1, Int(8.0 / renderState.zoomLevel))
         let visibleW = Int(Double(renderState.windowWidth) / renderState.zoomLevel)
         let visibleH = Int(Double(renderState.windowHeight) / renderState.zoomLevel)
@@ -304,7 +304,7 @@ func handleContinuousInput() {
     }
 
     // Playing state camera panning (continuous key state)
-    if case .playing = menuState {
+    if case .playing = session.menuState {
         let panSpeed = max(1.0, 8.0 / renderState.gameZoomLevel)
         let visibleW = Double(renderState.windowWidth - sidebarWidth) / renderState.gameZoomLevel
         let visibleH = Double(renderState.windowHeight) / renderState.gameZoomLevel

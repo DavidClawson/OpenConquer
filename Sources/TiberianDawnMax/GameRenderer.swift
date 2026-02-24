@@ -628,7 +628,7 @@ func renderGame(_ renderer: OpaquePointer?) {
     // === HUD ===
     let gameViewportCenter = (renderState.windowWidth - sidebarWidth) / 2
     let selectedCount = world.selectedObjects().count
-    let scenarioLabel = scenarioList[scenarioIndex]
+    let scenarioLabel = session.scenarioList[session.scenarioIndex]
     drawText(renderer, "PLAYING - \(scenarioLabel)", centerX: gameViewportCenter, centerY: 15, color: .amber, scale: 2)
 
     if selectedCount > 0 {

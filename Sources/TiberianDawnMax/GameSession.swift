@@ -1,10 +1,24 @@
 import Foundation
 
+// MARK: - Menu / UI Types
+
+enum Faction: String { case gdi = "GDI"; case nod = "NOD" }
+enum Difficulty: String, CaseIterable { case easy = "Easy"; case normal = "Normal"; case hard = "Hard" }
+enum MenuState { case main, chooseDifficulty, chooseFaction, launching(Faction, Difficulty), spriteViewer, soundTest, mapViewer, playing }
+
 // MARK: - GameSession
 // Consolidates all game-session state globals into a single object.
 // This is a mechanical refactor — no behavior changes.
 
 class GameSession {
+    // MARK: - Menu / UI State
+    var menuState: MenuState = .main
+    var running: Bool = true
+    var selectedDifficulty: Difficulty = .normal
+    var selectedFaction: Faction = .gdi
+    var scenarioList: [String] = []
+    var scenarioIndex: Int = 0
+    var soundTest = SoundTestState()
     // MARK: - Game World
     var world: GameWorld? = nil
 

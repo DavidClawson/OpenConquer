@@ -151,8 +151,488 @@ class ActiveTeam {
     }
 }
 
-// MARK: - Team Manager
+// MARK: - ActiveTeam Extension
 
+extension ActiveTeam {
+
+    /// Process this team's AI for one tick
+    func tick() {
+        guard session.world != nil else { return }
+
+        // Suspension check
+        if isSuspended {
+            if suspendTimer > 0 {
+                suspendTimer -= 4
+                return
+            }
+            isSuspended = false
+        }
+
+        // Recalculate center
+        calcTeamCenter()
+
+        // Strength calculation
+        let current = memberCount
+        let desired = desiredCount
+
+        isFullStrength = (current >= desired)
+        if type.isReinforcable {
+            isUnderStrength = (current <= desired / 3) && current < desired
+        } else {
+            isUnderStrength = !isHasBeen && current < desired
+        }
+
+        // Delete empty human teams that were activated
+        if current == 0 && isHasBeen {
+            return  // Will be cleaned up by tickTeams
+        }
+
+        // Regroup if understrength while executing missions
+        if isMoving && isUnderStrength {
+            isMoving = false
+            currentMission = -1
+
+            // Move to nearest friendly building to regroup
+            if let regroupPos = findRegroupPosition() {
+                coordinateMove(targetX: regroupPos.x, targetY: regroupPos.y)
+            }
+            return
+        }
+
+        // Launch mission when full strength (or forced)
+        if !isMoving && isFullStrength {
+            isMoving = true
+            isHasBeen = true
+            isUnderStrength = false
+            currentMission = -1
+            isNextMission = true
+        }
+
+        // Recruit if not full strength
+        if !isFullStrength && type.isReinforcable {
+            recruitMembers()
+        }
+
+        // Advance to next mission
+        if isMoving && isNextMission {
+            isNextMission = false
+            currentMission += 1
+
+            if currentMission >= type.missionList.count {
+                // Mission list exhausted — dissolve team
+                dissolve()
+                return
+            }
+
+            let missionEntry = type.missionList[currentMission]
+            missionTimeout = missionEntry.argument * 90  // VC: arg * (TICKS_PER_MINUTE / 10)
+            target = nil
+            targetCell = nil
+
+            // Set up mission target based on type
+            switch missionEntry.mission {
+            case .moveCell:
+                targetCell = missionEntry.argument
+            case .move, .unload:
+                // Use waypoint from scenario
+                if let cell = waypointCell(missionEntry.argument) {
+                    targetCell = cell
+                }
+            default:
+                break
+            }
+        }
+
+        // Execute current mission
+        guard isMoving && !isUnderStrength else { return }
+        guard currentMission >= 0 && currentMission < type.missionList.count else { return }
+
+        let missionEntry = type.missionList[currentMission]
+
+        switch missionEntry.mission {
+        case .attackBase:
+            // Find nearest enemy building
+            if target == nil {
+                if let enemyBuilding = findNearestEnemyBuilding() {
+                    target = enemyBuilding.id
+                }
+            }
+            coordinateAttack()
+
+        case .attackUnits:
+            // Find nearest enemy unit
+            if target == nil {
+                if let enemyUnit = findNearestEnemyUnit() {
+                    target = enemyUnit.id
+                }
+            }
+            coordinateAttack()
+
+        case .attackCivilians:
+            if target == nil {
+                if let civ = findNearestCivilian() {
+                    target = civ.id
+                }
+            }
+            coordinateAttack()
+
+        case .rampage, .attackTarcom:
+            if target == nil {
+                if let enemy = findNearestEnemyAny() {
+                    target = enemy.id
+                }
+            }
+            coordinateAttack()
+
+        case .defendBase:
+            if let cell = targetCell {
+                let pos = cellToPixel(cell)
+                coordinateMove(targetX: Double(pos.px) + 12.0, targetY: Double(pos.py) + 12.0)
+            } else {
+                coordinateRegroup()
+            }
+
+        case .move, .moveCell, .retreat:
+            if let cell = targetCell {
+                let pos = cellToPixel(cell)
+                coordinateMove(targetX: Double(pos.px) + 12.0, targetY: Double(pos.py) + 12.0)
+            } else {
+                isNextMission = true
+            }
+
+        case .guard_:
+            coordinateRegroup()
+
+        case .loop:
+            // Loop back to mission index specified by argument
+            currentMission = max(0, missionEntry.argument) - 1
+            isNextMission = true
+
+        case .unload:
+            coordinateUnload()
+        }
+
+        // Mission timeout
+        if missionTimeout > 0 {
+            missionTimeout -= 4
+            if missionTimeout <= 0 {
+                switch missionEntry.mission {
+                case .attackBase, .attackUnits, .attackCivilians, .rampage, .attackTarcom,
+                     .defendBase, .unload, .retreat, .guard_:
+                    isNextMission = true
+                default:
+                    break
+                }
+            }
+        }
+    }
+
+    // MARK: - Recruitment
+
+    /// Recruit members for this team from available units
+    func recruitMembers() {
+        guard let world = session.world else { return }
+
+        for (slotIndex, slot) in type.classSlots.enumerated() {
+            let currentCount = countMembersOfSlot(slotIndex: slotIndex)
+            let needed = slot.desiredCount - currentCount
+            guard needed > 0 else { continue }
+
+            var recruited = 0
+            for obj in world.objects {
+                guard obj.house == house else { continue }
+                guard obj.strength > 0 else { continue }
+                guard !obj.isInLimbo else { continue }
+                guard obj.typeName.uppercased() == slot.typeName.uppercased() else { continue }
+
+                // Don't recruit from higher-priority teams
+                if isInTeam(obj.id) {
+                    if let existingTeam = teamForObject(obj.id) {
+                        if existingTeam.type.recruitPriority >= type.recruitPriority {
+                            continue
+                        }
+                        // Remove from lower priority team
+                        existingTeam.removeMember(objectId: obj.id)
+                    }
+                }
+
+                // Don't recruit units with sticky missions
+                switch obj.mission {
+                case .sticky, .sleep, .harvest:
+                    continue
+                default:
+                    break
+                }
+
+                // Skip harvesters and MCVs
+                let upper = obj.typeName.uppercased()
+                if upper == "HARV" || upper == "MCV" { continue }
+
+                members.append(obj.id)
+                recruited += 1
+                if recruited >= needed { break }
+            }
+        }
+
+        // Calculate center
+        calcTeamCenter()
+    }
+
+    /// Count current members matching a particular class slot
+    func countMembersOfSlot(slotIndex: Int) -> Int {
+        guard slotIndex < type.classSlots.count else { return 0 }
+        let slot = type.classSlots[slotIndex]
+        guard let world = session.world else { return 0 }
+
+        return members.filter { id in
+            if let obj = world.findObject(id: id) {
+                return obj.strength > 0 && obj.typeName.uppercased() == slot.typeName.uppercased()
+            }
+            return false
+        }.count
+    }
+
+    /// Remove an object from this team
+    func removeMember(objectId: Int) {
+        members.removeAll { $0 == objectId }
+    }
+
+    // MARK: - Team Center Calculation
+
+    /// Calculate the average position of team members
+    func calcTeamCenter() {
+        guard let world = session.world else { return }
+        var x = 0.0, y = 0.0, count = 0
+
+        for id in members {
+            if let obj = world.findObject(id: id), obj.strength > 0, !obj.isInLimbo {
+                x += obj.worldX
+                y += obj.worldY
+                count += 1
+            }
+        }
+
+        if count > 0 {
+            centerX = x / Double(count)
+            centerY = y / Double(count)
+        }
+    }
+
+    // MARK: - Team Coordination Functions
+
+    /// Coordinate attack: all team members attack the same target
+    func coordinateAttack() {
+        guard let world = session.world else { return }
+        guard let targetId = target else {
+            isNextMission = true
+            return
+        }
+
+        // Verify target is still alive
+        guard world.objects.contains(where: { $0.id == targetId && $0.strength > 0 }) else {
+            target = nil
+            isNextMission = true
+            return
+        }
+
+        for id in members {
+            guard let obj = world.findObject(id: id), obj.strength > 0, !obj.isInLimbo else { continue }
+
+            if obj.mission != .attack || obj.attackTarget != targetId {
+                obj.attackTarget = targetId
+                obj.mission = .attack
+                obj.movePath = []
+            }
+        }
+    }
+
+    /// Coordinate move: all team members move to same destination
+    func coordinateMove(targetX: Double, targetY: Double) {
+        guard let world = session.world else { return }
+        var allArrived = true
+
+        for id in members {
+            guard let obj = world.findObject(id: id), obj.strength > 0, !obj.isInLimbo else { continue }
+
+            let dx = obj.worldX - targetX
+            let dy = obj.worldY - targetY
+            let dist = sqrt(dx * dx + dy * dy)
+
+            if dist > teamStrayDistance {
+                allArrived = false
+                if obj.mission != .move || obj.moveTargetX == nil {
+                    obj.moveTargetX = targetX + Double.random(in: -24...24)
+                    obj.moveTargetY = targetY + Double.random(in: -24...24)
+                    obj.mission = .move
+                    obj.movePath = []
+                }
+            }
+        }
+
+        if allArrived && isMoving {
+            isNextMission = true
+        }
+    }
+
+    /// Coordinate regroup: gather all units to team center
+    func coordinateRegroup() {
+        guard let world = session.world else { return }
+
+        for id in members {
+            guard let obj = world.findObject(id: id), obj.strength > 0, !obj.isInLimbo else { continue }
+
+            let dx = obj.worldX - centerX
+            let dy = obj.worldY - centerY
+            let dist = sqrt(dx * dx + dy * dy)
+
+            if dist > teamStrayDistance {
+                if obj.mission != .move || obj.moveTargetX == nil {
+                    obj.moveTargetX = centerX + Double.random(in: -12...12)
+                    obj.moveTargetY = centerY + Double.random(in: -12...12)
+                    obj.mission = .move
+                    obj.movePath = []
+                }
+            } else {
+                if obj.mission == .move {
+                    obj.mission = .guard_
+                    obj.moveTargetX = nil
+                    obj.moveTargetY = nil
+                }
+            }
+        }
+    }
+
+    /// Coordinate unload: all transport members unload passengers
+    func coordinateUnload() {
+        // Simplified: just advance to next mission since transport cargo not fully implemented
+        isNextMission = true
+    }
+
+    // MARK: - Team Target Finding
+
+    /// Find nearest enemy building for team to attack
+    func findNearestEnemyBuilding() -> GameObject? {
+        guard let world = session.world else { return nil }
+        var best: GameObject? = nil
+        var bestDist = Double.infinity
+
+        for obj in world.objects {
+            guard obj.kind == .structure && obj.strength > 0 else { continue }
+            guard obj.house != house && obj.house != .neutral else { continue }
+
+            let dx = obj.worldX - centerX
+            let dy = obj.worldY - centerY
+            let dist = sqrt(dx * dx + dy * dy)
+            if dist < bestDist {
+                bestDist = dist
+                best = obj
+            }
+        }
+        return best
+    }
+
+    /// Find nearest enemy unit
+    func findNearestEnemyUnit() -> GameObject? {
+        guard let world = session.world else { return nil }
+        var best: GameObject? = nil
+        var bestDist = Double.infinity
+
+        for obj in world.objects {
+            guard (obj.kind == .unit || obj.kind == .infantry) && obj.strength > 0 else { continue }
+            guard obj.house != house && obj.house != .neutral else { continue }
+
+            let dx = obj.worldX - centerX
+            let dy = obj.worldY - centerY
+            let dist = sqrt(dx * dx + dy * dy)
+            if dist < bestDist {
+                bestDist = dist
+                best = obj
+            }
+        }
+        return best
+    }
+
+    /// Find nearest civilian
+    func findNearestCivilian() -> GameObject? {
+        guard let world = session.world else { return nil }
+        var best: GameObject? = nil
+        var bestDist = Double.infinity
+
+        for obj in world.objects {
+            guard obj.strength > 0 else { continue }
+            guard obj.house == .neutral else { continue }
+
+            let dx = obj.worldX - centerX
+            let dy = obj.worldY - centerY
+            let dist = sqrt(dx * dx + dy * dy)
+            if dist < bestDist {
+                bestDist = dist
+                best = obj
+            }
+        }
+        return best
+    }
+
+    /// Find nearest enemy of any type
+    func findNearestEnemyAny() -> GameObject? {
+        guard let world = session.world else { return nil }
+        var best: GameObject? = nil
+        var bestDist = Double.infinity
+
+        for obj in world.objects {
+            guard obj.strength > 0 else { continue }
+            guard obj.house != house && obj.house != .neutral else { continue }
+
+            let dx = obj.worldX - centerX
+            let dy = obj.worldY - centerY
+            let dist = sqrt(dx * dx + dy * dy)
+            if dist < bestDist {
+                bestDist = dist
+                best = obj
+            }
+        }
+        return best
+    }
+
+    /// Find regroup position (nearest friendly building)
+    func findRegroupPosition() -> (x: Double, y: Double)? {
+        guard let world = session.world else { return nil }
+        var bestDist = Double.infinity
+        var bestPos: (x: Double, y: Double)? = nil
+
+        for obj in world.objects {
+            guard obj.kind == .structure && obj.house == house && obj.strength > 0 else { continue }
+
+            let dx = obj.worldX - centerX
+            let dy = obj.worldY - centerY
+            let dist = sqrt(dx * dx + dy * dy)
+            if dist < bestDist {
+                bestDist = dist
+                bestPos = (x: obj.worldX, y: obj.worldY)
+            }
+        }
+        return bestPos
+    }
+
+    /// Dissolve team: release all members back to individual control
+    func dissolve() {
+        guard let world = session.world else { return }
+
+        for id in members {
+            if let obj = world.findObject(id: id), obj.strength > 0 {
+                // Set to guard if idle
+                if obj.mission == .move {
+                    obj.mission = .guard_
+                    obj.moveTargetX = nil
+                    obj.moveTargetY = nil
+                }
+            }
+        }
+        members.removeAll()
+    }
+}
+
+// MARK: - Team Manager
 
 // MARK: - Parse Team Types from Scenario INI
 
@@ -262,73 +742,8 @@ func createTeam(type: TeamType) -> ActiveTeam? {
 /// Create a team and recruit members
 func createAndRecruitTeam(type: TeamType) -> ActiveTeam? {
     guard let team = createTeam(type: type) else { return nil }
-    recruitMembers(team)
+    team.recruitMembers()
     return team
-}
-
-// MARK: - Recruitment
-
-/// Recruit members for a team from available units
-func recruitMembers(_ team: ActiveTeam) {
-    guard let world = session.world else { return }
-
-    for (slotIndex, slot) in team.type.classSlots.enumerated() {
-        let currentCount = countMembersOfSlot(team, slotIndex: slotIndex)
-        let needed = slot.desiredCount - currentCount
-        guard needed > 0 else { continue }
-
-        var recruited = 0
-        for obj in world.objects {
-            guard obj.house == team.house else { continue }
-            guard obj.strength > 0 else { continue }
-            guard !obj.isInLimbo else { continue }
-            guard obj.typeName.uppercased() == slot.typeName.uppercased() else { continue }
-
-            // Don't recruit from higher-priority teams
-            if isInTeam(obj.id) {
-                if let existingTeam = teamForObject(obj.id) {
-                    if existingTeam.type.recruitPriority >= team.type.recruitPriority {
-                        continue
-                    }
-                    // Remove from lower priority team
-                    removeFromTeam(obj.id, team: existingTeam)
-                }
-            }
-
-            // Don't recruit units with sticky missions
-            switch obj.mission {
-            case .sticky, .sleep, .harvest:
-                continue
-            default:
-                break
-            }
-
-            // Skip harvesters and MCVs
-            let upper = obj.typeName.uppercased()
-            if upper == "HARV" || upper == "MCV" { continue }
-
-            team.members.append(obj.id)
-            recruited += 1
-            if recruited >= needed { break }
-        }
-    }
-
-    // Calculate center
-    calcTeamCenter(team)
-}
-
-/// Count current members matching a particular class slot
-func countMembersOfSlot(_ team: ActiveTeam, slotIndex: Int) -> Int {
-    guard slotIndex < team.type.classSlots.count else { return 0 }
-    let slot = team.type.classSlots[slotIndex]
-    guard let world = session.world else { return 0 }
-
-    return team.members.filter { id in
-        if let obj = world.findObject(id: id) {
-            return obj.strength > 0 && obj.typeName.uppercased() == slot.typeName.uppercased()
-        }
-        return false
-    }.count
 }
 
 // MARK: - Team Membership Helpers
@@ -341,32 +756,6 @@ func isInTeam(_ objectId: Int) -> Bool {
 /// Get the team an object belongs to
 func teamForObject(_ objectId: Int) -> ActiveTeam? {
     return session.activeTeams.first { $0.members.contains(objectId) }
-}
-
-/// Remove an object from a team
-func removeFromTeam(_ objectId: Int, team: ActiveTeam) {
-    team.members.removeAll { $0 == objectId }
-}
-
-// MARK: - Team Center Calculation
-
-/// Calculate the average position of team members
-func calcTeamCenter(_ team: ActiveTeam) {
-    guard let world = session.world else { return }
-    var x = 0.0, y = 0.0, count = 0
-
-    for id in team.members {
-        if let obj = world.findObject(id: id), obj.strength > 0, !obj.isInLimbo {
-            x += obj.worldX
-            y += obj.worldY
-            count += 1
-        }
-    }
-
-    if count > 0 {
-        team.centerX = x / Double(count)
-        team.centerY = y / Double(count)
-    }
 }
 
 // MARK: - Team AI Tick
@@ -386,396 +775,11 @@ func tickTeams() {
     }
 
     for team in session.activeTeams {
-        tickTeam(team)
+        team.tick()
     }
 
     // Remove empty teams that have been activated
     session.activeTeams.removeAll { $0.members.isEmpty && $0.isHasBeen }
-}
-
-/// Process a single team's AI
-func tickTeam(_ team: ActiveTeam) {
-    guard session.world != nil else { return }
-
-    // Suspension check
-    if team.isSuspended {
-        if team.suspendTimer > 0 {
-            team.suspendTimer -= 4
-            return
-        }
-        team.isSuspended = false
-    }
-
-    // Recalculate center
-    calcTeamCenter(team)
-
-    // Strength calculation
-    let current = team.memberCount
-    let desired = team.desiredCount
-
-    team.isFullStrength = (current >= desired)
-    if team.type.isReinforcable {
-        team.isUnderStrength = (current <= desired / 3) && current < desired
-    } else {
-        team.isUnderStrength = !team.isHasBeen && current < desired
-    }
-
-    // Delete empty human teams that were activated
-    if current == 0 && team.isHasBeen {
-        return  // Will be cleaned up by tickTeams
-    }
-
-    // Regroup if understrength while executing missions
-    if team.isMoving && team.isUnderStrength {
-        team.isMoving = false
-        team.currentMission = -1
-
-        // Move to nearest friendly building to regroup
-        if let regroupPos = findRegroupPosition(team) {
-            coordinateMove(team, targetX: regroupPos.x, targetY: regroupPos.y)
-        }
-        return
-    }
-
-    // Launch mission when full strength (or forced)
-    if !team.isMoving && team.isFullStrength {
-        team.isMoving = true
-        team.isHasBeen = true
-        team.isUnderStrength = false
-        team.currentMission = -1
-        team.isNextMission = true
-    }
-
-    // Recruit if not full strength
-    if !team.isFullStrength && team.type.isReinforcable {
-        recruitMembers(team)
-    }
-
-    // Advance to next mission
-    if team.isMoving && team.isNextMission {
-        team.isNextMission = false
-        team.currentMission += 1
-
-        if team.currentMission >= team.type.missionList.count {
-            // Mission list exhausted — dissolve team
-            dissolveTeam(team)
-            return
-        }
-
-        let missionEntry = team.type.missionList[team.currentMission]
-        team.missionTimeout = missionEntry.argument * 90  // VC: arg * (TICKS_PER_MINUTE / 10)
-        team.target = nil
-        team.targetCell = nil
-
-        // Set up mission target based on type
-        switch missionEntry.mission {
-        case .moveCell:
-            team.targetCell = missionEntry.argument
-        case .move, .unload:
-            // Use waypoint from scenario
-            if let cell = waypointCell(missionEntry.argument) {
-                team.targetCell = cell
-            }
-        default:
-            break
-        }
-    }
-
-    // Execute current mission
-    guard team.isMoving && !team.isUnderStrength else { return }
-    guard team.currentMission >= 0 && team.currentMission < team.type.missionList.count else { return }
-
-    let missionEntry = team.type.missionList[team.currentMission]
-
-    switch missionEntry.mission {
-    case .attackBase:
-        // Find nearest enemy building
-        if team.target == nil {
-            if let enemyBuilding = findNearestEnemyBuilding(team) {
-                team.target = enemyBuilding.id
-            }
-        }
-        coordinateAttack(team)
-
-    case .attackUnits:
-        // Find nearest enemy unit
-        if team.target == nil {
-            if let enemyUnit = findNearestEnemyUnit(team) {
-                team.target = enemyUnit.id
-            }
-        }
-        coordinateAttack(team)
-
-    case .attackCivilians:
-        if team.target == nil {
-            if let civ = findNearestCivilian(team) {
-                team.target = civ.id
-            }
-        }
-        coordinateAttack(team)
-
-    case .rampage, .attackTarcom:
-        if team.target == nil {
-            if let enemy = findNearestEnemyAny(team) {
-                team.target = enemy.id
-            }
-        }
-        coordinateAttack(team)
-
-    case .defendBase:
-        if let cell = team.targetCell {
-            let pos = cellToPixel(cell)
-            coordinateMove(team, targetX: Double(pos.px) + 12.0, targetY: Double(pos.py) + 12.0)
-        } else {
-            coordinateRegroup(team)
-        }
-
-    case .move, .moveCell, .retreat:
-        if let cell = team.targetCell {
-            let pos = cellToPixel(cell)
-            coordinateMove(team, targetX: Double(pos.px) + 12.0, targetY: Double(pos.py) + 12.0)
-        } else {
-            team.isNextMission = true
-        }
-
-    case .guard_:
-        coordinateRegroup(team)
-
-    case .loop:
-        // Loop back to mission index specified by argument
-        team.currentMission = max(0, missionEntry.argument) - 1
-        team.isNextMission = true
-
-    case .unload:
-        coordinateUnload(team)
-    }
-
-    // Mission timeout
-    if team.missionTimeout > 0 {
-        team.missionTimeout -= 4
-        if team.missionTimeout <= 0 {
-            switch missionEntry.mission {
-            case .attackBase, .attackUnits, .attackCivilians, .rampage, .attackTarcom,
-                 .defendBase, .unload, .retreat, .guard_:
-                team.isNextMission = true
-            default:
-                break
-            }
-        }
-    }
-}
-
-// MARK: - Team Coordination Functions
-
-/// Coordinate attack: all team members attack the same target
-func coordinateAttack(_ team: ActiveTeam) {
-    guard let world = session.world else { return }
-    guard let targetId = team.target else {
-        team.isNextMission = true
-        return
-    }
-
-    // Verify target is still alive
-    guard world.objects.contains(where: { $0.id == targetId && $0.strength > 0 }) else {
-        team.target = nil
-        team.isNextMission = true
-        return
-    }
-
-    for id in team.members {
-        guard let obj = world.findObject(id: id), obj.strength > 0, !obj.isInLimbo else { continue }
-
-        if obj.mission != .attack || obj.attackTarget != targetId {
-            obj.attackTarget = targetId
-            obj.mission = .attack
-            obj.movePath = []
-        }
-    }
-}
-
-/// Coordinate move: all team members move to same destination
-func coordinateMove(_ team: ActiveTeam, targetX: Double, targetY: Double) {
-    guard let world = session.world else { return }
-    var allArrived = true
-
-    for id in team.members {
-        guard let obj = world.findObject(id: id), obj.strength > 0, !obj.isInLimbo else { continue }
-
-        let dx = obj.worldX - targetX
-        let dy = obj.worldY - targetY
-        let dist = sqrt(dx * dx + dy * dy)
-
-        if dist > teamStrayDistance {
-            allArrived = false
-            if obj.mission != .move || obj.moveTargetX == nil {
-                obj.moveTargetX = targetX + Double.random(in: -24...24)
-                obj.moveTargetY = targetY + Double.random(in: -24...24)
-                obj.mission = .move
-                obj.movePath = []
-            }
-        }
-    }
-
-    if allArrived && team.isMoving {
-        team.isNextMission = true
-    }
-}
-
-/// Coordinate regroup: gather all units to team center
-func coordinateRegroup(_ team: ActiveTeam) {
-    guard let world = session.world else { return }
-
-    for id in team.members {
-        guard let obj = world.findObject(id: id), obj.strength > 0, !obj.isInLimbo else { continue }
-
-        let dx = obj.worldX - team.centerX
-        let dy = obj.worldY - team.centerY
-        let dist = sqrt(dx * dx + dy * dy)
-
-        if dist > teamStrayDistance {
-            if obj.mission != .move || obj.moveTargetX == nil {
-                obj.moveTargetX = team.centerX + Double.random(in: -12...12)
-                obj.moveTargetY = team.centerY + Double.random(in: -12...12)
-                obj.mission = .move
-                obj.movePath = []
-            }
-        } else {
-            if obj.mission == .move {
-                obj.mission = .guard_
-                obj.moveTargetX = nil
-                obj.moveTargetY = nil
-            }
-        }
-    }
-}
-
-/// Coordinate unload: all transport members unload passengers
-func coordinateUnload(_ team: ActiveTeam) {
-    // Simplified: just advance to next mission since transport cargo not fully implemented
-    team.isNextMission = true
-}
-
-// MARK: - Team Target Finding
-
-/// Find nearest enemy building for team to attack
-func findNearestEnemyBuilding(_ team: ActiveTeam) -> GameObject? {
-    guard let world = session.world else { return nil }
-    var best: GameObject? = nil
-    var bestDist = Double.infinity
-
-    for obj in world.objects {
-        guard obj.kind == .structure && obj.strength > 0 else { continue }
-        guard obj.house != team.house && obj.house != .neutral else { continue }
-
-        let dx = obj.worldX - team.centerX
-        let dy = obj.worldY - team.centerY
-        let dist = sqrt(dx * dx + dy * dy)
-        if dist < bestDist {
-            bestDist = dist
-            best = obj
-        }
-    }
-    return best
-}
-
-/// Find nearest enemy unit
-func findNearestEnemyUnit(_ team: ActiveTeam) -> GameObject? {
-    guard let world = session.world else { return nil }
-    var best: GameObject? = nil
-    var bestDist = Double.infinity
-
-    for obj in world.objects {
-        guard (obj.kind == .unit || obj.kind == .infantry) && obj.strength > 0 else { continue }
-        guard obj.house != team.house && obj.house != .neutral else { continue }
-
-        let dx = obj.worldX - team.centerX
-        let dy = obj.worldY - team.centerY
-        let dist = sqrt(dx * dx + dy * dy)
-        if dist < bestDist {
-            bestDist = dist
-            best = obj
-        }
-    }
-    return best
-}
-
-/// Find nearest civilian
-func findNearestCivilian(_ team: ActiveTeam) -> GameObject? {
-    guard let world = session.world else { return nil }
-    var best: GameObject? = nil
-    var bestDist = Double.infinity
-
-    for obj in world.objects {
-        guard obj.strength > 0 else { continue }
-        guard obj.house == .neutral else { continue }
-
-        let dx = obj.worldX - team.centerX
-        let dy = obj.worldY - team.centerY
-        let dist = sqrt(dx * dx + dy * dy)
-        if dist < bestDist {
-            bestDist = dist
-            best = obj
-        }
-    }
-    return best
-}
-
-/// Find nearest enemy of any type
-func findNearestEnemyAny(_ team: ActiveTeam) -> GameObject? {
-    guard let world = session.world else { return nil }
-    var best: GameObject? = nil
-    var bestDist = Double.infinity
-
-    for obj in world.objects {
-        guard obj.strength > 0 else { continue }
-        guard obj.house != team.house && obj.house != .neutral else { continue }
-
-        let dx = obj.worldX - team.centerX
-        let dy = obj.worldY - team.centerY
-        let dist = sqrt(dx * dx + dy * dy)
-        if dist < bestDist {
-            bestDist = dist
-            best = obj
-        }
-    }
-    return best
-}
-
-/// Find regroup position (nearest friendly building)
-func findRegroupPosition(_ team: ActiveTeam) -> (x: Double, y: Double)? {
-    guard let world = session.world else { return nil }
-    var bestDist = Double.infinity
-    var bestPos: (x: Double, y: Double)? = nil
-
-    for obj in world.objects {
-        guard obj.kind == .structure && obj.house == team.house && obj.strength > 0 else { continue }
-
-        let dx = obj.worldX - team.centerX
-        let dy = obj.worldY - team.centerY
-        let dist = sqrt(dx * dx + dy * dy)
-        if dist < bestDist {
-            bestDist = dist
-            bestPos = (x: obj.worldX, y: obj.worldY)
-        }
-    }
-    return bestPos
-}
-
-/// Dissolve team: release all members back to individual control
-func dissolveTeam(_ team: ActiveTeam) {
-    guard let world = session.world else { return }
-
-    for id in team.members {
-        if let obj = world.findObject(id: id), obj.strength > 0 {
-            // Set to guard if idle
-            if obj.mission == .move {
-                obj.mission = .guard_
-                obj.moveTargetX = nil
-                obj.moveTargetY = nil
-            }
-        }
-    }
-    team.members.removeAll()
 }
 
 // MARK: - Waypoint Lookup
@@ -804,7 +808,7 @@ func triggerCreateTeam(named name: String) {
 /// Destroy all instances of a team type
 func triggerDestroyTeam(named name: String) {
     for team in session.activeTeams where team.type.name == name {
-        dissolveTeam(team)
+        team.dissolve()
     }
     session.activeTeams.removeAll { $0.type.name == name }
     print("TeamAI: Destroyed all teams named '\(name)'")

@@ -28,138 +28,142 @@ func initTiberiumCells() {
     print("GameEconomy: Found \(map.tiberiumCells.count) tiberium cells")
 }
 
-// MARK: - Harvester State Machine
+// MARK: - Harvester Extension
 
-func tickHarvest(_ obj: GameObject) {
-    guard let world = session.world else { return }
-    let upper = obj.typeName.uppercased()
-    if upper != "HARV" { return }
+extension GameObject {
 
-    // State machine based on current conditions
-    if obj.tiberiumLoad >= maxTiberiumLoad {
-        // Full — return to refinery
-        if let refinery = findNearestRefinery(obj) {
-            let dx = refinery.worldX - obj.worldX
-            let dy = refinery.worldY - obj.worldY
-            let dist = sqrt(dx * dx + dy * dy)
+    /// Tick harvester state machine
+    func tickHarvest() {
+        guard let world = session.world else { return }
+        let upper = typeName.uppercased()
+        if upper != "HARV" { return }
 
-            if dist < 36.0 {
-                // At refinery — deposit
-                let creditsGained = obj.tiberiumLoad * tiberiumValue
-                let houseState = getHouseState(obj.house)
-                houseState.addCredits(creditsGained)
-                // Keep sidebar credits in sync for the player
-                if obj.house == session.world?.playerHouse {
-                    session.sidebarCredits += creditsGained
+        // State machine based on current conditions
+        if tiberiumLoad >= maxTiberiumLoad {
+            // Full — return to refinery
+            if let refinery = findNearestRefinery() {
+                let dx = refinery.worldX - worldX
+                let dy = refinery.worldY - worldY
+                let dist = sqrt(dx * dx + dy * dy)
+
+                if dist < 36.0 {
+                    // At refinery — deposit
+                    let creditsGained = tiberiumLoad * tiberiumValue
+                    let houseState = getHouseState(house)
+                    houseState.addCredits(creditsGained)
+                    // Keep sidebar credits in sync for the player
+                    if house == session.world?.playerHouse {
+                        session.sidebarCredits += creditsGained
+                    }
+                    tiberiumLoad = 0
+                    // Clear movement to go find more tiberium
+                    moveTargetX = nil
+                    moveTargetY = nil
+                    movePath = []
+                } else {
+                    // Move toward refinery
+                    moveTargetX = refinery.worldX
+                    moveTargetY = refinery.worldY
+                    if movePath.isEmpty {
+                        movePath = findPath(
+                            fromX: cellX, fromY: cellY,
+                            toX: refinery.cellX, toY: refinery.cellY,
+                            ignoring: self,
+                            speedType: .harvester
+                        )
+                    }
+                    let _ = moveOneStep()
                 }
-                obj.tiberiumLoad = 0
-                // Clear movement to go find more tiberium
-                obj.moveTargetX = nil
-                obj.moveTargetY = nil
-                obj.movePath = []
             } else {
-                // Move toward refinery
-                obj.moveTargetX = refinery.worldX
-                obj.moveTargetY = refinery.worldY
-                if obj.movePath.isEmpty {
-                    obj.movePath = findPath(
-                        fromX: obj.cellX, fromY: obj.cellY,
-                        toX: refinery.cellX, toY: refinery.cellY,
-                        ignoring: obj,
-                        speedType: .harvester
-                    )
-                }
-                let _ = obj.moveOneStep()
+                // No refinery — just sit
+                moveTargetX = nil
+                moveTargetY = nil
             }
-        } else {
-            // No refinery — just sit
-            obj.moveTargetX = nil
-            obj.moveTargetY = nil
-        }
-    } else if world.map.tiberiumCells.contains(obj.cell) {
-        // On tiberium — harvest
-        // Harvest one unit every few ticks
-        if world.tickCount % 4 == 0 {
-            obj.tiberiumLoad += 1
-            // Deplete tiberium after multiple harvests
-            if obj.tiberiumLoad % 5 == 0 {
-                world.map.tiberiumCells.remove(obj.cell)
-            }
-        }
-    } else {
-        // Not on tiberium and not full — find nearest tiberium
-        if let target = findNearestTiberium(obj) {
-            let targetPx = Double(target.cellX * 24) + 12.0
-            let targetPy = Double(target.cellY * 24) + 12.0
-
-            // Check if we're already moving to tiberium
-            if let mx = obj.moveTargetX, let my = obj.moveTargetY {
-                let dx = mx - targetPx
-                let dy = my - targetPy
-                if sqrt(dx * dx + dy * dy) < 2.0 {
-                    // Already heading there
-                    let _ = obj.moveOneStep()
-                    return
+        } else if world.map.tiberiumCells.contains(cell) {
+            // On tiberium — harvest
+            // Harvest one unit every few ticks
+            if world.tickCount % 4 == 0 {
+                tiberiumLoad += 1
+                // Deplete tiberium after multiple harvests
+                if tiberiumLoad % 5 == 0 {
+                    world.map.tiberiumCells.remove(cell)
                 }
             }
-
-            obj.moveTargetX = targetPx
-            obj.moveTargetY = targetPy
-            obj.movePath = findPath(
-                fromX: obj.cellX, fromY: obj.cellY,
-                toX: target.cellX, toY: target.cellY,
-                ignoring: obj,
-                speedType: .harvester
-            )
-            let _ = obj.moveOneStep()
         } else {
-            // No tiberium left — return to refinery if carrying anything
-            if obj.tiberiumLoad > 0 {
-                obj.tiberiumLoad = maxTiberiumLoad  // Force return
+            // Not on tiberium and not full — find nearest tiberium
+            if let target = findNearestTiberium() {
+                let targetPx = Double(target.cellX * 24) + 12.0
+                let targetPy = Double(target.cellY * 24) + 12.0
+
+                // Check if we're already moving to tiberium
+                if let mx = moveTargetX, let my = moveTargetY {
+                    let dx = mx - targetPx
+                    let dy = my - targetPy
+                    if sqrt(dx * dx + dy * dy) < 2.0 {
+                        // Already heading there
+                        let _ = moveOneStep()
+                        return
+                    }
+                }
+
+                moveTargetX = targetPx
+                moveTargetY = targetPy
+                movePath = findPath(
+                    fromX: cellX, fromY: cellY,
+                    toX: target.cellX, toY: target.cellY,
+                    ignoring: self,
+                    speedType: .harvester
+                )
+                let _ = moveOneStep()
+            } else {
+                // No tiberium left — return to refinery if carrying anything
+                if tiberiumLoad > 0 {
+                    tiberiumLoad = maxTiberiumLoad  // Force return
+                }
             }
         }
     }
-}
 
-/// Find nearest tiberium cell to a harvester
-func findNearestTiberium(_ obj: GameObject) -> (cellX: Int, cellY: Int)? {
-    guard let map = session.world?.map else { return nil }
-    var bestCell: (cellX: Int, cellY: Int)? = nil
-    var bestDist = Double.infinity
+    /// Find nearest tiberium cell to this harvester
+    func findNearestTiberium() -> (cellX: Int, cellY: Int)? {
+        guard let map = session.world?.map else { return nil }
+        var bestCell: (cellX: Int, cellY: Int)? = nil
+        var bestDist = Double.infinity
 
-    for cell in map.tiberiumCells {
-        let cx = cell % 64
-        let cy = cell / 64
-        let dx = Double(cx) - Double(obj.cellX)
-        let dy = Double(cy) - Double(obj.cellY)
-        let dist = sqrt(dx * dx + dy * dy)
-        if dist < bestDist {
-            bestDist = dist
-            bestCell = (cellX: cx, cellY: cy)
+        for cell in map.tiberiumCells {
+            let cx = cell % 64
+            let cy = cell / 64
+            let dx = Double(cx) - Double(cellX)
+            let dy = Double(cy) - Double(cellY)
+            let dist = sqrt(dx * dx + dy * dy)
+            if dist < bestDist {
+                bestDist = dist
+                bestCell = (cellX: cx, cellY: cy)
+            }
         }
+        return bestCell
     }
-    return bestCell
-}
 
-/// Find nearest refinery owned by this object's house
-func findNearestRefinery(_ obj: GameObject) -> GameObject? {
-    guard let world = session.world else { return nil }
-    var nearest: GameObject? = nil
-    var nearestDist = Double.infinity
+    /// Find nearest refinery owned by this object's house
+    func findNearestRefinery() -> GameObject? {
+        guard let world = session.world else { return nil }
+        var nearest: GameObject? = nil
+        var nearestDist = Double.infinity
 
-    for other in world.objects {
-        if other.kind != .structure { continue }
-        if other.house != obj.house { continue }
-        if other.strength <= 0 { continue }
-        if other.typeName.uppercased() != "PROC" { continue }
+        for other in world.objects {
+            if other.kind != .structure { continue }
+            if other.house != house { continue }
+            if other.strength <= 0 { continue }
+            if other.typeName.uppercased() != "PROC" { continue }
 
-        let dx = other.worldX - obj.worldX
-        let dy = other.worldY - obj.worldY
-        let dist = sqrt(dx * dx + dy * dy)
-        if dist < nearestDist {
-            nearest = other
-            nearestDist = dist
+            let dx = other.worldX - worldX
+            let dy = other.worldY - worldY
+            let dist = sqrt(dx * dx + dy * dy)
+            if dist < nearestDist {
+                nearest = other
+                nearestDist = dist
+            }
         }
+        return nearest
     }
-    return nearest
 }

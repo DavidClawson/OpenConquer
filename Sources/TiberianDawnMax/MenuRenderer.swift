@@ -47,22 +47,22 @@ func makeMainButtons() -> [Button] {
 
     return [
         Button(label: "Start New Game", x: cx, y: startY, w: bw, h: bh) {
-            menuState = .chooseDifficulty
+            session.menuState = .chooseDifficulty
         },
         Button(label: "Sprite Viewer", x: cx, y: startY + 60, w: bw, h: bh) {
             loadCurrentSprite()
-            menuState = .spriteViewer
+            session.menuState = .spriteViewer
         },
         Button(label: "Sound Test", x: cx, y: startY + 120, w: bw, h: bh) {
-            initSoundTest()
-            menuState = .soundTest
+            session.soundTest.initialize()
+            session.menuState = .soundTest
         },
         Button(label: "Map Viewer", x: cx, y: startY + 180, w: bw, h: bh) {
-            loadMapViewerData(scenarioList[scenarioIndex])
-            menuState = .mapViewer
+            loadMapViewerData(session.scenarioList[session.scenarioIndex])
+            session.menuState = .mapViewer
         },
         Button(label: "Exit Game", x: cx, y: startY + 240, w: bw, h: bh) {
-            running = false
+            session.running = false
         },
     ]
 }
@@ -75,8 +75,8 @@ func makeDifficultyButtons() -> [Button] {
 
     return Difficulty.allCases.enumerated().map { i, diff in
         Button(label: diff.rawValue, x: cx, y: startY + Int32(i) * 60, w: bw, h: bh) {
-            selectedDifficulty = diff
-            menuState = .chooseFaction
+            session.selectedDifficulty = diff
+            session.menuState = .chooseFaction
         }
     }
 }
@@ -91,12 +91,12 @@ func makeFactionButtons() -> [Button] {
 
     return [
         Button(label: "GDI", x: startX, y: cy, w: bw, h: bh) {
-            selectedFaction = .gdi
-            menuState = .launching(.gdi, selectedDifficulty)
+            session.selectedFaction = .gdi
+            session.menuState = .launching(.gdi, session.selectedDifficulty)
         },
         Button(label: "NOD", x: startX + bw + gap, y: cy, w: bw, h: bh) {
-            selectedFaction = .nod
-            menuState = .launching(.nod, selectedDifficulty)
+            session.selectedFaction = .nod
+            session.menuState = .launching(.nod, session.selectedDifficulty)
         },
     ]
 }
@@ -126,7 +126,7 @@ func renderMenuState(_ renderer: OpaquePointer?, state: MenuState) {
 
     case .chooseFaction:
         drawText(renderer, "Choose Your Side", centerX: renderState.windowWidth / 2, centerY: 100, color: .amber, scale: 3)
-        drawText(renderer, "Difficulty: \(selectedDifficulty.rawValue)", centerX: renderState.windowWidth / 2, centerY: 160, color: .green, scale: 2)
+        drawText(renderer, "Difficulty: \(session.selectedDifficulty.rawValue)", centerX: renderState.windowWidth / 2, centerY: 160, color: .green, scale: 2)
 
         for btn in makeFactionButtons() {
             let isGDI = btn.label == "GDI"
@@ -171,11 +171,11 @@ func renderMenuState(_ renderer: OpaquePointer?, state: MenuState) {
             session.tickAccumulator = 0
             session.missionScore.reset()
             session.triggerWinState = .playing
-            menuState = .playing
+            session.menuState = .playing
         } else {
             // Fallback if scenario not found
             print("Failed to load first mission for \(faction.rawValue)")
-            menuState = .main
+            session.menuState = .main
         }
 
     case .spriteViewer:
@@ -226,7 +226,7 @@ func renderMenuState(_ renderer: OpaquePointer?, state: MenuState) {
         drawText(renderer, "Esc: Back", centerX: renderState.windowWidth / 2, centerY: renderState.windowHeight - 35, color: .gray, scale: 1)
 
     case .soundTest:
-        renderSoundTest(renderer)
+        session.soundTest.render(renderer)
 
     case .mapViewer:
         // Increment animation frame for terrain (trees etc.)
@@ -238,7 +238,7 @@ func renderMenuState(_ renderer: OpaquePointer?, state: MenuState) {
         // HUD overlay
         let cellX = renderState.cameraX / 24
         let cellY = renderState.cameraY / 24
-        let scenarioLabel = "\(scenarioList[scenarioIndex]) (\(scenarioIndex + 1)/\(scenarioList.count))"
+        let scenarioLabel = "\(session.scenarioList[session.scenarioIndex]) (\(session.scenarioIndex + 1)/\(session.scenarioList.count))"
         drawText(renderer, "Map Viewer - \(scenarioLabel)", centerX: renderState.windowWidth / 2, centerY: 15, color: .amber, scale: 2)
         let zoomPct = String(format: "%.0f%%", renderState.zoomLevel * 100)
         drawText(renderer, "Camera: \(cellX) \(cellY)  Zoom: \(zoomPct)", centerX: renderState.windowWidth / 2, centerY: 35, color: .green, scale: 1)

@@ -181,7 +181,7 @@ extension GameObject {
         let upper = typeName.uppercased()
         if upper == "HARV" {
             // Harvester: find refinery
-            if let refinery = findNearestRefinery(self) {
+            if let refinery = findNearestRefinery() {
                 moveTargetX = refinery.worldX
                 moveTargetY = refinery.worldY
                 movePath = findPath(

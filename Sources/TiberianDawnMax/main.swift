@@ -146,34 +146,9 @@ func discoverScenarios() -> [String] {
     return found
 }
 
-var scenarioList = discoverScenarios()
-var scenarioIndex = 0
+session.scenarioList = discoverScenarios()
 
-print("Discovered \(scenarioList.count) scenarios: \(scenarioList.joined(separator: ", "))")
-
-// MARK: - Types
-
-enum Faction: String {
-    case gdi = "GDI"
-    case nod = "NOD"
-}
-
-enum Difficulty: String, CaseIterable {
-    case easy = "Easy"
-    case normal = "Normal"
-    case hard = "Hard"
-}
-
-enum MenuState {
-    case main
-    case chooseDifficulty
-    case chooseFaction
-    case launching(Faction, Difficulty)
-    case spriteViewer
-    case soundTest
-    case mapViewer
-    case playing
-}
+print("Discovered \(session.scenarioList.count) scenarios: \(session.scenarioList.joined(separator: ", "))")
 
 // MARK: - App
 
@@ -203,15 +178,11 @@ guard let renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED.raw
 audioManager.initialize()
 audioManager.soundLibrary = SoundLibrary(assetManager: assetManager)
 
-var menuState: MenuState = .main
-var running = true
 var event = SDL_Event()
-var selectedDifficulty: Difficulty = .normal
-var selectedFaction: Faction = .gdi
 
 // MARK: - Main Loop
 
-while running {
+while session.running {
     perf.beginFrame()
 
     // Events
@@ -219,7 +190,7 @@ while running {
         let eventType = SDL_EventType(rawValue: event.type)
         switch eventType {
         case SDL_QUIT:
-            running = false
+            session.running = false
         case SDL_KEYDOWN:
             handleKeyDown(event.key.keysym.sym)
         case SDL_MOUSEMOTION:
@@ -239,7 +210,7 @@ while running {
     handleContinuousInput()
 
     // Update game logic in playing state
-    if case .playing = menuState {
+    if case .playing = session.menuState {
         perf.beginSection("Logic")
         updateGame()
         perf.endSection("Logic")
@@ -255,7 +226,7 @@ while running {
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255)
     SDL_RenderClear(renderer)
 
-    renderMenuState(renderer, state: menuState)
+    renderMenuState(renderer, state: session.menuState)
 
     perf.endSection("Render")
 
