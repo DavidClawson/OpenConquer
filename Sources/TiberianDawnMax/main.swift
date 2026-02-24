@@ -210,7 +210,7 @@ while session.running {
     handleContinuousInput()
 
     // Update game logic in playing state
-    if case .playing = session.menuState {
+    if session.isPlaying {
         perf.beginSection("Logic")
         updateGame()
         perf.endSection("Logic")
@@ -226,7 +226,7 @@ while session.running {
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255)
     SDL_RenderClear(renderer)
 
-    renderMenuState(renderer, state: session.menuState)
+    renderMenuState(renderer)
 
     perf.endSection("Render")
 

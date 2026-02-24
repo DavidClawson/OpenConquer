@@ -197,8 +197,8 @@ func tickProduction() {
         if completed {
             spawnProducedUnit(session.unitBuildQueue.item!.typeName, world: world)
             session.unitBuildQueue.clear()
-            speak(.unitReady)
-            soundEffect(.construction)
+            audioManager.speak(.unitReady)
+            audioManager.play(.construction)
         }
     }
 
@@ -206,8 +206,8 @@ func tickProduction() {
     if session.structureBuildQueue.item != nil && !session.structureBuildQueue.isComplete {
         let completed = session.structureBuildQueue.tick(hasPower: houseState.hasPower, worldTickCount: world.tickCount)
         if completed {
-            speak(.construction)
-            soundEffect(.construction)
+            audioManager.speak(.construction)
+            audioManager.play(.construction)
         }
         // Don't auto-complete — wait for placement
     }

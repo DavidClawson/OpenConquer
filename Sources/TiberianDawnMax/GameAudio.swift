@@ -774,6 +774,66 @@ class AudioManager {
         }
     }
 
+    // MARK: - Convenience Methods
+
+    /// Play a sound effect (convenience alias for playSoundEffect)
+    func play(_ voc: VocType, worldX: Double? = nil, worldY: Double? = nil) {
+        playSoundEffect(voc, worldX: worldX, worldY: worldY)
+    }
+
+    /// Get the weapon fire sound for a weapon type
+    func weaponFireSound(_ weapon: WeaponType) -> VocType {
+        switch weapon {
+        case .mammothTusk, .dragon: return .rocket2
+        case .mlrs, .honestJohn: return .rocket1
+        case .flamethrower, .flameTongue: return .flamer1
+        case .chainGun, .m16, .m60mg: return .mgun2
+        case .obeliskLaser: return .laser
+        case .tomahawk, .towTwo: return .rocket1
+        case .turretGun: return .turret
+        case .rifle: return .sniper
+        case .pistol: return .rifle
+        case .grenade: return .toss
+        case .chemspray: return .flamer1
+        case .napalm: return .bomb1
+        case .nike: return .rocket2
+        case .w75mm, .w105mm, .w120mm: return .tank1
+        case .w155mm: return .hvygun10
+        default: return .tank1
+        }
+    }
+
+    /// Get an explosion sound for a warhead type
+    func explosionSound(_ warhead: WarheadType) -> VocType {
+        switch warhead {
+        case .he: return .xplobig4
+        case .ap: return .xplos
+        case .fire: return .xplobig6
+        case .laser: return .laser
+        case .pb: return .xplobig7
+        case .hollowPoint: return .xplode
+        default: return .xplos
+        }
+    }
+
+    /// Get an infantry death scream
+    func infantryDeathScream() -> VocType {
+        let screams: [VocType] = [.scream1, .scream3, .scream4, .scream5, .scream6, .scream7, .scream10, .scream11, .scream12]
+        return screams[Int.random(in: 0..<screams.count)]
+    }
+
+    /// Get a unit acknowledgment sound
+    func unitAcknowledgeSound() -> VocType {
+        let acks: [VocType] = [.acknowl, .affirm, .moveout, .noProb, .ready, .roger, .ugotit, .yessir]
+        return acks[Int.random(in: 0..<acks.count)]
+    }
+
+    /// Get a unit report sound
+    func unitReportSound() -> VocType {
+        let reports: [VocType] = [.await_, .report, .unit_, .vehic, .yessir]
+        return reports[Int.random(in: 0..<reports.count)]
+    }
+
     /// Mix a single sound into the output buffer with resampling
     private func mixSoundInto(_ buffer: inout [Float], sound: inout ActiveSound) {
         let vol = sound.volume
@@ -817,74 +877,3 @@ class AudioManager {
 
 let audioManager = AudioManager()
 
-// MARK: - Convenience Functions
-
-/// Play a sound effect (positional)
-func soundEffect(_ voc: VocType, worldX: Double? = nil, worldY: Double? = nil) {
-    audioManager.playSoundEffect(voc, worldX: worldX, worldY: worldY)
-}
-
-/// Play a sound effect (non-positional)
-func soundEffect(_ voc: VocType) {
-    audioManager.playSoundEffect(voc)
-}
-
-/// Play EVA speech
-func speak(_ vox: VoxType) {
-    audioManager.speak(vox)
-}
-
-// MARK: - Game Event Sound Mapping
-
-/// Get the weapon fire sound for a weapon type
-func weaponFireSound(_ weapon: WeaponType) -> VocType {
-    switch weapon {
-    case .mammothTusk, .dragon: return .rocket2
-    case .mlrs, .honestJohn: return .rocket1
-    case .flamethrower, .flameTongue: return .flamer1
-    case .chainGun, .m16, .m60mg: return .mgun2
-    case .obeliskLaser: return .laser
-    case .tomahawk, .towTwo: return .rocket1
-    case .turretGun: return .turret
-    case .rifle: return .sniper
-    case .pistol: return .rifle
-    case .grenade: return .toss
-    case .chemspray: return .flamer1
-    case .napalm: return .bomb1
-    case .nike: return .rocket2
-    case .w75mm, .w105mm, .w120mm: return .tank1
-    case .w155mm: return .hvygun10
-    default: return .tank1
-    }
-}
-
-/// Get an explosion sound for a warhead type
-func explosionSound(_ warhead: WarheadType) -> VocType {
-    switch warhead {
-    case .he: return .xplobig4
-    case .ap: return .xplos
-    case .fire: return .xplobig6
-    case .laser: return .laser
-    case .pb: return .xplobig7
-    case .hollowPoint: return .xplode
-    default: return .xplos
-    }
-}
-
-/// Get an infantry death scream
-func infantryDeathScream() -> VocType {
-    let screams: [VocType] = [.scream1, .scream3, .scream4, .scream5, .scream6, .scream7, .scream10, .scream11, .scream12]
-    return screams[Int.random(in: 0..<screams.count)]
-}
-
-/// Get a unit acknowledgment sound
-func unitAcknowledgeSound() -> VocType {
-    let acks: [VocType] = [.acknowl, .affirm, .moveout, .noProb, .ready, .roger, .ugotit, .yessir]
-    return acks[Int.random(in: 0..<acks.count)]
-}
-
-/// Get a unit report sound
-func unitReportSound() -> VocType {
-    let reports: [VocType] = [.await_, .report, .unit_, .vehic, .yessir]
-    return reports[Int.random(in: 0..<reports.count)]
-}

@@ -232,10 +232,10 @@ func handleSidebarClick(_ x: Int32, _ y: Int32) {
             if session.unitBuildQueue.item == nil && session.sidebarCredits >= item.cost {
                 session.unitBuildQueue.start(typeName: item.name, cost: item.cost, buildTime: item.buildTicks)
                 session.sidebarCredits -= item.cost
-                speak(.building)
+                audioManager.speak(.building)
             } else if session.sidebarCredits < item.cost {
-                speak(.noCash)
-                soundEffect(.scold)
+                audioManager.speak(.noCash)
+                audioManager.play(.scold)
             }
         }
     } else {
@@ -254,10 +254,10 @@ func handleSidebarClick(_ x: Int32, _ y: Int32) {
             if session.structureBuildQueue.item == nil && session.sidebarCredits >= item.cost {
                 session.structureBuildQueue.start(typeName: item.name, cost: item.cost, buildTime: item.buildTicks)
                 session.sidebarCredits -= item.cost
-                speak(.building)
+                audioManager.speak(.building)
             } else if session.sidebarCredits < item.cost {
-                speak(.noCash)
-                soundEffect(.scold)
+                audioManager.speak(.noCash)
+                audioManager.play(.scold)
             }
         }
     }

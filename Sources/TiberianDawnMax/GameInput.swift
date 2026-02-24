@@ -87,7 +87,7 @@ func handleGameLeftUp(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
         if let obj = nearest {
             obj.isSelected = !obj.isSelected || !shiftHeld
             if obj.isSelected && obj.house == world.playerHouse {
-                soundEffect(unitReportSound())
+                audioManager.play(audioManager.unitReportSound())
             }
         }
     }
@@ -115,7 +115,7 @@ func handleGameRightClick(_ x: Int32, _ y: Int32) {
             obj.mission = .attack
             obj.movePath = []
         }
-        soundEffect(unitAcknowledgeSound())
+        audioManager.play(audioManager.unitAcknowledgeSound())
         return
     }
 
@@ -142,5 +142,5 @@ func handleGameRightClick(_ x: Int32, _ y: Int32) {
         obj.mission = .move
         obj.movePath = []  // Clear old path so A* recalculates
     }
-    soundEffect(unitAcknowledgeSound())
+    audioManager.play(audioManager.unitAcknowledgeSound())
 }

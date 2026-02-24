@@ -312,7 +312,7 @@ private func doAirReinforcement(teamType: TeamType) {
 
     // Announce reinforcements if this is the player's house
     if teamType.house == world.playerHouse {
-        speak(.reinforcements)
+        audioManager.speak(.reinforcements)
     }
 }
 
@@ -423,7 +423,7 @@ private func doGroundReinforcement(teamType: TeamType) {
     }
 
     if teamType.house == world.playerHouse {
-        speak(.reinforcements)
+        audioManager.speak(.reinforcements)
     }
 }
 

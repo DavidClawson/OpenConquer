@@ -4,8 +4,6 @@ import Foundation
 
 enum Faction: String { case gdi = "GDI"; case nod = "NOD" }
 enum Difficulty: String, CaseIterable { case easy = "Easy"; case normal = "Normal"; case hard = "Hard" }
-enum MenuState { case main, chooseDifficulty, chooseFaction, launching(Faction, Difficulty), missionBriefing, spriteViewer, soundTest, mapViewer, playing, scoreScreen(won: Bool) }
-
 // MARK: - Sub-Containers
 
 /// Sidebar, credits, build queues, placement/repair/sell mode.
@@ -68,8 +66,9 @@ class CombatState {
 
 class GameSession {
     // MARK: - Menu / UI State
-    var menuState: MenuState = .main
+    var currentScreen: MenuScreen = MainMenuScreen()
     var running: Bool = true
+    var isPlaying: Bool { currentScreen is PlayingScreen }
     var selectedDifficulty: Difficulty = .normal
     var selectedFaction: Faction = .gdi
     var scenarioList: [String] = []
@@ -90,9 +89,15 @@ class GameSession {
     var combat = CombatState()
 
     // MARK: - Campaign
-    var campaignState = CampaignState()
-    var missionScore = MissionScore()
-    var currentScenarioName: String? = nil
+    var campaign = CampaignManager()
+
+    // Forwarding properties (campaign)
+    var campaignState: CampaignState { campaign.state }
+    var missionScore: MissionScore { campaign.score }
+    var currentScenarioName: String? {
+        get { campaign.currentScenarioName }
+        set { campaign.currentScenarioName = newValue }
+    }
 
     // MARK: - House States
     var houseStates: [House: HouseState] = [:]

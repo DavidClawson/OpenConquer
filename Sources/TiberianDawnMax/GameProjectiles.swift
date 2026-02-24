@@ -62,11 +62,11 @@ func spawnProjectile(bulletType: BulletType, from attacker: GameObject,
         if died {
             target.spawnDeathEffects()
             if target.kind == .infantry {
-                soundEffect(infantryDeathScream(), worldX: target.worldX, worldY: target.worldY)
+                audioManager.play(audioManager.infantryDeathScream(), worldX: target.worldX, worldY: target.worldY)
             } else {
-                soundEffect(explosionSound(warhead), worldX: target.worldX, worldY: target.worldY)
+                audioManager.play(audioManager.explosionSound(warhead), worldX: target.worldX, worldY: target.worldY)
             }
-            trackKill(victimHouse: target.house, victimKind: target.kind)
+            session.campaign.trackKill(victimHouse: target.house, victimKind: target.kind)
             let attackerState = getHouseState(attacker.house)
             let victimState = getHouseState(target.house)
             if target.kind == .structure {
@@ -158,11 +158,11 @@ func tickProjectiles() {
                 if died {
                     target.spawnDeathEffects()
                     if target.kind == .infantry {
-                        soundEffect(infantryDeathScream(), worldX: target.worldX, worldY: target.worldY)
+                        audioManager.play(audioManager.infantryDeathScream(), worldX: target.worldX, worldY: target.worldY)
                     } else {
-                        soundEffect(explosionSound(proj.warhead), worldX: target.worldX, worldY: target.worldY)
+                        audioManager.play(audioManager.explosionSound(proj.warhead), worldX: target.worldX, worldY: target.worldY)
                     }
-                    trackKill(victimHouse: target.house, victimKind: target.kind)
+                    session.campaign.trackKill(victimHouse: target.house, victimKind: target.kind)
                     let attackerState = getHouseState(proj.sourceHouse)
                     let victimState = getHouseState(target.house)
                     if target.kind == .structure {

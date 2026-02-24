@@ -48,8 +48,6 @@ class CampaignState {
     }
 }
 
-// session.campaignState -- now in session
-
 // MARK: - Score Tracking
 
 class MissionScore {
@@ -93,25 +91,222 @@ class MissionScore {
     }
 }
 
-// session.missionScore -- now in session
+// MARK: - Score Screen Data
 
-/// Track a kill for scoring purposes
-func trackKill(victimHouse: House, victimKind: ObjectKind) {
-    switch victimKind {
-    case .structure:
-        switch victimHouse {
-        case .goodGuy: session.missionScore.gdiBuildingsKilled += 1
-        case .badGuy: session.missionScore.nodBuildingsKilled += 1
-        case .neutral: session.missionScore.civBuildingsKilled += 1
-        default: break
+struct ScoreScreenData {
+    let scenarioName: String
+    let won: Bool
+    let score: Int
+    let stars: Int
+    let gdiKills: Int
+    let nodKills: Int
+    let civKills: Int
+    let gdiBuildings: Int
+    let nodBuildings: Int
+    let creditsHarvested: Int
+    let elapsedTime: String
+    let briefing: String?
+}
+
+// MARK: - Campaign Manager
+
+class CampaignManager {
+    var state = CampaignState()
+    var score = MissionScore()
+    var currentScenarioName: String? = nil
+
+    /// Track a kill for scoring purposes
+    func trackKill(victimHouse: House, victimKind: ObjectKind) {
+        switch victimKind {
+        case .structure:
+            switch victimHouse {
+            case .goodGuy: score.gdiBuildingsKilled += 1
+            case .badGuy: score.nodBuildingsKilled += 1
+            case .neutral: score.civBuildingsKilled += 1
+            default: break
+            }
+        case .unit, .infantry:
+            switch victimHouse {
+            case .goodGuy: score.gdiUnitsKilled += 1
+            case .badGuy: score.nodUnitsKilled += 1
+            case .neutral: score.civUnitsKilled += 1
+            default: break
+            }
         }
-    case .unit, .infantry:
-        switch victimHouse {
-        case .goodGuy: session.missionScore.gdiUnitsKilled += 1
-        case .badGuy: session.missionScore.nodUnitsKilled += 1
-        case .neutral: session.missionScore.civUnitsKilled += 1
-        default: break
+    }
+
+    /// Handle mission win
+    func handleWin() {
+        guard state.isActive else { return }
+
+        print("Campaign: Mission \(state.scenarioName) WON!")
+        audioManager.speak(.accomplished)
+
+        // Save carry-over credits
+        state.carryOverCredits = session.sidebarCredits * state.carryOverPercent / 100
+
+        // Record score
+        score.elapsedTicks = session.world?.tickCount ?? 0
+
+        // Advance campaign
+        state.advanceMission()
+
+        if state.isComplete {
+            print("Campaign: \(state.currentFaction) campaign COMPLETE!")
+        } else {
+            print("Campaign: Next mission is \(state.scenarioName)")
         }
+    }
+
+    /// Handle mission loss
+    func handleLoss() {
+        guard state.isActive else { return }
+
+        print("Campaign: Mission \(state.scenarioName) LOST!")
+        audioManager.speak(.fail)
+    }
+
+    /// Restart current mission
+    func restart() {
+        guard let scenName = currentScenarioName else { return }
+
+        // Reload the scenario
+        if let scenario = loadScenario(scenName + ".INI", from: mixManager) {
+            scenarioData = scenario
+            initGameWorld(scenario: scenario, scenarioName: scenName)
+            score.reset()
+            session.lastTickTime = 0
+            session.tickAccumulator = 0
+            print("Campaign: Restarted mission \(scenName)")
+        }
+    }
+
+    /// Start the next campaign mission
+    func startNextMission() -> Bool {
+        guard state.isActive && !state.isComplete else { return false }
+
+        let scenName = state.scenarioName
+
+        // Check if the scenario exists
+        guard mixManager.contains("\(scenName).INI") else {
+            // Try alternate variants
+            for variant in ["EA", "EB", "EC"] {
+                let prefix = state.currentFaction == "GDI" ? "SCG" : "SCB"
+                let num = String(format: "%02d", state.currentMission)
+                let altName = "\(prefix)\(num)\(variant)"
+                if mixManager.contains("\(altName).INI") {
+                    state.currentVariant = variant
+                    return startNextMission()
+                }
+            }
+            print("Campaign: Cannot find scenario \(scenName)")
+            return false
+        }
+
+        guard let scenario = loadScenario(scenName + ".INI", from: mixManager) else {
+            print("Campaign: Failed to load \(scenName)")
+            return false
+        }
+
+        scenarioData = scenario
+        initGameWorld(scenario: scenario, scenarioName: scenName)
+
+        // Apply carry-over credits
+        session.sidebarCredits += state.carryOverCredits
+
+        // Reset score for new mission
+        score.reset()
+        session.lastTickTime = 0
+        session.tickAccumulator = 0
+
+        print("Campaign: Started mission \(scenName) with \(state.carryOverCredits) carry-over credits")
+        return true
+    }
+
+    /// Get briefing text for a scenario
+    func briefingText() -> String? {
+        let scenName = state.scenarioName
+        guard let iniData = mixManager.retrieve("\(scenName).INI") else { return nil }
+        guard let iniString = String(data: Data(iniData), encoding: .ascii) else { return nil }
+
+        // Parse the INI to find [Briefing] section
+        let lines = iniString.components(separatedBy: .newlines)
+        var inBriefing = false
+        var briefingParts: [String] = []
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("[") {
+                if inBriefing { break }
+                if trimmed.lowercased() == "[briefing]" {
+                    inBriefing = true
+                }
+                continue
+            }
+            if inBriefing && !trimmed.isEmpty {
+                // Briefing lines are numbered: 1=text, 2=text, etc.
+                if let eqIdx = trimmed.firstIndex(of: "=") {
+                    let text = String(trimmed[trimmed.index(after: eqIdx)...]).trimmingCharacters(in: .whitespaces)
+                    briefingParts.append(text)
+                }
+            }
+        }
+
+        if briefingParts.isEmpty { return nil }
+        return briefingParts.joined(separator: " ")
+    }
+
+    /// Get briefing text for a specific scenario name
+    func briefingText(scenarioName: String) -> String? {
+        guard let iniData = mixManager.retrieve("\(scenarioName).INI") else { return nil }
+        guard let iniString = String(data: Data(iniData), encoding: .ascii) else { return nil }
+
+        let lines = iniString.components(separatedBy: .newlines)
+        var inBriefing = false
+        var briefingParts: [String] = []
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("[") {
+                if inBriefing { break }
+                if trimmed.lowercased() == "[briefing]" {
+                    inBriefing = true
+                }
+                continue
+            }
+            if inBriefing && !trimmed.isEmpty {
+                if let eqIdx = trimmed.firstIndex(of: "=") {
+                    let text = String(trimmed[trimmed.index(after: eqIdx)...]).trimmingCharacters(in: .whitespaces)
+                    briefingParts.append(text)
+                }
+            }
+        }
+
+        if briefingParts.isEmpty { return nil }
+        return briefingParts.joined(separator: " ")
+    }
+
+    /// Generate score screen data for the completed mission
+    func scoreScreen(won: Bool) -> ScoreScreenData {
+        let ticks = score.elapsedTicks
+        let minutes = ticks / (15 * 60)
+        let seconds = (ticks / 15) % 60
+        let timeStr = String(format: "%d:%02d", minutes, seconds)
+
+        return ScoreScreenData(
+            scenarioName: currentScenarioName ?? "Unknown",
+            won: won,
+            score: score.totalScore,
+            stars: score.starRating,
+            gdiKills: score.gdiUnitsKilled,
+            nodKills: score.nodUnitsKilled,
+            civKills: score.civUnitsKilled,
+            gdiBuildings: score.gdiBuildingsKilled,
+            nodBuildings: score.nodBuildingsKilled,
+            creditsHarvested: score.creditsHarvested,
+            elapsedTime: timeStr,
+            briefing: briefingText(scenarioName: currentScenarioName ?? "")
+        )
     }
 }
 
@@ -468,99 +663,7 @@ func quickLoad() -> Bool {
     return loadGame(slot: 0)
 }
 
-// MARK: - Mission Completion
-
-/// Handle mission win
-func handleMissionWin() {
-    guard session.campaignState.isActive else { return }
-
-    print("Campaign: Mission \(session.campaignState.scenarioName) WON!")
-    speak(.accomplished)
-
-    // Save carry-over credits
-    session.campaignState.carryOverCredits = session.sidebarCredits * session.campaignState.carryOverPercent / 100
-
-    // Record score
-    session.missionScore.elapsedTicks = session.world?.tickCount ?? 0
-
-    // Advance campaign
-    session.campaignState.advanceMission()
-
-    if session.campaignState.isComplete {
-        print("Campaign: \(session.campaignState.currentFaction) campaign COMPLETE!")
-    } else {
-        print("Campaign: Next mission is \(session.campaignState.scenarioName)")
-    }
-}
-
-/// Handle mission loss
-func handleMissionLoss() {
-    guard session.campaignState.isActive else { return }
-
-    print("Campaign: Mission \(session.campaignState.scenarioName) LOST!")
-    speak(.fail)
-}
-
-/// Restart current mission
-func restartMission() {
-    guard let scenName = session.currentScenarioName else { return }
-
-    // Reload the scenario
-    if let scenario = loadScenario(scenName + ".INI", from: mixManager) {
-        scenarioData = scenario
-        initGameWorld(scenario: scenario, scenarioName: scenName)
-        session.missionScore.reset()
-        session.lastTickTime = 0
-        session.tickAccumulator = 0
-        print("Campaign: Restarted mission \(scenName)")
-    }
-}
-
-/// Start the next campaign mission
-func startNextMission() -> Bool {
-    guard session.campaignState.isActive && !session.campaignState.isComplete else { return false }
-
-    let scenName = session.campaignState.scenarioName
-
-    // Check if the scenario exists
-    guard mixManager.contains("\(scenName).INI") else {
-        // Try alternate variants
-        for variant in ["EA", "EB", "EC"] {
-            let prefix = session.campaignState.currentFaction == "GDI" ? "SCG" : "SCB"
-            let num = String(format: "%02d", session.campaignState.currentMission)
-            let altName = "\(prefix)\(num)\(variant)"
-            if mixManager.contains("\(altName).INI") {
-                session.campaignState.currentVariant = variant
-                return startNextMission()
-            }
-        }
-        print("Campaign: Cannot find scenario \(scenName)")
-        return false
-    }
-
-    guard let scenario = loadScenario(scenName + ".INI", from: mixManager) else {
-        print("Campaign: Failed to load \(scenName)")
-        return false
-    }
-
-    scenarioData = scenario
-    initGameWorld(scenario: scenario, scenarioName: scenName)
-
-    // Apply carry-over credits
-    session.sidebarCredits += session.campaignState.carryOverCredits
-
-    // Reset score for new mission
-    session.missionScore.reset()
-    session.lastTickTime = 0
-    session.tickAccumulator = 0
-
-    print("Campaign: Started mission \(scenName) with \(session.campaignState.carryOverCredits) carry-over credits")
-    return true
-}
-
 // MARK: - Helper Functions
-
-// session.currentScenarioName -- now in session
 
 func objectKindString(_ kind: ObjectKind) -> String {
     switch kind {
@@ -607,78 +710,4 @@ extension Mission {
         case .sticky: return "Sticky"
         }
     }
-}
-
-// MARK: - Campaign Briefing Text
-
-/// Get briefing text for a scenario
-func getBriefingText(scenarioName: String) -> String? {
-    guard let iniData = mixManager.retrieve("\(scenarioName).INI") else { return nil }
-    guard let iniString = String(data: Data(iniData), encoding: .ascii) else { return nil }
-
-    // Parse the INI to find [Briefing] section
-    let lines = iniString.components(separatedBy: .newlines)
-    var inBriefing = false
-    var briefingParts: [String] = []
-
-    for line in lines {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        if trimmed.hasPrefix("[") {
-            if inBriefing { break }
-            if trimmed.lowercased() == "[briefing]" {
-                inBriefing = true
-            }
-            continue
-        }
-        if inBriefing && !trimmed.isEmpty {
-            // Briefing lines are numbered: 1=text, 2=text, etc.
-            if let eqIdx = trimmed.firstIndex(of: "=") {
-                let text = String(trimmed[trimmed.index(after: eqIdx)...]).trimmingCharacters(in: .whitespaces)
-                briefingParts.append(text)
-            }
-        }
-    }
-
-    if briefingParts.isEmpty { return nil }
-    return briefingParts.joined(separator: " ")
-}
-
-// MARK: - Score Screen Data
-
-struct ScoreScreenData {
-    let scenarioName: String
-    let won: Bool
-    let score: Int
-    let stars: Int
-    let gdiKills: Int
-    let nodKills: Int
-    let civKills: Int
-    let gdiBuildings: Int
-    let nodBuildings: Int
-    let creditsHarvested: Int
-    let elapsedTime: String
-    let briefing: String?
-}
-
-/// Generate score screen data for the completed mission
-func generateScoreScreen(won: Bool) -> ScoreScreenData {
-    let ticks = session.missionScore.elapsedTicks
-    let minutes = ticks / (15 * 60)
-    let seconds = (ticks / 15) % 60
-    let timeStr = String(format: "%d:%02d", minutes, seconds)
-
-    return ScoreScreenData(
-        scenarioName: session.currentScenarioName ?? "Unknown",
-        won: won,
-        score: session.missionScore.totalScore,
-        stars: session.missionScore.starRating,
-        gdiKills: session.missionScore.gdiUnitsKilled,
-        nodKills: session.missionScore.nodUnitsKilled,
-        civKills: session.missionScore.civUnitsKilled,
-        gdiBuildings: session.missionScore.gdiBuildingsKilled,
-        nodBuildings: session.missionScore.nodBuildingsKilled,
-        creditsHarvested: session.missionScore.creditsHarvested,
-        elapsedTime: timeStr,
-        briefing: getBriefingText(scenarioName: session.currentScenarioName ?? "")
-    )
 }

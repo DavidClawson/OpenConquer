@@ -224,7 +224,7 @@ extension GameObject {
 
                 // Play weapon fire sound
                 if let weapon = cachedPrimaryWeapon {
-                    soundEffect(weaponFireSound(weapon), worldX: worldX, worldY: worldY)
+                    audioManager.play(audioManager.weaponFireSound(weapon), worldX: worldX, worldY: worldY)
                 }
 
                 // Spawn projectile — the projectile system handles damage on impact.

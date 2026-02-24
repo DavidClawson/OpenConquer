@@ -47,19 +47,19 @@ func makeMainButtons() -> [Button] {
 
     return [
         Button(label: "Start New Game", x: cx, y: startY, w: bw, h: bh) {
-            session.menuState = .chooseDifficulty
+            session.currentScreen = DifficultyScreen()
         },
         Button(label: "Sprite Viewer", x: cx, y: startY + 60, w: bw, h: bh) {
             loadCurrentSprite()
-            session.menuState = .spriteViewer
+            session.currentScreen = SpriteViewerScreen()
         },
         Button(label: "Sound Test", x: cx, y: startY + 120, w: bw, h: bh) {
             session.soundTest.initialize()
-            session.menuState = .soundTest
+            session.currentScreen = SoundTestScreen()
         },
         Button(label: "Map Viewer", x: cx, y: startY + 180, w: bw, h: bh) {
             loadMapViewerData(session.scenarioList[session.scenarioIndex])
-            session.menuState = .mapViewer
+            session.currentScreen = MapViewerScreen()
         },
         Button(label: "Exit Game", x: cx, y: startY + 240, w: bw, h: bh) {
             session.running = false
@@ -76,7 +76,7 @@ func makeDifficultyButtons() -> [Button] {
     return Difficulty.allCases.enumerated().map { i, diff in
         Button(label: diff.rawValue, x: cx, y: startY + Int32(i) * 60, w: bw, h: bh) {
             session.selectedDifficulty = diff
-            session.menuState = .chooseFaction
+            session.currentScreen = FactionScreen()
         }
     }
 }
@@ -92,148 +92,19 @@ func makeFactionButtons() -> [Button] {
     return [
         Button(label: "GDI", x: startX, y: cy, w: bw, h: bh) {
             session.selectedFaction = .gdi
-            session.menuState = .launching(.gdi, session.selectedDifficulty)
+            session.currentScreen = LaunchingScreen(faction: .gdi, difficulty: session.selectedDifficulty)
         },
         Button(label: "NOD", x: startX + bw + gap, y: cy, w: bw, h: bh) {
             session.selectedFaction = .nod
-            session.menuState = .launching(.nod, session.selectedDifficulty)
+            session.currentScreen = LaunchingScreen(faction: .nod, difficulty: session.selectedDifficulty)
         },
     ]
 }
 
 // MARK: - Menu State Rendering
 
-func renderMenuState(_ renderer: OpaquePointer?, state: MenuState) {
-    switch state {
-    case .main:
-        drawText(renderer, "Command & Conquer", centerX: renderState.windowWidth / 2, centerY: 80, color: .amber, scale: 4)
-        drawText(renderer, "Tiberian Dawn Max", centerX: renderState.windowWidth / 2, centerY: 140, color: .green, scale: 3)
-
-        for btn in makeMainButtons() {
-            btn.draw(renderer, highlighted: btn.contains(input.mouseX, input.mouseY))
-        }
-
-        drawText(renderer, "R964", centerX: renderState.windowWidth / 2, centerY: renderState.windowHeight - 40, color: .gray, scale: 1)
-
-    case .chooseDifficulty:
-        drawText(renderer, "Select Difficulty", centerX: renderState.windowWidth / 2, centerY: 120, color: .amber, scale: 3)
-
-        for btn in makeDifficultyButtons() {
-            btn.draw(renderer, highlighted: btn.contains(input.mouseX, input.mouseY))
-        }
-
-        drawText(renderer, "Esc: Back", centerX: renderState.windowWidth / 2, centerY: renderState.windowHeight - 40, color: .gray, scale: 1)
-
-    case .chooseFaction:
-        drawText(renderer, "Choose Your Side", centerX: renderState.windowWidth / 2, centerY: 100, color: .amber, scale: 3)
-        drawText(renderer, "Difficulty: \(session.selectedDifficulty.rawValue)", centerX: renderState.windowWidth / 2, centerY: 160, color: .green, scale: 2)
-
-        for btn in makeFactionButtons() {
-            let isGDI = btn.label == "GDI"
-            let highlighted = btn.contains(input.mouseX, input.mouseY)
-            btn.draw(renderer, highlighted: highlighted)
-            // Subtitle
-            let subtitle = isGDI ? "Global Defense Initiative" : "Brotherhood of Nod"
-            drawText(renderer, subtitle, centerX: btn.x + btn.w / 2, centerY: btn.y + btn.h + 20, color: isGDI ? .amber : .red, scale: 1)
-        }
-
-        drawText(renderer, "Esc: Back", centerX: renderState.windowWidth / 2, centerY: renderState.windowHeight - 40, color: .gray, scale: 1)
-
-    case .launching(let faction, let difficulty):
-        drawText(renderer, "Loading...", centerX: renderState.windowWidth / 2, centerY: renderState.windowHeight / 2, color: .green, scale: 3)
-        SDL_RenderPresent(renderer)
-
-        // Initialize campaign
-        session.campaignState.currentFaction = (faction == .gdi) ? "GDI" : "NOD"
-        session.campaignState.difficulty = (difficulty == .easy) ? 0 : (difficulty == .normal ? 1 : 2)
-        session.campaignState.currentMission = 1
-        session.campaignState.currentVariant = "EA"
-        session.campaignState.isActive = true
-        session.campaignState.carryOverCredits = 0
-        session.campaignState.completedMissions.removeAll()
-
-        // Show mission briefing before starting
-        session.menuState = .missionBriefing
-
-    case .missionBriefing:
-        renderMissionBriefing(renderer)
-
-    case .scoreScreen(let won):
-        renderScoreScreen(renderer, won: won)
-
-    case .spriteViewer:
-        let shapeName = viewableShapes[renderState.spriteViewerIndex]
-
-        // Title and info
-        drawText(renderer, "Sprite Viewer", centerX: renderState.windowWidth / 2, centerY: 30, color: .amber, scale: 3)
-        drawText(renderer, shapeName, centerX: renderState.windowWidth / 2, centerY: 70, color: .green, scale: 2)
-
-        if let shp = renderState.currentSHP, !shp.frames.isEmpty {
-            // Auto-animate
-            let now = SDL_GetTicks()
-            if renderState.spriteViewerAnimating && now - renderState.spriteViewerFrameTimer > 100 {
-                renderState.spriteViewerFrameTimer = now
-                renderState.spriteViewerFrame = (renderState.spriteViewerFrame + 1) % shp.frames.count
-            }
-
-            let frame = shp.frames[renderState.spriteViewerFrame]
-            let info = "Frame \(renderState.spriteViewerFrame)/\(shp.frames.count)  \(frame.width)x\(frame.height)"
-            drawText(renderer, info, centerX: renderState.windowWidth / 2, centerY: 100, color: .green, scale: 1)
-
-            // Calculate scale to fit sprite nicely
-            let maxDisplayW: Int32 = 400
-            let maxDisplayH: Int32 = 350
-            let scaleX = frame.width > 0 ? maxDisplayW / Int32(frame.width) : 1
-            let scaleY = frame.height > 0 ? maxDisplayH / Int32(frame.height) : 1
-            let pixelScale = max(1, min(scaleX, scaleY))
-
-            let drawW = Int32(frame.width) * pixelScale
-            let drawH = Int32(frame.height) * pixelScale
-            let drawX = renderState.windowWidth / 2 - drawW / 2
-            let drawY: Int32 = 130 + (maxDisplayH - drawH) / 2
-
-            // Draw a subtle border around the sprite area
-            SDL_SetRenderDrawColor(renderer, 40, 40, 40, 255)
-            var border = SDL_Rect(x: drawX - 2, y: drawY - 2, w: drawW + 4, h: drawH + 4)
-            SDL_RenderDrawRect(renderer, &border)
-
-            // Render the sprite
-            renderSHPFrame(renderer, frame: frame, atX: drawX, atY: drawY, scale: pixelScale)
-        } else {
-            drawText(renderer, "Not Found", centerX: renderState.windowWidth / 2, centerY: renderState.windowHeight / 2, color: .red, scale: 2)
-        }
-
-        // Controls
-        let animLabel = renderState.spriteViewerAnimating ? "Playing" : "Paused"
-        drawText(renderer, "Left/Right: Shape  Up/Down: Frame  Space: \(animLabel)", centerX: renderState.windowWidth / 2, centerY: renderState.windowHeight - 60, color: .gray, scale: 1)
-        drawText(renderer, "Esc: Back", centerX: renderState.windowWidth / 2, centerY: renderState.windowHeight - 35, color: .gray, scale: 1)
-
-    case .soundTest:
-        session.soundTest.render(renderer)
-
-    case .mapViewer:
-        // Increment animation frame for terrain (trees etc.)
-        renderState.animationFrame += 1
-
-        // Render the map tiles + scenario objects
-        renderMapViewer(renderer)
-
-        // HUD overlay
-        let cellX = renderState.cameraX / 24
-        let cellY = renderState.cameraY / 24
-        let scenarioLabel = "\(session.scenarioList[session.scenarioIndex]) (\(session.scenarioIndex + 1)/\(session.scenarioList.count))"
-        drawText(renderer, "Map Viewer - \(scenarioLabel)", centerX: renderState.windowWidth / 2, centerY: 15, color: .amber, scale: 2)
-        let zoomPct = String(format: "%.0f%%", renderState.zoomLevel * 100)
-        drawText(renderer, "Camera: \(cellX) \(cellY)  Zoom: \(zoomPct)", centerX: renderState.windowWidth / 2, centerY: 35, color: .green, scale: 1)
-        if let sd = scenarioData {
-            let counts = "T:\(sd.terrain.count) O:\(sd.overlays.count) S:\(sd.structures.count) U:\(sd.units.count) I:\(sd.infantry.count)"
-            drawText(renderer, counts, centerX: renderState.windowWidth / 2, centerY: 52, color: .green, scale: 1)
-        }
-        drawText(renderer, "Arrows/Drag: Pan  +/-: Zoom  [/]: Scenario  G: Grid  I: Info  T: Triggers  B: Base  P: Play  0-9: WP", centerX: renderState.windowWidth / 2, centerY: renderState.windowHeight - 15, color: .gray, scale: 1)
-
-    case .playing:
-        renderGame(renderer)
-    }
+func renderMenuState(_ renderer: OpaquePointer?) {
+    session.currentScreen.render(renderer)
 }
 
 // MARK: - Mission Briefing Screen
@@ -250,7 +121,7 @@ func renderMissionBriefing(_ renderer: OpaquePointer?) {
     drawText(renderer, "Mission \(missionNum)", centerX: cx, centerY: 100, color: .green, scale: 3)
 
     // Briefing text
-    let briefing = getBriefingText(scenarioName: scenName)
+    let briefing = session.campaign.briefingText(scenarioName: scenName)
     if let briefing = briefing, !briefing.isEmpty {
         // Word-wrap briefing text to fit screen
         let maxCharsPerLine = Int((renderState.windowWidth - 100) / 12)  // scale 2 chars are ~12px wide
@@ -279,7 +150,7 @@ func renderMissionBriefing(_ renderer: OpaquePointer?) {
 
 func renderScoreScreen(_ renderer: OpaquePointer?, won: Bool) {
     let cx = renderState.windowWidth / 2
-    let scoreData = generateScoreScreen(won: won)
+    let scoreData = session.campaign.scoreScreen(won: won)
 
     // Title
     if won {
