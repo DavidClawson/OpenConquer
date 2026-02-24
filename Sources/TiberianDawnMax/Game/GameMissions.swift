@@ -707,15 +707,19 @@ extension GameObject {
             session.previousBuildOptionCount = newTotal
         }
 
-        // Refinery: spawn a free harvester
+        // Refinery: spawn a free harvester at the building exit
         if upper == "PROC" {
+            let size = buildingSize("PROC")
+            // Spawn below the refinery footprint (exit point)
+            let exitX = worldX
+            let exitY = worldY + Double(size.h * 24) / 2.0 + 12.0
             let harv = GameObject(
                 id: world.allocateId(),
                 typeName: "HARV",
                 house: house,
                 kind: .unit,
-                worldX: worldX,
-                worldY: worldY + 24.0,  // Spawn just below the refinery
+                worldX: exitX,
+                worldY: exitY,
                 facing: 128,  // Facing south
                 strength: resolveStrength(typeName: "HARV", kind: .unit, scenarioStrength: 256),
                 mission: .harvest,

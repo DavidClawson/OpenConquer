@@ -487,10 +487,10 @@ func renderGame(_ renderer: OpaquePointer?) {
         }
     }
 
-    // === Pass 5b: Repair wrench indicator on damaged player buildings ===
+    // === Pass 5b: Repair wrench indicator on buildings actively being repaired ===
     for obj in world.objects {
         guard obj.kind == .structure && obj.house == world.playerHouse &&
-              obj.strength > 0 && obj.strength < obj.maxStrength else { continue }
+              obj.strength > 0 && obj.isRepairing else { continue }
         let screenX = Int32(obj.worldX - Double(camX))
         let screenY = Int32(obj.worldY - Double(camY))
         let size = buildingSize(obj.typeName)

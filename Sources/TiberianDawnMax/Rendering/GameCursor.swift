@@ -68,20 +68,22 @@ func renderGameCursor(_ renderer: OpaquePointer?, world: GameWorld) {
         let worldPos = gameScreenToWorld(input.mouseX, input.mouseY)
         let selected = world.selectedObjects()
 
-        // Check if hovering over a damaged friendly building → repair wrench cursor
+        // Check if hovering over a damaged friendly building in repair mode → repair wrench cursor
         var hoveringDamagedBuilding = false
-        for obj in world.objects {
-            if obj.kind != .structure { continue }
-            if obj.house != world.playerHouse { continue }
-            if obj.strength <= 0 { continue }
-            if obj.strength >= obj.maxStrength { continue }
-            let size = buildingSize(obj.typeName)
-            let halfW = Double(size.w * 24) / 2.0
-            let halfH = Double(size.h * 24) / 2.0
-            if abs(worldPos.worldX - obj.worldX) <= halfW && abs(worldPos.worldY - obj.worldY) <= halfH {
-                cursor = cursorRepair
-                hoveringDamagedBuilding = true
-                break
+        if session.isRepairMode {
+            for obj in world.objects {
+                if obj.kind != .structure { continue }
+                if obj.house != world.playerHouse { continue }
+                if obj.strength <= 0 { continue }
+                if obj.strength >= obj.maxStrength { continue }
+                let size = buildingSize(obj.typeName)
+                let halfW = Double(size.w * 24) / 2.0
+                let halfH = Double(size.h * 24) / 2.0
+                if abs(worldPos.worldX - obj.worldX) <= halfW && abs(worldPos.worldY - obj.worldY) <= halfH {
+                    cursor = cursorRepair
+                    hoveringDamagedBuilding = true
+                    break
+                }
             }
         }
 

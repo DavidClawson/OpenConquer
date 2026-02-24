@@ -68,31 +68,45 @@ func handleGameLeftUp(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
         let worldPos = gameScreenToWorld(x, y)
         let hitRadius = 14.0 / renderState.gameZoomLevel
 
-        // Check if clicking on a damaged friendly building → toggle repair
+        // Check if clicking on a friendly building → select it (or toggle repair in repair mode)
+        var clickedBuilding: GameObject? = nil
         for obj in world.objects {
             if obj.kind != .structure { continue }
             if obj.house != world.playerHouse { continue }
             if obj.strength <= 0 { continue }
-            if obj.strength >= obj.maxStrength { continue }
             let size = buildingSize(obj.typeName)
             let halfW = Double(size.w * 24) / 2.0
             let halfH = Double(size.h * 24) / 2.0
             if abs(worldPos.worldX - obj.worldX) <= halfW && abs(worldPos.worldY - obj.worldY) <= halfH {
-                // Toggle repair on this building
-                if obj.isRepairing {
-                    obj.isRepairing = false
-                    obj.mission = .guard_
-                } else {
-                    obj.isRepairing = true
-                    obj.mission = .repair
-                }
-                input.selectionBoxStartX = nil
-                input.selectionBoxStartY = nil
-                input.selectionBoxEndX = nil
-                input.selectionBoxEndY = nil
-                input.isDragging = false
-                return
+                clickedBuilding = obj
+                break
             }
+        }
+
+        if let building = clickedBuilding {
+            if session.isRepairMode {
+                // Repair mode: toggle repair on damaged buildings
+                if building.strength < building.maxStrength {
+                    if building.isRepairing {
+                        building.isRepairing = false
+                        building.mission = .guard_
+                    } else {
+                        building.isRepairing = true
+                        building.mission = .repair
+                    }
+                }
+                session.isRepairMode = false
+            } else {
+                // Normal click: select the building
+                if !shiftHeld { world.deselectAll() }
+                building.isSelected = true
+            }
+            input.selectionBoxStartX = nil
+            input.selectionBoxStartY = nil
+            input.selectionBoxEndX = nil
+            input.selectionBoxEndY = nil
+            input.isDragging = false
+            return
         }
 
         var nearest: GameObject? = nil

@@ -96,11 +96,15 @@ func buildPassabilityMap() {
     }
 
     // Mark water/land tiles appropriately for each map.
-    // Only pure water templates (W1, W2) are fully land-impassable.
-    // Shore (SH*), river (RV*), falls, ford, and bridge templates are multi-cell
-    // with a mix of land and water sub-tiles. Without per-icon land type data,
-    // we keep them land-passable to avoid blocking large terrain areas.
-    // Water passability: W1, W2, SH*, RV*, FALLS*, FORD* are water-passable for boats.
+    // For pure water (W1, W2): land-impassable, water-passable.
+    // For shore/river/falls/ford: use per-icon pixel analysis to determine
+    // which sub-tiles are water vs. land. Tiles with predominantly blue/water
+    // pixels are marked land-impassable.
+    // For bridges: land-passable, water-impassable.
+    let theater = scenarioData?.theater ?? .temperate
+    let palette = renderState.gamePalette
+    var shoreICNCache: [String: ICNFile] = [:]
+
     for i in 0..<4096 {
         let templateType = Int(mapCells[i].templateType)
         if templateType != 0xFF && templateType < templateTable.count {
@@ -111,11 +115,18 @@ func buildPassabilityMap() {
                 // waterPassability[i] stays true
             } else if name.hasPrefix("SH") || name.hasPrefix("RV") ||
                       name.hasPrefix("FALLS") || name.hasPrefix("FORD") {
-                // Shore/river/falls/ford: passable for BOTH land and water
-                // These multi-cell templates have mixed terrain; keep land-passable
-                // to avoid blocking banks/beaches. Boats can also traverse.
-                // landPassability[i] stays true
-                // waterPassability[i] stays true
+                // Shore/river/falls/ford: analyze per-icon pixel data
+                // to classify each sub-tile as water vs. land.
+                let iconIndex = Int(mapCells[i].iconIndex)
+                let isWater = isIconWater(
+                    icnName: name, iconIndex: iconIndex,
+                    theater: theater, palette: palette,
+                    cache: &shoreICNCache
+                )
+                if isWater {
+                    landPassability[i] = false
+                }
+                // waterPassability stays true for boats
             } else if name.hasPrefix("BRIDGE") {
                 // Bridges: passable by land, not by water
                 // landPassability[i] stays true
@@ -145,7 +156,63 @@ func buildPassabilityMap() {
 
     let landImpassable = landPassability.filter { !$0 }.count
     let waterImpassable = waterPassability.filter { !$0 }.count
-    print("GameMap: Built passability map, \(landImpassable) land-impassable, \(waterImpassable) water-impassable cells")
+    let shoreWaterCells = shoreICNCache.isEmpty ? 0 :
+        (0..<4096).filter { i in
+            let tt = Int(mapCells[i].templateType)
+            if tt == 0xFF || tt >= templateTable.count { return false }
+            let n = templateTable[tt].icnName.uppercased()
+            return (n.hasPrefix("SH") || n.hasPrefix("RV")) && !landPassability[i]
+        }.count
+    print("GameMap: Built passability map, \(landImpassable) land-impassable, \(waterImpassable) water-impassable cells, \(shoreWaterCells) shore water cells")
+}
+
+// MARK: - Per-Icon Water Detection
+
+/// Determine if a specific icon within a shore/river template is predominantly water
+/// by analyzing its pixel data against the palette. Water pixels are identified by
+/// having a dominant blue channel in the RGB palette color.
+func isIconWater(
+    icnName: String, iconIndex: Int,
+    theater: TheaterType, palette: [(r: UInt8, g: UInt8, b: UInt8)],
+    cache: inout [String: ICNFile]
+) -> Bool {
+    // Load ICN file from MIX if not cached
+    if cache[icnName] == nil {
+        let filename = icnName + theater.suffix
+        if let data = mixManager.retrieve(filename) {
+            cache[icnName] = try? ICNFile(data: data)
+        }
+    }
+
+    guard let icn = cache[icnName], let pixels = icn.tile(icon: iconIndex) else {
+        return false  // Can't load tile data — assume land (safe default)
+    }
+
+    guard !palette.isEmpty else { return false }
+
+    // Count pixels that look like water (blue-dominant in the palette)
+    var waterPixels = 0
+    var totalPixels = 0
+
+    for pixel in pixels {
+        let palIdx = Int(pixel)
+        guard palIdx > 0 && palIdx < palette.count else { continue }  // Skip index 0 (transparent)
+        totalPixels += 1
+        let c = palette[palIdx]
+        let r = Int(c.r)
+        let g = Int(c.g)
+        let b = Int(c.b)
+        // Water is blue-dominant: blue channel significantly exceeds red and green
+        // Also catch dark water (low overall but still blue-ish)
+        if b > r + 30 && b > g + 10 && b > 60 {
+            waterPixels += 1
+        }
+    }
+
+    guard totalPixels > 0 else { return false }
+
+    // If more than 50% of visible pixels are water-colored, classify as water
+    return Double(waterPixels) / Double(totalPixels) > 0.50
 }
 
 /// Get the appropriate passability map for a given speed type
