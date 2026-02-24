@@ -467,6 +467,14 @@ struct SavedObject: Codable {
     // Flags
     var isInLimbo: Bool?
     var isTethered: Bool?
+
+    // Rally point (buildings)
+    var rallyPointX: Double?
+    var rallyPointY: Double?
+
+    // Patrol route
+    var patrolWaypoints: [SavedCell]?
+    var patrolIndex: Int?
 }
 
 struct SavedCell: Codable {
@@ -605,7 +613,13 @@ func saveGame(slot: Int, description: String = "") -> Bool {
             isTakingOff: obj.isTakingOff ? true : nil,
             // V2 flags
             isInLimbo: obj.isInLimbo ? true : nil,
-            isTethered: obj.isTethered ? true : nil
+            isTethered: obj.isTethered ? true : nil,
+            // Rally point
+            rallyPointX: obj.rallyPointX,
+            rallyPointY: obj.rallyPointY,
+            // Patrol
+            patrolWaypoints: obj.patrolWaypoints.isEmpty ? nil : obj.patrolWaypoints.map { SavedCell(x: Int($0.x), y: Int($0.y)) },
+            patrolIndex: obj.patrolIndex > 0 ? obj.patrolIndex : nil
         )
         savedObjects.append(saved)
     }
@@ -841,6 +855,12 @@ func loadGame(slot: Int) -> Bool {
             obj.isTakingOff = saved.isTakingOff ?? false
             obj.isInLimbo = saved.isInLimbo ?? false
             obj.isTethered = saved.isTethered ?? false
+            obj.rallyPointX = saved.rallyPointX
+            obj.rallyPointY = saved.rallyPointY
+            if let pwps = saved.patrolWaypoints {
+                obj.patrolWaypoints = pwps.map { (x: Double($0.x), y: Double($0.y)) }
+            }
+            obj.patrolIndex = saved.patrolIndex ?? 0
 
             world.addObject(obj)
             world.nextObjectId = max(world.nextObjectId, saved.id + 1)
@@ -1145,6 +1165,7 @@ extension Mission {
         case .missile: return "Missile"
         case .sticky: return "Sticky"
         case .sabotage: return "Sabotage"
+        case .patrol: return "Patrol"
         }
     }
 }

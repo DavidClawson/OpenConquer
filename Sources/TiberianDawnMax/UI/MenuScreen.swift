@@ -23,7 +23,17 @@ extension MenuScreen {
 // MARK: - Main Menu Screen
 
 class MainMenuScreen: MenuScreen {
+    private var musicStarted = false
+
     func render(_ renderer: OpaquePointer?) {
+        // Start menu music on first render
+        if !musicStarted {
+            musicStarted = true
+            if !audioManager.isMusicPlaying {
+                audioManager.playMenuMusic(.aoi)
+            }
+        }
+
         drawText(renderer, "Command & Conquer", centerX: renderState.windowWidth / 2, centerY: 80, color: .amber, scale: 4)
         drawText(renderer, "Tiberian Dawn Max", centerX: renderState.windowWidth / 2, centerY: 140, color: .green, scale: 3)
 
@@ -31,12 +41,20 @@ class MainMenuScreen: MenuScreen {
             btn.draw(renderer, highlighted: btn.contains(input.mouseX, input.mouseY))
         }
 
+        // Music status
+        let musicStatus = audioManager.musicEnabled ? "M: Music ON" : "M: Music OFF"
+        drawText(renderer, musicStatus, centerX: renderState.windowWidth / 2, centerY: renderState.windowHeight - 60, color: .gray, scale: 1)
         drawText(renderer, "R964", centerX: renderState.windowWidth / 2, centerY: renderState.windowHeight - 40, color: .gray, scale: 1)
     }
 
     func handleKeyDown(_ key: Int32) {
         if key == Int32(SDLK_ESCAPE.rawValue) {
             session.running = false
+        } else if key == Int32(SDLK_m.rawValue) {
+            audioManager.toggleMusic()
+            if audioManager.musicEnabled && !audioManager.isMusicPlaying {
+                audioManager.playMenuMusic(.aoi)
+            }
         }
     }
 
@@ -467,6 +485,8 @@ class MapViewerScreen: MenuScreen {
                 session.missionScore.reset()
                 session.currentScreen = PlayingScreen()
             }
+        } else if key == Int32(SDLK_m.rawValue) {
+            audioManager.toggleMusic()
         } else if key >= Int32(SDLK_0.rawValue) && key <= Int32(SDLK_9.rawValue) {
             let wpId = Int(key - Int32(SDLK_0.rawValue))
             if let sd = scenarioData,
@@ -540,13 +560,23 @@ class MapViewerScreen: MenuScreen {
 // MARK: - Playing Screen
 
 class PlayingScreen: MenuScreen {
+    private var musicStarted = false
+
     func render(_ renderer: OpaquePointer?) {
+        // Start gameplay music on first render
+        if !musicStarted {
+            musicStarted = true
+            audioManager.startGameplayMusic()
+        }
         renderGame(renderer)
     }
 
     func handleKeyDown(_ key: Int32) {
         if key == Int32(SDLK_ESCAPE.rawValue) {
-            if session.superWeaponTargeting != nil {
+            if session.isPatrolMode {
+                session.isPatrolMode = false
+                session.patrolModeWaypoints = []
+            } else if session.superWeaponTargeting != nil {
                 session.superWeaponTargeting = nil
             } else if session.isAttackMoveMode {
                 session.isAttackMoveMode = false
@@ -660,6 +690,17 @@ class PlayingScreen: MenuScreen {
                     obj.moveWaypoints = []
                 }
             }
+        } else if key == Int32(SDLK_p.rawValue) {
+            // Patrol mode: press P, then click to add waypoints, right-click/ESC to finalize
+            if let world = session.world, !world.selectedObjects().isEmpty {
+                let hasMovable = world.selectedObjects().contains {
+                    $0.kind != .structure && $0.house == world.playerHouse
+                }
+                if hasMovable {
+                    session.isPatrolMode = true
+                    session.patrolModeWaypoints = []
+                }
+            }
         } else if key == Int32(SDLK_r.rawValue) {
             if session.triggerWinState != .playing {
                 session.campaign.restart()
@@ -696,6 +737,12 @@ class PlayingScreen: MenuScreen {
                         obj.isSelected = true
                     }
                 }
+            }
+        } else if key == Int32(SDLK_m.rawValue) {
+            // M key: toggle music on/off
+            audioManager.toggleMusic()
+            if audioManager.musicEnabled && !audioManager.isMusicPlaying {
+                audioManager.startGameplayMusic()
             }
         } else if isNumberKey(key) {
             // Control groups: Ctrl+0-9 to assign, 0-9 to recall, double-tap to center
@@ -767,6 +814,10 @@ class PlayingScreen: MenuScreen {
                     session.isRepairMode = false
                     session.isSellMode = false
                 }
+            } else if session.isPatrolMode {
+                // Patrol mode: left-click adds a waypoint
+                let worldPos = gameScreenToWorld(x, y)
+                session.patrolModeWaypoints.append((x: worldPos.worldX, y: worldPos.worldY))
             } else if session.isAttackMoveMode {
                 // Attack-move: issue move order — units engage enemies along the way
                 session.isAttackMoveMode = false
@@ -776,6 +827,18 @@ class PlayingScreen: MenuScreen {
                         $0.kind != .structure && $0.house == world.playerHouse
                     }
                     let count = movable.count
+
+                    // Squad speed matching for attack-move
+                    let groupSpeed: Double?
+                    if count >= 2 {
+                        let speeds = movable.map { $0.effectiveSpeed }
+                        let minSpd = speeds.min() ?? 0
+                        let maxSpd = speeds.max() ?? 0
+                        groupSpeed = (minSpd < maxSpd) ? minSpd : nil
+                    } else {
+                        groupSpeed = nil
+                    }
+
                     let cols = max(1, Int(ceil(sqrt(Double(count)))))
                     let spacing = 36.0
                     for (i, obj) in movable.enumerated() {
@@ -792,6 +855,7 @@ class PlayingScreen: MenuScreen {
                         obj.attackTarget = nil
                         obj.isAttackMoving = true
                         obj.moveWaypoints = []
+                        obj.groupMoveSpeed = groupSpeed
                     }
                     audioManager.play(audioManager.unitAcknowledgeSound())
                 }

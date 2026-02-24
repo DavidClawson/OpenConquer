@@ -300,6 +300,16 @@ func spawnProducedUnit(_ typeName: String, world: GameWorld) {
         speed: speed
     )
     world.addObject(obj)
+
+    // Rally point: if producer has a rally point, send the new unit there
+    if upper != "HARV",
+       let rpX = producer.rallyPointX,
+       let rpY = producer.rallyPointY {
+        obj.moveTargetX = rpX
+        obj.moveTargetY = rpY
+        obj.mission = .move
+        obj.movePath = []
+    }
 }
 
 // MARK: - Structure Placement

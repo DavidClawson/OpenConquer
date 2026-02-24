@@ -160,12 +160,56 @@ func handleGameLeftUp(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
     input.isDragging = false
 }
 
+/// Check if a building type is a production structure (can have rally points)
+func isProductionStructure(_ typeName: String) -> Bool {
+    let upper = typeName.uppercased()
+    return ["PYLE", "HAND", "WEAP", "AFLD", "HPAD"].contains(upper)
+}
+
 func handleGameRightClick(_ x: Int32, _ y: Int32, shiftHeld: Bool = false) {
     guard let world = session.world else { return }
     let worldPos = gameScreenToWorld(x, y)
 
+    // Cancel patrol mode on right-click
+    if session.isPatrolMode {
+        // If we have waypoints, commit them to selected units
+        if !session.patrolModeWaypoints.isEmpty {
+            for obj in world.selectedObjects() {
+                if obj.kind == .structure { continue }
+                if obj.house != world.playerHouse { continue }
+                obj.patrolWaypoints = session.patrolModeWaypoints
+                obj.patrolIndex = 0
+                obj.mission = .patrol
+                obj.moveTargetX = nil
+                obj.moveTargetY = nil
+                obj.movePath = []
+                obj.attackTarget = nil
+                obj.isAttackMoving = false
+                obj.moveWaypoints = []
+            }
+            audioManager.play(audioManager.unitAcknowledgeSound())
+        }
+        session.isPatrolMode = false
+        session.patrolModeWaypoints = []
+        return
+    }
+
     let selected = world.selectedObjects()
     if selected.isEmpty { return }
+
+    // Check if all selected objects are production structures -> set rally point
+    let playerSelected = selected.filter { $0.house == world.playerHouse }
+    let allProductionBuildings = !playerSelected.isEmpty && playerSelected.allSatisfy {
+        $0.kind == .structure && isProductionStructure($0.typeName)
+    }
+    if allProductionBuildings {
+        for obj in playerSelected {
+            obj.rallyPointX = worldPos.worldX
+            obj.rallyPointY = worldPos.worldY
+        }
+        audioManager.play(audioManager.unitAcknowledgeSound())
+        return
+    }
 
     // Check if right-clicking on an enemy → attack order
     if let enemy = findEnemyAtWorldPos(worldX: worldPos.worldX, worldY: worldPos.worldY) {
@@ -175,6 +219,7 @@ func handleGameRightClick(_ x: Int32, _ y: Int32, shiftHeld: Bool = false) {
             obj.movePath = []
             obj.isAttackMoving = false
             obj.moveWaypoints = []
+            obj.groupMoveSpeed = nil
             // Commando targeting a building → sabotage mission (C4)
             if obj.typeName.uppercased() == "RMBO" && enemy.kind == .structure {
                 obj.mission = .sabotage
@@ -189,6 +234,22 @@ func handleGameRightClick(_ x: Int32, _ y: Int32, shiftHeld: Bool = false) {
     // Formation spread: arrange targets in a grid so units don't pile up
     let movable = selected.filter { $0.kind != .structure }
     let count = movable.count
+
+    // Squad speed matching: compute minimum speed for mixed groups
+    let groupSpeed: Double?
+    if count >= 2 {
+        let speeds = movable.map { $0.effectiveSpeed }
+        let minSpeed = speeds.min() ?? 0
+        let maxSpeed = speeds.max() ?? 0
+        groupSpeed = (minSpeed < maxSpeed) ? minSpeed : nil
+    } else {
+        groupSpeed = nil
+    }
+    // Single unit: clear any previous group speed
+    if count == 1 {
+        movable[0].groupMoveSpeed = nil
+    }
+
     let cols = max(1, Int(ceil(sqrt(Double(count)))))
     let spacing = 36.0  // 1.5 cells apart to avoid stacking
 
@@ -253,6 +314,7 @@ func handleGameRightClick(_ x: Int32, _ y: Int32, shiftHeld: Bool = false) {
                 obj.mission = .move
                 obj.movePath = []
             }
+            obj.groupMoveSpeed = groupSpeed
         } else {
             // Normal move: clear waypoints and set target directly
             obj.moveTargetX = tgtX
@@ -262,6 +324,7 @@ func handleGameRightClick(_ x: Int32, _ y: Int32, shiftHeld: Bool = false) {
             obj.mission = .move
             obj.movePath = []
             obj.moveWaypoints = []
+            obj.groupMoveSpeed = groupSpeed
         }
     }
     audioManager.play(audioManager.unitAcknowledgeSound())

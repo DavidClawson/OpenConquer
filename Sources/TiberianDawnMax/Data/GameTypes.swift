@@ -570,6 +570,7 @@ extension Mission {
         case .missile:        return .missile
         case .selling:        return nil  // No MissionType equivalent
         case .sabotage:       return nil  // No MissionType equivalent
+        case .patrol:         return nil  // No MissionType equivalent
         }
     }
 }

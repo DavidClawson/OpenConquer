@@ -270,6 +270,10 @@ extension GameObject {
                 reloadTimer = effectiveReloadTicks(resolved.reloadTicks)
                 lastFireTick = world.tickCount
 
+                // Trigger fire animation state
+                isFiringAnim = true
+                fireAnimTicks = 4
+
                 // Spawn muzzle flash animation at barrel position
                 // Use weapon-appropriate flash: small piff for small arms, GUNFIRE for cannons
                 let fireFacing = hasTurret ? turretFacing : facing

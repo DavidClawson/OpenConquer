@@ -52,6 +52,9 @@ func tickAI() {
         tickAIDamagedRetreat(world: world)
     }
 
+    // AI tactical behaviors (recon, hit-and-run, flanking, harassment)
+    tickAITactics()
+
     // AI building priority evaluation every 60 ticks (~4 seconds)
     if session.aiTickCounter % 60 == 0 {
         tickAIBuilding()
@@ -75,6 +78,9 @@ func tickAI() {
                 if let enemy = findNearestEnemy(obj, range: aggroRange) {
                     obj.attackTarget = enemy.id
                     obj.mission = .attack
+                    // Record enemy position in AI memory
+                    let houseState = getHouseState(obj.house)
+                    recordEnemyPosition(houseState: houseState, enemy: enemy, tick: world.tickCount)
                 }
             }
             continue
@@ -108,6 +114,9 @@ func tickAI() {
                 if let enemy = findNearestEnemy(obj, range: aggroRange) {
                     obj.attackTarget = enemy.id
                     obj.mission = .attack
+                    // Record enemy position in AI memory
+                    let houseState = getHouseState(obj.house)
+                    recordEnemyPosition(houseState: houseState, enemy: enemy, tick: world.tickCount)
                 }
             }
         }
@@ -913,7 +922,7 @@ func tickAIAttackWaves(world: GameWorld) {
         let ticksSinceLastAttack = session.aiTickCounter - state.aiLastAttackTick
         guard ticksSinceLastAttack >= attackInterval else { continue }
 
-        // Gather idle combat units (on guard or stop)
+        // Gather idle combat units (on guard or stop), excluding those with tactical roles
         var idleUnits: [GameObject] = []
         for obj in world.objects {
             guard obj.house == house && obj.strength > 0 else { continue }
@@ -922,44 +931,66 @@ func tickAIAttackWaves(world: GameWorld) {
             if upper == "HARV" || upper == "MCV" { continue }
             guard obj.mission == .guard_ || obj.mission == .stop else { continue }
             guard obj.isArmed else { continue }
+            guard obj.aiTacticalRole == .none else { continue }
             idleUnits.append(obj)
         }
 
         guard idleUnits.count >= threshold else { continue }
 
-        // Find a target: nearest player structure, or nearest player harvester
+        // Find a target: use AI memory for weakest known cluster, else nearest player structure
         var target: GameObject? = nil
         var targetDist = Double.infinity
 
         // Calculate AI base center for distance measurement
         guard let aiBase = findHouseBase(house: house, world: world) else { continue }
 
-        // Prefer player structures
-        for obj in world.objects {
-            guard obj.house == world.playerHouse && obj.strength > 0 else { continue }
-            guard obj.kind == .structure || obj.typeName.uppercased() == "HARV" else { continue }
-            let dx = obj.worldX - aiBase.x
-            let dy = obj.worldY - aiBase.y
-            let dist = sqrt(dx * dx + dy * dy)
-            if dist < targetDist {
-                target = obj
-                targetDist = dist
+        // Try to use known enemy positions to find the weakest cluster
+        if !state.aiKnownEnemyPositions.isEmpty {
+            // Find the known position with the weakest nearby concentration
+            // (prefer isolated enemy positions for easier attacks)
+            var bestKnownTarget: GameObject? = nil
+            var bestKnownScore = Double.infinity
+            for known in state.aiKnownEnemyPositions {
+                // Find actual enemy near this known position
+                for obj in world.objects {
+                    guard obj.house != house && obj.house != .neutral && obj.strength > 0 else { continue }
+                    let dx = obj.worldX - known.x
+                    let dy = obj.worldY - known.y
+                    guard abs(dx) < 120 && abs(dy) < 120 else { continue }
+                    // Score: lower is better (fewer nearby defenders + closer to AI base)
+                    let distToBase = sqrt(pow(obj.worldX - aiBase.x, 2) + pow(obj.worldY - aiBase.y, 2))
+                    let score = distToBase
+                    if score < bestKnownScore {
+                        bestKnownScore = score
+                        bestKnownTarget = obj
+                    }
+                }
+            }
+            target = bestKnownTarget
+        }
+
+        // Fallback: nearest player structure or harvester
+        if target == nil {
+            for obj in world.objects {
+                guard obj.house == world.playerHouse && obj.strength > 0 else { continue }
+                guard obj.kind == .structure || obj.typeName.uppercased() == "HARV" else { continue }
+                let dx = obj.worldX - aiBase.x
+                let dy = obj.worldY - aiBase.y
+                let dist = sqrt(dx * dx + dy * dy)
+                if dist < targetDist {
+                    target = obj
+                    targetDist = dist
+                }
             }
         }
 
         guard let attackTarget = target else { continue }
 
-        // Send all idle combat units to attack
-        for unit in idleUnits {
-            unit.attackTarget = attackTarget.id
-            unit.mission = .attack
-            unit.movePath = []
-            // Add slight offset so units don't all stack
-            let offsetX = Double.random(in: -36...36)
-            let offsetY = Double.random(in: -36...36)
-            unit.moveTargetX = attackTarget.worldX + offsetX
-            unit.moveTargetY = attackTarget.worldY + offsetY
-        }
+        // Use flanking tactics for large waves (6+ units on Hard difficulty)
+        applyFlankingTactics(
+            units: idleUnits, target: attackTarget,
+            house: house, houseState: state, world: world
+        )
 
         state.aiLastAttackTick = session.aiTickCounter
         print("AI: \(house.rawValue) launched attack wave with \(idleUnits.count) units")

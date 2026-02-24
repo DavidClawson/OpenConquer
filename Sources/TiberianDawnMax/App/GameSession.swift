@@ -19,6 +19,8 @@ class ProductionState {
     var isRepairMode: Bool = false
     var isSellMode: Bool = false
     var isAttackMoveMode: Bool = false
+    var isPatrolMode: Bool = false
+    var patrolModeWaypoints: [(x: Double, y: Double)] = []  // Waypoints being built in patrol mode
 
     /// Animate displayedCredits toward sidebarCredits each game tick.
     /// Ported from Vanilla Conquer credits.cpp CreditClass::AI.
@@ -152,6 +154,14 @@ class GameSession {
     var isAttackMoveMode: Bool {
         get { production.isAttackMoveMode }
         set { production.isAttackMoveMode = newValue }
+    }
+    var isPatrolMode: Bool {
+        get { production.isPatrolMode }
+        set { production.isPatrolMode = newValue }
+    }
+    var patrolModeWaypoints: [(x: Double, y: Double)] {
+        get { production.patrolModeWaypoints }
+        set { production.patrolModeWaypoints = newValue }
     }
     func tickCreditsDisplay() { production.tickCreditsDisplay() }
 

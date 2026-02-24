@@ -902,4 +902,52 @@ extension GameObject {
 
         print("Building sold: \(typeName) for $\(refundAmount)")
     }
+
+    // MARK: - Patrol (Loop through waypoints, engage enemies along the way)
+
+    /// Patrol: move through waypoints in a loop, scanning for enemies along the way.
+    /// When an enemy is found, engage it, then resume the patrol route.
+    func tickPatrol() {
+        guard let world = session.world else { return }
+
+        // Need waypoints to patrol
+        guard !patrolWaypoints.isEmpty else {
+            mission = .guard_
+            return
+        }
+
+        // Scan for enemies periodically (reuse guard scan logic)
+        if isArmed && world.tickCount % 8 == 0 {
+            let sightPixels = Double(sightRange) * 24.0
+            let resolved = resolveWeapon()
+            let weaponRange = resolved?.range ?? 96.0
+            let scanRange = max(sightPixels, weaponRange * 1.5)
+            if let enemy = findNearestEnemy(self, range: scanRange) {
+                // Engage enemy, save patrol mission for resume
+                suspendedMission = .patrol
+                attackTarget = enemy.id
+                mission = .attack
+                return
+            }
+        }
+
+        // Move toward current waypoint
+        let wp = patrolWaypoints[patrolIndex]
+        if moveTargetX == nil {
+            moveTargetX = wp.x
+            moveTargetY = wp.y
+            movePath = []
+        }
+
+        let result = executeMovementStep()
+        switch result {
+        case .noTarget, .noPath, .arrivedFinal:
+            // Reached waypoint - advance to next
+            moveTargetX = nil
+            moveTargetY = nil
+            patrolIndex = (patrolIndex + 1) % patrolWaypoints.count
+        case .blocked, .moving, .arrivedWaypoint:
+            break
+        }
+    }
 }

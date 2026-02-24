@@ -36,6 +36,20 @@ class HouseState {
     var aiLastAttackTick: Int = -9999    // Last tick an attack wave was sent
     var aiLastBuildCheckTick: Int = 0    // Last tick building priorities were evaluated
 
+    // AI tactical state — memory, scouting, harassment
+    var aiKnownEnemyPositions: [(x: Double, y: Double, typeName: String, tick: Int)] = []
+    var aiLastScoutTick: Int = 0         // When last scout was sent
+    var aiScoutTargetCell: Int? = nil    // Current scout destination cell
+    var aiScoutUnitId: Int? = nil        // Object ID of active scout unit
+    var aiLastHitAndRunTick: Int = 0     // When last hit-and-run was initiated
+    var aiLastHarassTick: Int = 0        // When last harvester harassment was sent
+    var aiHarassUnitId: Int? = nil       // Object ID of active harass unit
+    var aiFlankDelayTick: Int? = nil     // Tick when flank group should engage
+    var aiFlankUnitIds: [Int] = []       // Object IDs in the flank group
+    var aiFlankTargetX: Double? = nil    // Flank group's attack target X
+    var aiFlankTargetY: Double? = nil    // Flank group's attack target Y
+    var aiFlankAttackTargetId: Int? = nil // Flank group's attack target object ID
+
     init(type: House, credits: Int, isHuman: Bool) {
         self.type = type
         self.credits = credits

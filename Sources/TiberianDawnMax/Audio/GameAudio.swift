@@ -461,7 +461,7 @@ class AudioManager {
     var isInitialized = false
     var masterVolume: Float = 0.8
     var sfxVolume: Float = 1.0
-    var musicVolume: Float = 0.6
+    var musicVolume: Float = 0.3
 
     // Sound library (set after AssetManager is initialized)
     var soundLibrary: SoundLibrary?
@@ -475,7 +475,12 @@ class AudioManager {
     var musicSamples: [Int16] = []
     var musicOffset: Int = 0
     var isMusicPlaying: Bool = false
-    var isMusicLooping: Bool = true
+    var isMusicLooping: Bool = false  // Don't loop single tracks; advance playlist
+    var musicEnabled: Bool = true
+
+    // Playlist
+    var musicPlaylist: [ThemeType] = []
+    var currentTrackIndex: Int = 0
 
     // Active sound mixing
     var activeSounds: [ActiveSound] = []
@@ -688,12 +693,64 @@ class AudioManager {
         musicOffset = 0
     }
 
-    /// Pick and play a random normal gameplay theme
-    func playRandomTheme() {
-        let normalThemes = ThemeType.allCases.filter { $0.isNormal }
-        guard !normalThemes.isEmpty else { return }
-        let chosen = normalThemes[Int.random(in: 0..<normalThemes.count)]
-        playTheme(chosen)
+    /// Advance to the next track in the playlist
+    func nextTrack() {
+        guard musicEnabled, !musicPlaylist.isEmpty else { return }
+        currentTrackIndex = (currentTrackIndex + 1) % musicPlaylist.count
+        // Re-shuffle when wrapping around to the start
+        if currentTrackIndex == 0 {
+            shufflePlaylist()
+        }
+        playTheme(musicPlaylist[currentTrackIndex])
+    }
+
+    /// Toggle music on/off
+    func toggleMusic() {
+        musicEnabled.toggle()
+        if musicEnabled {
+            // Resume: play next track if we have a playlist
+            if !musicPlaylist.isEmpty {
+                playTheme(musicPlaylist[currentTrackIndex])
+            }
+            print("AudioManager: Music ON")
+        } else {
+            stopMusic()
+            print("AudioManager: Music OFF")
+        }
+    }
+
+    /// Set music volume (0.0 - 1.0)
+    func setMusicVolume(_ vol: Float) {
+        musicVolume = max(0.0, min(1.0, vol))
+    }
+
+    /// Build and shuffle the gameplay playlist from normal themes
+    func shufflePlaylist() {
+        musicPlaylist = ThemeType.allCases.filter { $0.isNormal }
+        musicPlaylist.shuffle()
+    }
+
+    /// Start playing the playlist from the beginning (shuffled)
+    func startPlaylist() {
+        guard musicEnabled else { return }
+        shufflePlaylist()
+        currentTrackIndex = 0
+        guard !musicPlaylist.isEmpty else { return }
+        playTheme(musicPlaylist[currentTrackIndex])
+    }
+
+    /// Start playing a specific theme as menu music (loops)
+    func playMenuMusic(_ theme: ThemeType = .aoi) {
+        guard musicEnabled else { return }
+        isMusicLooping = true
+        playTheme(theme)
+    }
+
+    /// Start gameplay music (playlist, no loop on individual tracks)
+    func startGameplayMusic() {
+        guard musicEnabled else { return }
+        isMusicLooping = false
+        startPlaylist()
     }
 
     // MARK: - Audio Tick (called each game frame)
@@ -754,9 +811,9 @@ class AudioManager {
                     musicOffset = 0
                 } else {
                     isMusicPlaying = false
-                    // Auto-play next theme
-                    DispatchQueue.main.async { [weak self] in
-                        self?.playRandomTheme()
+                    // Auto-play next track from playlist
+                    if !musicPlaylist.isEmpty {
+                        nextTrack()
                     }
                     break
                 }

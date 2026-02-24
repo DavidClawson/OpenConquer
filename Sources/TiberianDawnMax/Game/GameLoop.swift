@@ -181,6 +181,8 @@ func gameTick() {
             obj.tickSabotage()
         case .missile:
             break  // Future: superweapon launch
+        case .patrol:
+            obj.tickPatrol()
         }
     }
 
@@ -188,6 +190,36 @@ func gameTick() {
     for obj in world.objects {
         if obj.kind == .infantry {
             obj.tickFear()
+        }
+    }
+
+    // Tick animation state (walk cycles, fire animations)
+    for obj in world.objects {
+        guard obj.strength > 0 else { continue }
+
+        // Fire animation countdown
+        if obj.isFiringAnim {
+            obj.fireAnimTicks -= 1
+            if obj.fireAnimTicks <= 0 {
+                obj.isFiringAnim = false
+                obj.fireAnimTicks = 0
+            }
+        }
+
+        // Infantry walk cycle advancement
+        if obj.kind == .infantry {
+            let isMoving = obj.moveTargetX != nil
+            if isMoving {
+                obj.animTickCounter += 1
+                if obj.animTickCounter >= 4 {
+                    obj.animTickCounter = 0
+                    obj.animFrame += 1
+                    if obj.animFrame > 5 { obj.animFrame = 0 }
+                }
+            } else {
+                obj.animFrame = 0
+                obj.animTickCounter = 0
+            }
         }
     }
 
@@ -397,7 +429,8 @@ extension GameObject {
             facing = directionToFacing(dx: dx, dy: dy)
         }
 
-        let moveSpeed = effectiveSpeed
+        let baseSpeed = effectiveSpeed
+        let moveSpeed = groupMoveSpeed != nil ? min(baseSpeed, groupMoveSpeed!) : baseSpeed
         if dist <= moveSpeed {
             // Arrived at waypoint
             worldX = nextX
@@ -466,6 +499,7 @@ extension GameObject {
                 movePath = []  // Recalculate A* for new segment
             } else {
                 isAttackMoving = false
+                groupMoveSpeed = nil
                 mission = .guard_
                 moveTargetX = nil
                 moveTargetY = nil
@@ -484,11 +518,13 @@ extension GameObject {
         case .noTarget, .noPath, .arrivedFinal:
             moveTargetX = nil
             moveTargetY = nil
+            groupMoveSpeed = nil
             return false
         case .blocked, .moving, .arrivedWaypoint:
             return true
         }
     }
+
 }
 
 // MARK: - Facing Calculation

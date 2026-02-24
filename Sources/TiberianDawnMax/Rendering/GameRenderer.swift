@@ -1,6 +1,29 @@
 import CSDL2
 import Foundation
 
+// MARK: - Drawing Utilities
+
+/// Draw a dotted/dashed line between two points using the current render draw color.
+func drawDottedLine(_ renderer: OpaquePointer?, x1: Int32, y1: Int32, x2: Int32, y2: Int32, dashLen: Int32, gapLen: Int32) {
+    let dx = Double(x2 - x1)
+    let dy = Double(y2 - y1)
+    let totalLen = sqrt(dx * dx + dy * dy)
+    guard totalLen > 0 else { return }
+    let ux = dx / totalLen
+    let uy = dy / totalLen
+    let segLen = Double(dashLen + gapLen)
+    var t = 0.0
+    while t < totalLen {
+        let endT = min(t + Double(dashLen), totalLen)
+        let sx = Int32(Double(x1) + ux * t)
+        let sy = Int32(Double(y1) + uy * t)
+        let ex = Int32(Double(x1) + ux * endT)
+        let ey = Int32(Double(y1) + uy * endT)
+        SDL_RenderDrawLine(renderer, sx, sy, ex, ey)
+        t += segLen
+    }
+}
+
 // MARK: - Game Renderer
 
 func renderGame(_ renderer: OpaquePointer?) {
@@ -403,35 +426,42 @@ func renderGame(_ renderer: OpaquePointer?) {
             let direction = humanShape[facingIdx]  // 0-7 direction index
 
             // Determine animation frame based on infantry state
-            let frameIdx: Int
+            // Uses per-object animFrame for smooth per-unit walk cycles
+            var frameIdx: Int
             let isMoving = obj.moveTargetX != nil
-            let isFiring = (world.tickCount - obj.lastFireTick) < 4 && obj.lastFireTick > 0
             if obj.isProne {
                 if isMoving {
                     // DO_CRAWL: Frame=144, Count=4, Jump=4 (minigunner layout)
                     let crawlStart = 144
-                    let crawlCount = 4
                     let crawlJump = 4
-                    frameIdx = crawlStart + direction * crawlJump + (world.tickCount % crawlCount)
+                    frameIdx = crawlStart + direction * crawlJump + (obj.animFrame % 4)
                 } else {
                     // DO_PRONE: Frame=192, Count=1, Jump=8
                     frameIdx = 192 + direction * 8
                 }
-            } else if isFiring {
+            } else if obj.isFiringAnim {
                 // DO_FIRE_WEAPON: Frame=64, Count=8, Jump=8 (minigunner)
                 let fireStart = 64
-                let fireCount = 8
                 let fireJump = 8
-                frameIdx = fireStart + direction * fireJump + (world.tickCount % fireCount)
+                // Use fireAnimTicks as countdown to pick a fire frame
+                let fireFrame = max(0, 4 - obj.fireAnimTicks)
+                frameIdx = fireStart + direction * fireJump + fireFrame
             } else if isMoving {
                 // DO_WALK: Frame=16, Count=6, Jump=6 (all standard infantry)
                 let walkStart = 16
-                let walkCount = 6
                 let walkJump = 6
-                frameIdx = walkStart + direction * walkJump + (world.tickCount % walkCount)
+                frameIdx = walkStart + direction * walkJump + (obj.animFrame % 6)
             } else {
                 // DO_STAND_READY: Frame=0, Count=1, Jump=1
                 frameIdx = direction
+            }
+
+            // Clamp frame index to valid range for this SHP
+            let infantrySpriteName = spriteNameOverrides[obj.typeName.uppercased()] ?? obj.typeName.uppercased()
+            if let shp = renderState.objectSHPCache[infantrySpriteName] {
+                if frameIdx >= shp.frames.count {
+                    frameIdx = min(shp.frames.count - 1, direction)
+                }
             }
 
             if let info = getObjectTexture(renderer, typeName: obj.typeName, frame: frameIdx, house: obj.house) {
@@ -517,6 +547,97 @@ func renderGame(_ renderer: OpaquePointer?) {
         let size = buildingSize(obj.typeName)
         let topY = screenY - Int32(size.h * 24) / 2
         renderRepairWrench(renderer, cx: screenX, cy: topY - 8, tickCount: world.tickCount)
+    }
+
+    // === Pass 5c: Rally points for selected production buildings ===
+    for obj in world.objects {
+        guard obj.isSelected && obj.kind == .structure && obj.house == world.playerHouse else { continue }
+        guard obj.strength > 0 else { continue }
+        guard let rpX = obj.rallyPointX, let rpY = obj.rallyPointY else { continue }
+
+        let bx = Int32(obj.worldX - Double(camX))
+        let by = Int32(obj.worldY - Double(camY))
+        let rx = Int32(rpX - Double(camX))
+        let ry = Int32(rpY - Double(camY))
+
+        // Draw dotted line from building to rally point (bright green)
+        SDL_SetRenderDrawColor(renderer, 0, 255, 0, 200)
+        drawDottedLine(renderer, x1: bx, y1: by, x2: rx, y2: ry, dashLen: 4, gapLen: 3)
+
+        // Draw diamond marker at rally point
+        SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255)
+        let ds: Int32 = 5
+        SDL_RenderDrawLine(renderer, rx, ry - ds, rx + ds, ry)
+        SDL_RenderDrawLine(renderer, rx + ds, ry, rx, ry + ds)
+        SDL_RenderDrawLine(renderer, rx, ry + ds, rx - ds, ry)
+        SDL_RenderDrawLine(renderer, rx - ds, ry, rx, ry - ds)
+        // Fill the diamond with a small rectangle
+        var flagRect = SDL_Rect(x: rx - 2, y: ry - 2, w: 5, h: 5)
+        SDL_RenderFillRect(renderer, &flagRect)
+    }
+
+    // === Pass 5d: Patrol routes for selected patrolling units ===
+    for obj in world.objects {
+        guard obj.isSelected && obj.strength > 0 else { continue }
+        guard obj.house == world.playerHouse else { continue }
+        guard obj.mission == .patrol && !obj.patrolWaypoints.isEmpty else { continue }
+
+        SDL_SetRenderDrawColor(renderer, 255, 255, 0, 200)
+        let wps = obj.patrolWaypoints
+        // Draw connected line segments
+        for i in 0..<wps.count {
+            let from = wps[i]
+            let to = wps[(i + 1) % wps.count]
+            let fx = Int32(from.x - Double(camX))
+            let fy = Int32(from.y - Double(camY))
+            let tx = Int32(to.x - Double(camX))
+            let ty = Int32(to.y - Double(camY))
+            SDL_RenderDrawLine(renderer, fx, fy, tx, ty)
+        }
+        // Draw dots at each waypoint
+        for (i, wp) in wps.enumerated() {
+            let wx = Int32(wp.x - Double(camX))
+            let wy = Int32(wp.y - Double(camY))
+            let isCurrent = (i == obj.patrolIndex)
+            let dotSize: Int32 = isCurrent ? 4 : 2
+            if isCurrent {
+                SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255)
+            } else {
+                SDL_SetRenderDrawColor(renderer, 255, 255, 0, 255)
+            }
+            var dotRect = SDL_Rect(x: wx - dotSize, y: wy - dotSize, w: dotSize * 2, h: dotSize * 2)
+            SDL_RenderFillRect(renderer, &dotRect)
+        }
+    }
+
+    // === Pass 5e: Patrol mode waypoint preview (while building route) ===
+    if session.isPatrolMode && !session.patrolModeWaypoints.isEmpty {
+        SDL_SetRenderDrawColor(renderer, 255, 255, 0, 150)
+        let wps = session.patrolModeWaypoints
+        for i in 0..<wps.count - 1 {
+            let fx = Int32(wps[i].x - Double(camX))
+            let fy = Int32(wps[i].y - Double(camY))
+            let tx = Int32(wps[i + 1].x - Double(camX))
+            let ty = Int32(wps[i + 1].y - Double(camY))
+            SDL_RenderDrawLine(renderer, fx, fy, tx, ty)
+        }
+        // Draw closing segment preview (dashed)
+        if wps.count > 1 {
+            let lastX = Int32(wps.last!.x - Double(camX))
+            let lastY = Int32(wps.last!.y - Double(camY))
+            let firstX = Int32(wps[0].x - Double(camX))
+            let firstY = Int32(wps[0].y - Double(camY))
+            SDL_SetRenderDrawColor(renderer, 255, 255, 0, 100)
+            drawDottedLine(renderer, x1: lastX, y1: lastY, x2: firstX, y2: firstY, dashLen: 3, gapLen: 4)
+        }
+        // Draw dots at placed waypoints
+        SDL_SetRenderDrawColor(renderer, 255, 255, 0, 255)
+        for wp in wps {
+            let wx = Int32(wp.x - Double(camX))
+            let wy = Int32(wp.y - Double(camY))
+            var dotRect = SDL_Rect(x: wx - 3, y: wy - 3, w: 6, h: 6)
+            SDL_RenderFillRect(renderer, &dotRect)
+        }
     }
 
     // === Pass 6: Drag-select rectangle (in world space since we have zoom scaling active) ===
