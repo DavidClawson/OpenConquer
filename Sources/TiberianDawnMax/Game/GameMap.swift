@@ -307,6 +307,92 @@ func cellInfantryCount(_ cell: Int, world: GameWorld, ignoringId: Int? = nil) ->
     return count
 }
 
+/// Sweep the world for cells holding more than one unit and tell the extras
+/// to scatter to the nearest free neighbor. Catches scenarios where two
+/// units start the mission overlapping (or where a spawn slipped past the
+/// destination check) — without this, idle stacked units never move and
+/// stay glued together.
+func resolveStackedUnits() {
+    guard let world = session.world else { return }
+    for (cell, ids) in world.occupancy where ids.count > 1 {
+        // Prefer to scatter mobile/idle units; leave busy ones in place
+        // unless every co-occupant is busy.
+        var picked: GameObject? = nil
+        for id in ids {
+            guard let obj = world.findObject(id: id) else { continue }
+            // Vehicles must scatter; infantry only if we exceed the cap.
+            let exceedsCap = obj.kind == .infantry &&
+                cellInfantryCount(cell, world: world) > maxInfantryPerCell
+            guard obj.kind == .unit || exceedsCap else { continue }
+            // Only nudge units that aren't already on a path; a unit mid-move
+            // will resolve itself.
+            guard obj.moveTargetX == nil else { continue }
+            picked = obj
+            break
+        }
+        guard let scatterer = picked else { continue }
+        guard let target = findFreeSpawnCell(
+            nearWorldX: scatterer.worldX,
+            nearWorldY: scatterer.worldY,
+            kind: scatterer.kind,
+            speedType: scatterer.cachedSpeedType,
+            radius: 4
+        ) else { continue }
+        scatterer.moveTargetX = Double(target.cellX * 24) + 12.0
+        scatterer.moveTargetY = Double(target.cellY * 24) + 12.0
+        scatterer.movePath = []
+        if scatterer.mission == .guard_ || scatterer.mission == .stop {
+            scatterer.mission = .move
+        }
+    }
+}
+
+/// Find a free cell near a desired spawn point. Used by production spawns
+/// and the free-harvester drop on PROC build, so a new unit doesn't land
+/// on top of an existing unit and immediately get stuck.
+///
+/// Searches outward in a square spiral up to `radius` cells; returns the
+/// closest cell that is statically passable AND has no vehicle (and < max
+/// infantry, for an infantry spawn). Returns nil if no slot is free.
+func findFreeSpawnCell(nearWorldX: Double, nearWorldY: Double,
+                       kind: ObjectKind, speedType: SpeedType = .track,
+                       radius: Int = 6) -> (cellX: Int, cellY: Int)? {
+    guard let world = session.world else { return nil }
+    let baseX = max(0, min(63, Int(nearWorldX) / 24))
+    let baseY = max(0, min(63, Int(nearWorldY) / 24))
+    let passMap = passabilityMap(for: speedType)
+
+    for r in 0...radius {
+        var best: (cellX: Int, cellY: Int)? = nil
+        var bestDist = Double.infinity
+        for dy in -r...r {
+            for dx in -r...r {
+                // Outer ring only at this radius (skip cells already
+                // checked at smaller r).
+                if r > 0 && abs(dx) != r && abs(dy) != r { continue }
+                let nx = baseX + dx
+                let ny = baseY + dy
+                guard nx >= 0 && nx < 64 && ny >= 0 && ny < 64 else { continue }
+                let cellIdx = ny * 64 + nx
+                if !passMap[cellIdx] { continue }
+                if cellHasVehicle(cellIdx, world: world) { continue }
+                if kind == .unit {
+                    if cellInfantryCount(cellIdx, world: world) > 0 { continue }
+                } else if kind == .infantry {
+                    if cellInfantryCount(cellIdx, world: world) >= maxInfantryPerCell { continue }
+                }
+                let dist = Double(dx * dx + dy * dy)
+                if dist < bestDist {
+                    bestDist = dist
+                    best = (cellX: nx, cellY: ny)
+                }
+            }
+        }
+        if let found = best { return found }
+    }
+    return nil
+}
+
 // MARK: - Passability Check
 
 /// Can `mover` enter `cell` for transit?

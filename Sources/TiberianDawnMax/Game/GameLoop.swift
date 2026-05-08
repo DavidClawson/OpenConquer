@@ -57,6 +57,13 @@ func gameTick() {
     // Update occupancy at start of tick
     updateOccupancy()
 
+    // Resolve any pre-stacked units (idle units sharing a cell with another
+    // unit). Picks one to scatter to the nearest free neighbor; affected
+    // units fall through their normal mission tick once moving.
+    if world.tickCount % 30 == 0 {
+        resolveStackedUnits()
+    }
+
     // Update fog of war
     updateFog()
 

@@ -716,9 +716,14 @@ extension GameObject {
         // Refinery: spawn a free harvester at the building exit
         if isRefinery {
             let size = buildingSize("PROC")
-            // Spawn below the refinery footprint (exit point)
-            let exitX = worldX
-            let exitY = worldY + Double(size.h * 24) / 2.0 + 12.0
+            let preferredX = worldX
+            let preferredY = worldY + Double(size.h * 24) / 2.0 + 12.0
+            // Find an empty cell near the exit so the harvester doesn't
+            // land on top of an MCV/unit that's already parked there.
+            let spawn = findFreeSpawnCell(nearWorldX: preferredX, nearWorldY: preferredY, kind: .unit)
+                ?? (cellX: Int(preferredX) / 24, cellY: Int(preferredY) / 24)
+            let exitX = Double(spawn.cellX * 24) + 12.0
+            let exitY = Double(spawn.cellY * 24) + 12.0
             let harv = GameObject(
                 id: world.allocateId(),
                 typeName: "HARV",

@@ -281,12 +281,18 @@ func spawnProducedUnit(_ typeName: String, world: GameWorld) {
 
     // Spawn near the exit of the producing structure
     let size = buildingSize(producerType)
-    let exitX = producer.worldX + Double(size.w * 24) / 2.0 + 12.0
-    let exitY = producer.worldY + Double(size.h * 24) / 2.0
-
     let isInfantry = ["E1", "E2", "E3", "E4", "E5", "E6", "E7", "RMBO"].contains(upper)
     let kind: ObjectKind = isInfantry ? .infantry : .unit
     let speed = resolveSpeed(typeName: upper, kind: kind)
+    let preferredX = producer.worldX + Double(size.w * 24) / 2.0 + 12.0
+    let preferredY = producer.worldY + Double(size.h * 24) / 2.0
+    // Resolve the actual spawn cell — preferred exit if free, else the
+    // nearest empty cell. Without this, two production cycles in a row
+    // park the second unit on top of the first.
+    let spawn = findFreeSpawnCell(nearWorldX: preferredX, nearWorldY: preferredY, kind: kind)
+        ?? (cellX: Int(preferredX) / 24, cellY: Int(preferredY) / 24)
+    let exitX = Double(spawn.cellX * 24) + 12.0
+    let exitY = Double(spawn.cellY * 24) + 12.0
 
     let obj = GameObject(
         id: world.allocateId(),
