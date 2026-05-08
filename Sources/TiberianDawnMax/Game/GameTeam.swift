@@ -365,8 +365,7 @@ extension ActiveTeam {
                 }
 
                 // Skip harvesters and MCVs
-                let upper = obj.typeName.uppercased()
-                if upper == "HARV" || upper == "MCV" { continue }
+                if obj.isHarvester || obj.isMCV { continue }
 
                 members.append(obj.id)
                 recruited += 1

@@ -58,6 +58,11 @@ enum UnitType: Int, CaseIterable {
         let upper = iniName.uppercased()
         return UnitType.allCases.first { $0.iniName == upper }
     }
+
+    // MARK: - Identity flags (used by AI/combat/movement to avoid scattered string comparisons)
+    var isHarvester: Bool { self == .harvester }
+    var isMCV: Bool { self == .mcv }
+    var isGunboat: Bool { self == .gunboat }
 }
 
 // MARK: - Infantry Types
@@ -113,6 +118,8 @@ enum InfantryType: Int, CaseIterable {
         let upper = iniName.uppercased()
         return InfantryType.allCases.first { $0.iniName == upper }
     }
+
+    var isCommando: Bool { self == .rambo }
 }
 
 // MARK: - Structure Types
@@ -227,6 +234,24 @@ enum StructType: Int, CaseIterable {
     static func from(iniName: String) -> StructType? {
         let upper = iniName.uppercased()
         return StructType.allCases.first { $0.iniName == upper }
+    }
+
+    // MARK: - Identity flags
+    var isDefenseStructure: Bool {
+        switch self {
+        case .turret, .gtower, .atower, .sam, .obelisk: return true
+        default: return false
+        }
+    }
+    var isPowerPlant: Bool { self == .power || self == .advancedPower }
+    var isRefinery: Bool { self == .refinery }
+    var isAircraftPad: Bool { self == .helipad || self == .airstrip }
+    var isSAMSite: Bool { self == .sam }
+    var isWall: Bool {
+        switch self {
+        case .sandbagWall, .cycloneWall, .brickWall, .barbwireWall, .woodWall: return true
+        default: return false
+        }
     }
 }
 

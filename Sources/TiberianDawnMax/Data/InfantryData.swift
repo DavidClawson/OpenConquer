@@ -41,7 +41,7 @@ struct InfantryTypeData {
 
 // MARK: - Infantry Type Data Table
 
-let infantryTypeDataTable: [InfantryType: InfantryTypeData] = [
+var infantryTypeDataTable: [InfantryType: InfantryTypeData] = [
 
     .e1: InfantryTypeData(
         type: .e1, iniName: "E1", fullName: "Minigunner",

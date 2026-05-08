@@ -59,11 +59,77 @@ func loadGameData() {
 // Run MIX loading on startup
 loadGameData()
 
+// Apply any data overrides from extracted/data/*.json (modder hook).
+// Must run after MIX init (so the compiled tables exist) and before any
+// game world is built (so resolveSpeed/resolveStrength see the new values).
+loadDataOverrides()
+
 // Index remastered sprites (if available)
 initRemasteredSprites()
 
 // If --test-mix flag, just print results and exit
 if CommandLine.arguments.contains("--test-mix") {
+    exit(0)
+}
+
+// Diagnostic: --dump-scenario <NAME>  prints map bounds, waypoints, etc.
+if let dumpIdx = CommandLine.arguments.firstIndex(of: "--dump-scenario"),
+   dumpIdx + 1 < CommandLine.arguments.count {
+    let scen = CommandLine.arguments[dumpIdx + 1]
+    if let data = loadScenario("\(scen).INI", from: mixManager) {
+        print("--- \(scen) ---")
+        if let b = data.mapBounds {
+            print("MapBounds: x=\(b.x) y=\(b.y) w=\(b.width) h=\(b.height)  pixW=\(b.width*24) pixH=\(b.height*24)")
+        } else {
+            print("MapBounds: nil")
+        }
+        for wp in data.waypoints where [98, 99, 25, 26, 27].contains(wp.id) {
+            let cellX = wp.cell % 64
+            let cellY = wp.cell / 64
+            print("Waypoint \(wp.id): cell=\(wp.cell) (\(cellX),\(cellY)) px=(\(cellX*24),\(cellY*24))")
+        }
+        print("Theater: \(data.theater)  Credits: \(data.credits)  BuildLevel: \(data.buildLevel)")
+        // Player object placements
+        let playerHouse = scen.uppercased().hasPrefix("SCB") ? "BadGuy" : "GoodGuy"
+        print("--- Player (\(playerHouse)) placements ---")
+        for u in data.units where u.house.rawValue == playerHouse {
+            print("  unit \(u.typeName) cell=\(u.cell) (\(u.cell % 64),\(u.cell / 64))")
+        }
+        for inf in data.infantry where inf.house.rawValue == playerHouse {
+            print("  inf  \(inf.typeName) cell=\(inf.cell) (\(inf.cell % 64),\(inf.cell / 64))")
+        }
+        for s in data.structures where s.house.rawValue == playerHouse {
+            print("  bldg \(s.typeName) cell=\(s.cell) (\(s.cell % 64),\(s.cell / 64))")
+        }
+    } else {
+        print("Could not load scenario \(scen)")
+    }
+    exit(0)
+}
+
+// Diagnostic: --probe-tiberium  parses TI1.TEM/TI12.TEM and dumps headers
+if CommandLine.arguments.contains("--probe-tiberium") {
+    for name in ["TI1.TEM", "TI6.TEM", "TI12.TEM"] {
+        guard let data = mixManager.retrieve(name) else {
+            print("\(name): NOT FOUND")
+            continue
+        }
+        let buf = Data(data)
+        let firstBytes = buf.prefix(16).map { String(format: "%02X", $0) }.joined(separator: " ")
+        print("\(name): \(buf.count) bytes, first 16: \(firstBytes)")
+        if let shp = try? SHPFile(data: buf) {
+            print("  SHPFile parsed OK: \(shp.frames.count) frames")
+            for (i, f) in shp.frames.prefix(3).enumerated() {
+                let nz = f.pixels.filter { $0 != 0 }.count
+                print("    frame \(i): \(f.width)x\(f.height), \(nz) visible px")
+            }
+        } else {
+            print("  SHPFile parse FAILED")
+        }
+        if let icn = try? ICNFile(data: buf) {
+            print("  ICNFile parsed OK: \(icn.count) tiles, \(icn.width)x\(icn.height)")
+        }
+    }
     exit(0)
 }
 
@@ -170,6 +236,15 @@ guard SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_AUDIO) == 0 else {
     exit(1)
 }
 
+// Restore last window size if available, otherwise use the default.
+if let saved = WindowConfig.loadSaved() {
+    renderState.windowWidth = saved.width
+    renderState.windowHeight = saved.height
+} else {
+    renderState.windowWidth = WindowConfig.defaultWidth
+    renderState.windowHeight = WindowConfig.defaultHeight
+}
+
 guard let window = SDL_CreateWindow(
     "Tiberian Dawn Max",
     Int32(SDL_WINDOWPOS_CENTERED_MASK),
@@ -182,9 +257,32 @@ guard let window = SDL_CreateWindow(
     exit(1)
 }
 
+SDL_SetWindowMinimumSize(window, WindowConfig.minWidth, WindowConfig.minHeight)
+
 guard let renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED.rawValue | SDL_RENDERER_PRESENTVSYNC.rawValue) else {
     print("SDL_CreateRenderer failed: \(String(cString: SDL_GetError()))")
     exit(1)
+}
+
+renderState.sdlRenderer = renderer
+
+// Query actual window size (may differ from requested on small screens)
+do {
+    var actualW: Int32 = 0, actualH: Int32 = 0
+    SDL_GetWindowSize(window, &actualW, &actualH)
+    renderState.windowWidth = actualW
+    renderState.windowHeight = actualH
+
+    // Detect HiDPI scale factor (drawable pixels vs window pixels)
+    var drawW: Int32 = 0, drawH: Int32 = 0
+    SDL_GetRendererOutputSize(renderer, &drawW, &drawH)
+    if actualW > 0 {
+        renderState.displayScale = Double(drawW) / Double(actualW)
+    }
+
+    // Set logical size so SDL maps input & rendering to window coordinates automatically.
+    // This makes mouse events and render coordinates use the same coordinate space.
+    SDL_RenderSetLogicalSize(renderer, actualW, actualH)
 }
 
 // Initialize audio system
@@ -212,6 +310,8 @@ while session.running {
             handleMouseButtonDown(event)
         case SDL_MOUSEBUTTONUP:
             handleMouseButtonUp(event)
+        case SDL_MOUSEWHEEL:
+            handleMouseWheel(event)
         case SDL_WINDOWEVENT:
             handleWindowEvent(event)
         default:

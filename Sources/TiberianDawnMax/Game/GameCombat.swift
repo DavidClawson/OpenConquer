@@ -130,14 +130,27 @@ extension GameObject {
             if let aId = attackerId, let attacker = findObjectById(aId) {
                 attacker.killCount += 1
             }
+            // Emit destruction event
+            if kind == .structure {
+                eventBus.emit(.buildingDestroyed(objectId: id, typeName: typeName, house: house, killerHouse: attackerHouse))
+            } else {
+                eventBus.emit(.unitDestroyed(objectId: id, typeName: typeName, house: house, killerHouse: attackerHouse))
+            }
             return true
+        }
+
+        // Emit damage event
+        if kind == .structure {
+            eventBus.emit(.buildingDamaged(objectId: id, attackerHouse: attackerHouse, damageAmount: adjustedDamage))
+        } else {
+            eventBus.emit(.unitDamaged(objectId: id, attackerHouse: attackerHouse, damageAmount: adjustedDamage))
         }
 
         // EVA warnings for player objects taking damage
         if let world = session.world, house == world.playerHouse {
             if kind == .structure {
                 session.speakEVA(.baseUnderAttack, cooldownTicks: 90)
-            } else if typeName.uppercased() == "HARV" {
+            } else if isHarvester {
                 session.speakEVA(.baseUnderAttack, cooldownTicks: 90)
             }
         }
@@ -180,14 +193,6 @@ extension GameObject {
         // Check if close enough
         let newDiff = ((targetFacing - turretFacing) + 256) % 256
         return newDiff < rotateSpeed || newDiff > (256 - rotateSpeed)
-    }
-
-    /// True if this object is a defensive structure (turrets, SAMs, guard towers, obelisk)
-    var isDefenseStructure: Bool {
-        guard kind == .structure else { return false }
-        let upper = typeName.uppercased()
-        return upper == "GUN" || upper == "GTWR" || upper == "SAM" ||
-               upper == "ATWR" || upper == "OBLI"
     }
 
     /// Tick the attack mission
@@ -362,7 +367,7 @@ extension GameObject {
     /// Frame 0 = retracted, frames 1-31 = deployed turret rotation.
     func tickSAMDeploy() {
         guard kind == .structure else { return }
-        guard typeName.uppercased() == "SAM" else { return }
+        guard isSAMSite else { return }
 
         let hasTarget = attackTarget != nil && mission == .attack
 

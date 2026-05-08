@@ -134,7 +134,7 @@ func initGameWorld(scenario: ScenarioData, scenarioName: String) {
         }
 
         // VC special case: Gunboat always faces west, hunts toward west edge, is a loaner
-        if unit.typeName.uppercased() == "BOAT" {
+        if obj.isGunboat {
             obj.facing = 192  // DIR_W
             obj.turretFacing = 192
             obj.mission = .hunt
@@ -217,7 +217,7 @@ func initGameWorld(scenario: ScenarioData, scenarioName: String) {
 
     // Set harvesters to harvest mission
     for obj in world.objects {
-        if obj.typeName.uppercased() == "HARV" && obj.house == world.playerHouse {
+        if obj.isHarvester && obj.house == world.playerHouse {
             obj.mission = .harvest
         }
     }

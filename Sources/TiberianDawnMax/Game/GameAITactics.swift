@@ -113,7 +113,7 @@ func tickAIRecon(house: House, houseState: HouseState, world: GameWorld) {
         guard obj.house == house && obj.strength > 0 else { continue }
         guard obj.kind == .unit else { continue }
         let upper = obj.typeName.uppercased()
-        guard fastUnitTypes.contains(upper) || upper == "JEEP" else { continue }
+        guard fastUnitTypes.contains(upper) else { continue }
         guard obj.mission == .guard_ || obj.mission == .stop else { continue }
         guard obj.aiTacticalRole == .none else { continue }
         if obj.speed > bestSpeed {
@@ -271,8 +271,7 @@ func tickAIHitAndRun(house: House, houseState: HouseState, world: GameWorld) {
         guard obj.house != house && obj.house != .neutral else { continue }
         guard obj.kind == .unit || obj.kind == .infantry else { continue }
 
-        let upper = obj.typeName.uppercased()
-        if upper == "HARV" {
+        if obj.isHarvester {
             // Harvesters are highest priority
             if targetPriority < 3 {
                 target = obj
@@ -468,7 +467,7 @@ func tickAIHarvestHarass(house: House, houseState: HouseState, world: GameWorld)
     for obj in world.objects {
         guard obj.strength > 0 else { continue }
         guard obj.house != house && obj.house != .neutral else { continue }
-        guard obj.typeName.uppercased() == "HARV" else { continue }
+        guard obj.isHarvester else { continue }
 
         // Measure distance to nearest player building
         var nearestBuildingDist = Double.infinity

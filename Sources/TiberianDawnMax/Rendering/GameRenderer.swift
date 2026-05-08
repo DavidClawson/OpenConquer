@@ -24,6 +24,49 @@ func drawDottedLine(_ renderer: OpaquePointer?, x1: Int32, y1: Int32, x2: Int32,
     }
 }
 
+// MARK: - Building Damage Frames
+// Mirrors Vanilla-Conquer building.cpp:560-634. Buildings encode damaged
+// graphics in trailing SHP frames: simple buildings put the damaged version at
+// frameCount-2 and rubble at frameCount-1; turreted buildings (GUN, SAM)
+// shift the entire body+turret set by 64 to reach the damaged variants.
+func pickStructureFrame(_ obj: GameObject) -> Int {
+    if obj.buildUpFrame >= 0 { return obj.buildUpFrame }
+
+    let upper = obj.typeName.uppercased()
+    let healthFrac = obj.healthFraction
+    let isCritical = obj.strength <= 1
+    let isDamaged = healthFrac < 0.5
+
+    // Resolve total SHP frame count from the cache (populated on first render).
+    let frameCount = renderState.objectSHPCache[upper]?.frames.count ?? 0
+
+    if obj.hasTurret {
+        var base: Int
+        if upper == "SAM" {
+            base = obj.samDeployState
+        } else {
+            let facingIdx = facing32[min(255, max(0, obj.turretFacing))]
+            base = bodyShape[facingIdx]
+        }
+        // Damaged set lives at +64 (32 body + 32 turret = "fresh"; next 64 = "damaged").
+        if isDamaged && frameCount >= base + 64 + 1 {
+            base += 64
+        }
+        return base
+    }
+
+    if isCritical && frameCount >= 1 {
+        return frameCount - 1  // rubble
+    }
+    if isDamaged {
+        // Special cases mirror VC building.cpp:582-630.
+        if upper == "WEAP" { return frameCount >= 2 ? 1 : 0 }
+        // Most simple buildings: second-to-last frame is the damaged variant.
+        if frameCount >= 2 { return frameCount - 2 }
+    }
+    return 0
+}
+
 // MARK: - Game Renderer
 
 func renderGame(_ renderer: OpaquePointer?) {
@@ -131,6 +174,13 @@ func renderGame(_ renderer: OpaquePointer?) {
     }
 
     // === Pass 2b: Dynamic tiberium from world.map (grows/spreads, depleted by harvesting) ===
+    // VC convention: the SHP (TI1..TI12) is the *visual variant*, the FRAME within
+    // that SHP is the maturity 0..11. Each variant SHP has 12 frames going from
+    // sparse (frame 0) to fully mature glowing tiberium (frame 11). Drawing
+    // frame 0 of every cell flattens that gradient — the "bright green glowing"
+    // late-stage frames never appeared.
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
+    var tiberiumRendered = 0
     for cell in world.map.tiberiumCells {
         let pos = cellToPixel(cell)
         let screenX = Int32(pos.px - camX)
@@ -138,16 +188,34 @@ func renderGame(_ renderer: OpaquePointer?) {
         if screenX > vw || screenY > vh || screenX + 24 < 0 || screenY + 24 < 0 { continue }
 
         let density = world.map.tiberiumDensity[cell] ?? 1
-        let tiName = "TI\(density)"
+        let variant = world.map.tiberiumVariant[cell] ?? density  // legacy save fallback
+        let tiName = "TI\(min(max(variant, 1), 12))"
+        let frame = min(max(density - 1, 0), 11)
 
-        if let info = getObjectTexture(renderer, typeName: tiName, frame: 0, house: .neutral, theater: theater) {
+        if let info = getObjectTexture(renderer, typeName: tiName, frame: frame, house: .neutral, theater: theater) {
             var dstRect = SDL_Rect(x: screenX, y: screenY, w: Int32(info.width), h: Int32(info.height))
             SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
+            tiberiumRendered += 1
         } else {
-            // Fallback: bright green square to show tiberium location
-            SDL_SetRenderDrawColor(renderer, 0, 200, 0, 120)
-            var rect = SDL_Rect(x: screenX + 2, y: screenY + 2, w: 20, h: 20)
+            // Fallback: bright green diamond to show tiberium location
+            SDL_SetRenderDrawColor(renderer, 40, 220, 40, 255)
+            var rect = SDL_Rect(x: screenX + 4, y: screenY + 4, w: 16, h: 16)
             SDL_RenderFillRect(renderer, &rect)
+            // Add crystal-like accent
+            SDL_SetRenderDrawColor(renderer, 120, 255, 120, 255)
+            SDL_RenderDrawLine(renderer, screenX + 8, screenY + 4, screenX + 12, screenY + 10)
+            SDL_RenderDrawLine(renderer, screenX + 14, screenY + 6, screenX + 10, screenY + 14)
+            tiberiumRendered += 1
+        }
+    }
+    if world.tickCount <= 2 && !world.map.tiberiumCells.isEmpty {
+        if let firstCell = world.map.tiberiumCells.first {
+            let density = world.map.tiberiumDensity[firstCell] ?? 1
+            let variant = world.map.tiberiumVariant[firstCell] ?? density
+            let tiName = "TI\(variant)"
+            let frame = min(max(density - 1, 0), 11)
+            let hasTex = getObjectTexture(renderer, typeName: tiName, frame: frame, house: .neutral, theater: theater) != nil
+            print("Tiberium debug: \(world.map.tiberiumCells.count) cells, \(tiberiumRendered) visible, sample=\(tiName) frame=\(frame) hasTex=\(hasTex)")
         }
     }
 
@@ -270,24 +338,8 @@ func renderGame(_ renderer: OpaquePointer?) {
             }
         }
 
-        // Determine frame for structures
-        let structFrame: Int
-        if obj.buildUpFrame >= 0 {
-            // Build-up animation in progress — show construction frame
-            structFrame = obj.buildUpFrame
-        } else if obj.hasTurret {
-            let upper = obj.typeName.uppercased()
-            if upper == "SAM" {
-                // SAM sites use deploy state: 0=retracted, >0=deployed rotation frame
-                structFrame = obj.samDeployState
-            } else {
-                // Other turreted structures (GUN) rotate their full sprite
-                let facingIdx = facing32[min(255, max(0, obj.turretFacing))]
-                structFrame = bodyShape[facingIdx]
-            }
-        } else {
-            structFrame = 0
-        }
+        // Determine frame for structures (mirrors Vanilla-Conquer building.cpp:560-634)
+        let structFrame: Int = pickStructureFrame(obj)
 
         if let info = getObjectTexture(renderer, typeName: obj.typeName, frame: structFrame, house: obj.house, theater: theater) {
             let spriteX = screenX
@@ -519,7 +571,11 @@ func renderGame(_ renderer: OpaquePointer?) {
             let boxSize: Int32 = obj.kind == .unit ? 20 : 12
             let sx = screenX - boxSize / 2
             let sy = screenY - boxSize / 2
-            renderSelectionBox(renderer, x: sx, y: sy, w: boxSize, h: boxSize, healthFraction: obj.healthFraction)
+            // Show cargo pips for harvesters
+            let isHarv = obj.typeName.uppercased() == "HARV"
+            renderSelectionBox(renderer, x: sx, y: sy, w: boxSize, h: boxSize, healthFraction: obj.healthFraction,
+                               cargoPips: isHarv ? obj.tiberiumLoad : 0,
+                               maxCargoPips: isHarv ? maxTiberiumLoad : 0)
         }
     }
 
@@ -825,9 +881,12 @@ func getUITexture(_ renderer: OpaquePointer?, shp: SHPFile, frame: Int, cache: i
 
 // MARK: - Selection Box Rendering
 
-func renderSelectionBox(_ renderer: OpaquePointer?, x: Int32, y: Int32, w: Int32, h: Int32, healthFraction: Double) {
+func renderSelectionBox(_ renderer: OpaquePointer?, x: Int32, y: Int32, w: Int32, h: Int32, healthFraction: Double, cargoPips: Int = 0, maxCargoPips: Int = 0) {
     renderProceduralBrackets(renderer, x: x, y: y, w: w, h: h)
     renderHealthPips(renderer, x: x, y: y, w: w, healthFraction: healthFraction)
+    if maxCargoPips > 0 {
+        renderCargoPips(renderer, x: x, y: y + h + 2, w: w, cargo: cargoPips, maxCargo: maxCargoPips)
+    }
 }
 
 /// Fallback procedural white corner brackets
@@ -876,6 +935,32 @@ func renderHealthPips(_ renderer: OpaquePointer?, x: Int32, y: Int32, w: Int32, 
     SDL_RenderFillRect(renderer, &healthRect)
 }
 
+/// Render cargo pips below selected harvesters showing tiberium load
+func renderCargoPips(_ renderer: OpaquePointer?, x: Int32, y: Int32, w: Int32, cargo: Int, maxCargo: Int) {
+    guard maxCargo > 0 else { return }
+    let pipCount = min(maxCargo, 7)  // Show up to 7 pips
+    let pipW: Int32 = max(2, w / Int32(pipCount + 1))
+    let pipH: Int32 = 2
+    let spacing: Int32 = 1
+    let totalW = Int32(pipCount) * (pipW + spacing) - spacing
+    let startX = x + (w - totalW) / 2
+
+    let filledPips = Int(Double(cargo) / Double(maxCargo) * Double(pipCount))
+
+    for i in 0..<pipCount {
+        let px = startX + Int32(i) * (pipW + spacing)
+        if i < filledPips {
+            // Filled pip: bright green (tiberium)
+            SDL_SetRenderDrawColor(renderer, 0, 220, 0, 255)
+        } else {
+            // Empty pip: dark gray
+            SDL_SetRenderDrawColor(renderer, 40, 40, 40, 180)
+        }
+        var pipRect = SDL_Rect(x: px, y: y, w: pipW, h: pipH)
+        SDL_RenderFillRect(renderer, &pipRect)
+    }
+}
+
 // MARK: - Animation Rendering
 
 /// Render active animations (explosions, fires, smoke)
@@ -893,11 +978,10 @@ func renderAnimations(_ renderer: OpaquePointer?, camX: Int, camY: Int, vw: Int3
         if screenX + maxSize < 0 || screenY + maxSize < 0 ||
            screenX - maxSize > vw || screenY - maxSize > vh { continue }
 
-        // Try to render from SHP sprite
-        let theater = session.world?.theater ?? .temperate
+        // Try to render from SHP sprite (animations are plain .SHP, not theater-specific)
         if let info = getObjectTexture(renderer, typeName: anim.data.name,
                                        frame: anim.currentFrame, house: .neutral,
-                                       theater: theater) {
+                                       theater: nil) {
             let drawX = screenX - Int32(info.width) / 2
             let drawY = screenY - Int32(info.height) / 2
             var dstRect = SDL_Rect(x: drawX, y: drawY, w: Int32(info.width), h: Int32(info.height))
@@ -961,8 +1045,16 @@ func renderProceduralExplosion(_ renderer: OpaquePointer?, anim: GameAnimation, 
         var flash = SDL_Rect(x: screenX - 3, y: screenY - 3, w: 6, h: 6)
         SDL_RenderFillRect(renderer, &flash)
         return
-    case .napalm1, .napalm2, .napalm3, .burnSmall, .burnMed, .burnBig,
+    case .burnSmall, .burnMed, .burnBig,
          .onFireSmall, .onFireMed, .onFireBig, .fireSmall, .fireMed, .fireMed2, .fireTiny:
+        // Persistent fire/smoke effects — render as thin grey smoke puff so a
+        // missing SHP doesn't dominate the screen with a glowing red square.
+        SDL_SetRenderDrawColor(renderer, 70, 65, 60, alpha / 4)
+        let puff = Int32(max(2, Double(halfSize) * 0.4))
+        var puffRect = SDL_Rect(x: screenX - puff / 2, y: screenY - puff / 2, w: puff, h: puff)
+        SDL_RenderFillRect(renderer, &puffRect)
+        return
+    case .napalm1, .napalm2, .napalm3:
         r = 255; g = UInt8(max(0, 160 - Int(progress * 160))); b = 0
     case .piff, .piffpiff:
         r = 255; g = 255; b = 200

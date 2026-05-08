@@ -9,6 +9,7 @@ protocol MenuScreen: AnyObject {
     func handleMouseDown(_ x: Int32, _ y: Int32, button: UInt8)
     func handleMouseUp(_ x: Int32, _ y: Int32, button: UInt8)
     func handleMouseMotion(_ x: Int32, _ y: Int32, xrel: Int32, yrel: Int32)
+    func handleMouseWheel(_ dy: Int32, atX: Int32, atY: Int32)
     func handleContinuousInput()
 }
 
@@ -17,6 +18,7 @@ extension MenuScreen {
     func handleMouseDown(_ x: Int32, _ y: Int32, button: UInt8) {}
     func handleMouseUp(_ x: Int32, _ y: Int32, button: UInt8) {}
     func handleMouseMotion(_ x: Int32, _ y: Int32, xrel: Int32, yrel: Int32) {}
+    func handleMouseWheel(_ dy: Int32, atX: Int32, atY: Int32) {}
     func handleContinuousInput() {}
 }
 
@@ -184,32 +186,7 @@ class BriefingScreen: MenuScreen {
         if key == Int32(SDLK_RETURN.rawValue) || key == Int32(SDLK_SPACE.rawValue) {
             // Launch the mission
             if session.campaign.startNextMission() {
-                // Calculate auto-zoom to fit map bounds in viewport
-                let vpW = Double(renderState.windowWidth - sidebarWidth)
-                let vpH = Double(renderState.windowHeight)
-                if let bounds = session.world?.mapBounds {
-                    let mapPixW = Double(bounds.width * 24)
-                    let mapPixH = Double(bounds.height * 24)
-                    let fitZoomX = vpW / mapPixW
-                    let fitZoomY = vpH / mapPixH
-                    // Use the larger zoom so map fills viewport (no empty space)
-                    renderState.gameZoomLevel = max(fitZoomX, fitZoomY)
-                    // Minimum zoom is 1.0 (don't zoom out beyond native pixel size)
-                    renderState.gameZoomLevel = max(1.0, renderState.gameZoomLevel)
-                } else {
-                    renderState.gameZoomLevel = 1.0
-                }
-
-                // Initialize game camera — center on start waypoint or map bounds
-                if let scenario = scenarioData,
-                   let startWP = scenario.waypoints.first(where: { $0.id == 98 }) {
-                    let pos = cellToPixel(startWP.cell)
-                    renderState.gameCameraX = Double(pos.px) - vpW / renderState.gameZoomLevel / 2.0
-                    renderState.gameCameraY = Double(pos.py) - vpH / renderState.gameZoomLevel / 2.0
-                } else if let bounds = session.world?.mapBounds {
-                    renderState.gameCameraX = Double(bounds.x * 24)
-                    renderState.gameCameraY = Double(bounds.y * 24)
-                }
+                applyAutoFitCameraAndZoom()
                 session.lastTickTime = 0
                 session.tickAccumulator = 0
                 session.missionScore.reset()
@@ -475,14 +452,30 @@ class MapViewerScreen: MenuScreen {
         } else if key == Int32(SDLK_p.rawValue) {
             if let sd = scenarioData {
                 let scenName = session.scenarioList[session.scenarioIndex]
+
+                // Simulator launch: detach from any active campaign so handleWin/score
+                // don't try to advance to the next mission afterward.
+                session.campaignState.isActive = false
+                session.campaignState.completedMissions.removeAll()
+                session.campaignState.carryOverCredits = 0
+
+                // Build the world (resets triggers/win state, fog, house states, super weapons).
                 initGameWorld(scenario: sd, scenarioName: scenName)
                 session.currentScenarioName = scenName
-                renderState.gameCameraX = Double(renderState.cameraX)
-                renderState.gameCameraY = Double(renderState.cameraY)
-                renderState.gameZoomLevel = renderState.zoomLevel
+
+                // Seed credits + tech level from the scenario INI (campaign path does
+                // this via startNextMission; the simulator has to do it explicitly).
+                session.sidebarCredits = sd.credits
+                session.displayedCredits = sd.credits
+                session.scenarioBuildLevel = sd.buildLevel
+
+                // Match the briefing path's setup so end-screen + score work.
+                session.missionScore.reset()
                 session.lastTickTime = 0
                 session.tickAccumulator = 0
-                session.missionScore.reset()
+                session.triggerWinState = .playing
+                applyAutoFitCameraAndZoom()
+
                 session.currentScreen = PlayingScreen()
             }
         } else if key == Int32(SDLK_m.rawValue) {
@@ -515,6 +508,19 @@ class MapViewerScreen: MenuScreen {
         if button == UInt8(SDL_BUTTON_LEFT) {
             input.isPanning = false
         }
+    }
+
+    func handleMouseWheel(_ dy: Int32, atX: Int32, atY: Int32) {
+        let oldZoom = renderState.zoomLevel
+        var newZoom = oldZoom + (dy > 0 ? 0.25 : -0.25)
+        newZoom = max(0.5, min(3.0, newZoom))
+        if abs(newZoom - oldZoom) < 0.001 { return }
+        // Anchor zoom to cursor — same math as the playing screen.
+        let sx = Double(atX)
+        let sy = Double(atY)
+        renderState.cameraX += Int(sx * (1.0 / oldZoom - 1.0 / newZoom))
+        renderState.cameraY += Int(sy * (1.0 / oldZoom - 1.0 / newZoom))
+        renderState.zoomLevel = newZoom
     }
 
     func handleMouseMotion(_ x: Int32, _ y: Int32, xrel: Int32, yrel: Int32) {
@@ -561,6 +567,9 @@ class MapViewerScreen: MenuScreen {
 
 class PlayingScreen: MenuScreen {
     private var musicStarted = false
+    private var endScreenTimer: Int = 0
+    private var showingEndScreen: Bool = false
+    private var endScreenButtons: [(label: String, x: Int32, y: Int32, w: Int32, h: Int32, action: String)] = []
 
     func render(_ renderer: OpaquePointer?) {
         // Start gameplay music on first render
@@ -569,9 +578,172 @@ class PlayingScreen: MenuScreen {
             audioManager.startGameplayMusic()
         }
         renderGame(renderer)
+
+        // Victory/Defeat overlay
+        if showingEndScreen {
+            renderEndScreen(renderer)
+        }
+    }
+
+    // MARK: - End Screen Overlay
+
+    private func renderEndScreen(_ renderer: OpaquePointer?) {
+        let winW = renderState.windowWidth
+        let winH = renderState.windowHeight
+        let cx = winW / 2
+
+        // Semi-transparent dark background
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 180)
+        var bgRect = SDL_Rect(x: 0, y: 0, w: winW, h: winH)
+        SDL_RenderFillRect(renderer, &bgRect)
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE)
+
+        let won = session.triggerWinState == .won
+
+        // Title
+        if won {
+            drawText(renderer, "MISSION ACCOMPLISHED", centerX: cx, centerY: 80, color: .green, scale: 4)
+        } else {
+            drawText(renderer, "MISSION FAILED", centerX: cx, centerY: 80, color: .red, scale: 4)
+        }
+
+        // Scenario name
+        let scenName = session.currentScenarioName ?? session.campaignState.scenarioName
+        drawText(renderer, scenName, centerX: cx, centerY: 130, color: .amber, scale: 2)
+
+        // Stats section
+        let statY: Int32 = 180
+        let leftX = cx - 200
+        let valueX = cx + 120
+
+        drawText(renderer, "-- STATISTICS --", centerX: cx, centerY: statY, color: .amber, scale: 2)
+
+        // Time elapsed
+        let ticks = session.world?.tickCount ?? 0
+        let totalSeconds = ticks / 15
+        let minutes = totalSeconds / 60
+        let seconds = totalSeconds % 60
+        let timeStr = String(format: "%d:%02d", minutes, seconds)
+        drawTextLeft(renderer, "Time:", x: leftX, y: statY + 35, color: .green, scale: 2)
+        drawTextLeft(renderer, timeStr, x: valueX, y: statY + 35, color: .green, scale: 2)
+
+        // Get score data from campaign
+        let scoreData = session.campaign.scoreScreen(won: won)
+
+        // Units destroyed
+        let unitsDestroyed = scoreData.gdiKills + scoreData.nodKills
+        drawTextLeft(renderer, "Units Destroyed:", x: leftX, y: statY + 65, color: .green, scale: 2)
+        drawTextLeft(renderer, "\(unitsDestroyed)", x: valueX, y: statY + 65, color: .green, scale: 2)
+
+        // Units lost — use player house state if available
+        let playerHouse = session.world?.playerHouse ?? .goodGuy
+        let unitsLost = session.houseStates[playerHouse]?.unitsLost ?? 0
+        drawTextLeft(renderer, "Units Lost:", x: leftX, y: statY + 95, color: .green, scale: 2)
+        drawTextLeft(renderer, "\(unitsLost)", x: valueX, y: statY + 95, color: .green, scale: 2)
+
+        // Buildings destroyed
+        let buildingsDestroyed = scoreData.gdiBuildings + scoreData.nodBuildings
+        drawTextLeft(renderer, "Buildings Destroyed:", x: leftX, y: statY + 125, color: .green, scale: 2)
+        drawTextLeft(renderer, "\(buildingsDestroyed)", x: valueX, y: statY + 125, color: .green, scale: 2)
+
+        // Buildings lost
+        let buildingsLost = session.houseStates[playerHouse]?.buildingsLost ?? 0
+        drawTextLeft(renderer, "Buildings Lost:", x: leftX, y: statY + 155, color: .green, scale: 2)
+        drawTextLeft(renderer, "\(buildingsLost)", x: valueX, y: statY + 155, color: .green, scale: 2)
+
+        // Score
+        session.missionScore.elapsedTicks = ticks
+        let score = session.missionScore.totalScore
+        drawText(renderer, "Score: \(score)", centerX: cx, centerY: statY + 200, color: .amber, scale: 3)
+
+        // Star rating
+        let stars = session.missionScore.starRating
+        let starStr = String(repeating: "*", count: stars) + String(repeating: "-", count: 3 - stars)
+        drawText(renderer, "Rating: \(starStr)", centerX: cx, centerY: statY + 240, color: .amber, scale: 2)
+
+        // Buttons
+        for btn in endScreenButtons {
+            let mx = input.mouseX
+            let my = input.mouseY
+            let highlighted = mx >= btn.x && mx < btn.x + btn.w && my >= btn.y && my < btn.y + btn.h
+
+            let borderColor = highlighted ? Color.brightGreen : Color.green
+            let fillColor = highlighted ? Color.darkGreen : Color.black
+
+            var rect = SDL_Rect(x: btn.x, y: btn.y, w: btn.w, h: btn.h)
+            SDL_SetRenderDrawColor(renderer, fillColor.r, fillColor.g, fillColor.b, fillColor.a)
+            SDL_RenderFillRect(renderer, &rect)
+            SDL_SetRenderDrawColor(renderer, borderColor.r, borderColor.g, borderColor.b, borderColor.a)
+            SDL_RenderDrawRect(renderer, &rect)
+            var inner = SDL_Rect(x: btn.x + 1, y: btn.y + 1, w: btn.w - 2, h: btn.h - 2)
+            SDL_RenderDrawRect(renderer, &inner)
+
+            drawText(renderer, btn.label, centerX: btn.x + btn.w / 2, centerY: btn.y + btn.h / 2, color: borderColor)
+        }
+    }
+
+    private func buildEndScreenButtons() {
+        let won = session.triggerWinState == .won
+        let bw: Int32 = 200
+        let bh: Int32 = 44
+        let gap: Int32 = 40
+        let cy = renderState.windowHeight - 100
+
+        if won {
+            let totalW = bw * 2 + gap
+            let startX = renderState.windowWidth / 2 - totalW / 2
+            endScreenButtons = [
+                (label: "CONTINUE", x: startX, y: cy, w: bw, h: bh, action: "continue"),
+                (label: "REPLAY", x: startX + bw + gap, y: cy, w: bw, h: bh, action: "replay"),
+            ]
+        } else {
+            let totalW = bw * 2 + gap
+            let startX = renderState.windowWidth / 2 - totalW / 2
+            endScreenButtons = [
+                (label: "RETRY", x: startX, y: cy, w: bw, h: bh, action: "retry"),
+                (label: "MENU", x: startX + bw + gap, y: cy, w: bw, h: bh, action: "menu"),
+            ]
+        }
+    }
+
+    private func handleEndScreenClick(_ x: Int32, _ y: Int32) {
+        for btn in endScreenButtons {
+            if x >= btn.x && x < btn.x + btn.w && y >= btn.y && y < btn.y + btn.h {
+                switch btn.action {
+                case "continue":
+                    session.missionScore.elapsedTicks = session.world?.tickCount ?? 0
+                    session.campaign.handleWin()
+                    if session.campaignState.isComplete {
+                        session.currentScreen = MainMenuScreen()
+                    } else {
+                        session.currentScreen = BriefingScreen()
+                    }
+                case "replay", "retry":
+                    session.campaign.restart()
+                    session.triggerWinState = .playing
+                    showingEndScreen = false
+                    endScreenTimer = 0
+                    endScreenButtons = []
+                case "menu":
+                    session.currentScreen = MainMenuScreen()
+                default:
+                    break
+                }
+                return
+            }
+        }
     }
 
     func handleKeyDown(_ key: Int32) {
+        // When end screen is showing, block most input
+        if showingEndScreen {
+            if key == Int32(SDLK_ESCAPE.rawValue) {
+                session.currentScreen = MainMenuScreen()
+            }
+            return
+        }
+
         if key == Int32(SDLK_ESCAPE.rawValue) {
             if session.isPatrolMode {
                 session.isPatrolMode = false
@@ -606,11 +778,11 @@ class PlayingScreen: MenuScreen {
             }
             renderState.gameZoomLevel = max(minZoom, renderState.gameZoomLevel - 0.25)
         } else if key == Int32(SDLK_F5.rawValue) {
-            if quickSave() {
+            if quickMissionSave() {
                 print("Quick saved!")
             }
         } else if key == Int32(SDLK_F9.rawValue) {
-            if quickLoad() {
+            if quickMissionLoad() {
                 print("Quick loaded!")
             }
         } else if key == Int32(SDLK_RETURN.rawValue) || key == Int32(SDLK_SPACE.rawValue) {
@@ -705,6 +877,7 @@ class PlayingScreen: MenuScreen {
             if session.triggerWinState != .playing {
                 session.campaign.restart()
                 session.triggerWinState = .playing
+                endScreenTimer = 0
             }
         } else if key == Int32(SDLK_h.rawValue) {
             // H key: center camera on player's Construction Yard
@@ -790,6 +963,14 @@ class PlayingScreen: MenuScreen {
     }
 
     func handleMouseDown(_ x: Int32, _ y: Int32, button: UInt8) {
+        // When end screen is showing, only handle overlay button clicks
+        if showingEndScreen {
+            if button == UInt8(SDL_BUTTON_LEFT) {
+                handleEndScreenClick(x, y)
+            }
+            return
+        }
+
         if button == UInt8(SDL_BUTTON_LEFT) {
             if x >= renderState.windowWidth - sidebarWidth {
                 if handleSuperWeaponClick(x, y) {
@@ -882,9 +1063,13 @@ class PlayingScreen: MenuScreen {
     }
 
     func handleMouseUp(_ x: Int32, _ y: Int32, button: UInt8) {
+        if showingEndScreen { return }
         if button == UInt8(SDL_BUTTON_LEFT) {
             if input.isDraggingMinimap {
                 input.isDraggingMinimap = false
+            } else if session.isPatrolMode {
+                // Don't process left-up during patrol mode — waypoints are added on mouse-down
+                // and we must not deselect units or start a selection box.
             } else if x < renderState.windowWidth - sidebarWidth && !session.isPlacingStructure {
                 let shiftHeld = (SDL_GetModState().rawValue & UInt32(KMOD_SHIFT.rawValue)) != 0
                 handleGameLeftUp(x, y, shiftHeld: shiftHeld)
@@ -893,6 +1078,7 @@ class PlayingScreen: MenuScreen {
     }
 
     func handleMouseMotion(_ x: Int32, _ y: Int32, xrel: Int32, yrel: Int32) {
+        if showingEndScreen { return }
         if input.isDraggingMinimap {
             // Continue dragging on minimap — update camera position
             handleMinimapClick(x, y)
@@ -901,7 +1087,43 @@ class PlayingScreen: MenuScreen {
         }
     }
 
+    func handleMouseWheel(_ dy: Int32, atX: Int32, atY: Int32) {
+        if showingEndScreen { return }
+        // Don't zoom when the cursor is over the sidebar — let the wheel
+        // pass through (e.g. for sidebar scroll later).
+        if atX >= renderState.windowWidth - sidebarWidth { return }
+
+        let oldZoom = renderState.gameZoomLevel
+        let step = 0.25
+        var newZoom = oldZoom + (dy > 0 ? step : -step)
+        // Clamp: 1.0 keeps tiles at native pixels (no fractional sampling
+        // ugliness); 4.0 is a comfortable zoom-in ceiling.
+        newZoom = max(1.0, min(4.0, newZoom))
+        if abs(newZoom - oldZoom) < 0.001 { return }
+
+        // Anchor zoom to cursor: keep the world point under the mouse fixed.
+        // worldX = camX + screenX/zoom  →  camX_new = camX_old + screenX*(1/zoom_old - 1/zoom_new)
+        let sx = Double(atX)
+        let sy = Double(atY)
+        renderState.gameCameraX += sx * (1.0 / oldZoom - 1.0 / newZoom)
+        renderState.gameCameraY += sy * (1.0 / oldZoom - 1.0 / newZoom)
+        renderState.gameZoomLevel = newZoom
+        clampGameCamera()
+    }
+
     func handleContinuousInput() {
+        // Manage end screen timer
+        if session.triggerWinState != .playing && !showingEndScreen {
+            endScreenTimer += 1
+            if endScreenTimer >= 45 {  // ~3 seconds at 15 FPS
+                showingEndScreen = true
+                buildEndScreenButtons()
+            }
+        }
+
+        // Block camera panning when end screen is up
+        if showingEndScreen { return }
+
         let panSpeed = max(1.0, 8.0 / renderState.gameZoomLevel)
         let visibleW = Double(renderState.windowWidth - sidebarWidth) / renderState.gameZoomLevel
         let visibleH = Double(renderState.windowHeight) / renderState.gameZoomLevel
@@ -923,23 +1145,39 @@ class PlayingScreen: MenuScreen {
             maxCamY = Double(64 * 24) - visibleH
         }
 
-        // Edge-of-screen mouse scrolling (classic C&C style)
-        let edgeSize: Int32 = 8  // Pixels from edge to trigger scroll
-        let mx = input.mouseX
-        let my = input.mouseY
-        let gameAreaWidth = renderState.windowWidth - sidebarWidth
+        // Edge-of-screen mouse scrolling with acceleration
+        // The deeper the cursor is into the edge zone, the faster the scroll.
+        let edgeZone: Double = 40.0  // Pixels from edge that triggers scroll
+        let minSpeed = panSpeed * 0.25
+        let maxSpeed = panSpeed * 2.5
+        let mx = Double(input.mouseX)
+        let my = Double(input.mouseY)
+        let gameAreaWidth = Double(renderState.windowWidth - sidebarWidth)
+        let windowHeight = Double(renderState.windowHeight)
 
-        if mx < edgeSize {
-            renderState.gameCameraX = max(minCamX, renderState.gameCameraX - panSpeed)
+        // Left edge
+        if mx < edgeZone {
+            let depth = (edgeZone - mx) / edgeZone  // 0 at boundary, 1 at screen edge
+            let speed = minSpeed + (maxSpeed - minSpeed) * depth * depth
+            renderState.gameCameraX = max(minCamX, renderState.gameCameraX - speed)
         }
-        if mx >= gameAreaWidth - edgeSize {
-            renderState.gameCameraX = min(maxCamX, renderState.gameCameraX + panSpeed)
+        // Right edge
+        if mx >= gameAreaWidth - edgeZone {
+            let depth = (mx - (gameAreaWidth - edgeZone)) / edgeZone
+            let speed = minSpeed + (maxSpeed - minSpeed) * depth * depth
+            renderState.gameCameraX = min(maxCamX, renderState.gameCameraX + speed)
         }
-        if my < edgeSize {
-            renderState.gameCameraY = max(minCamY, renderState.gameCameraY - panSpeed)
+        // Top edge
+        if my < edgeZone {
+            let depth = (edgeZone - my) / edgeZone
+            let speed = minSpeed + (maxSpeed - minSpeed) * depth * depth
+            renderState.gameCameraY = max(minCamY, renderState.gameCameraY - speed)
         }
-        if my >= renderState.windowHeight - edgeSize {
-            renderState.gameCameraY = min(maxCamY, renderState.gameCameraY + panSpeed)
+        // Bottom edge
+        if my >= windowHeight - edgeZone {
+            let depth = (my - (windowHeight - edgeZone)) / edgeZone
+            let speed = minSpeed + (maxSpeed - minSpeed) * depth * depth
+            renderState.gameCameraY = min(maxCamY, renderState.gameCameraY + speed)
         }
 
         // Clamp camera after pan (in case maxCam < minCam when viewport > map)
@@ -961,8 +1199,81 @@ private func numberKeyIndex(_ key: Int32) -> Int {
     return raw  // SDLK_0=0, SDLK_1=1, ..., SDLK_9=9
 }
 
+/// Auto-fit zoom so the map fills the viewport, then center the camera on
+/// the player's starting position. Used by both the campaign briefing and
+/// the Map Viewer's P:Play simulator so the two paths stay aligned.
+///
+/// Focal-point priority (most-specific first):
+///   1. Tiberian Dawn HOME waypoint (id 26 — see Vanilla-Conquer
+///      `tiberiandawn/defines.h` `WAYPT_HOME`).
+///   2. Red Alert HOME waypoint (id 98), in case an RA scenario loads.
+///   3. Centroid of the player's starting objects — handles commando
+///      missions like SCG01EA that have no HOME waypoint but plenty of
+///      placed infantry. Without this, the camera lands at bounds-origin
+///      and the playable area renders as solid black fog of war.
+///   4. Center of the playable map bounds.
+///   5. Bounds origin (legacy fallback).
+func applyAutoFitCameraAndZoom() {
+    let vpW = max(1.0, Double(renderState.windowWidth - sidebarWidth))
+    let vpH = max(1.0, Double(renderState.windowHeight))
+
+    if let bounds = session.world?.mapBounds {
+        let mapPixW = max(1.0, Double(bounds.width * 24))
+        let mapPixH = max(1.0, Double(bounds.height * 24))
+        // Fit-to-viewport but cap at 1.5x so tiny maps don't upscale 24x24
+        // ICN tiles to a chunky 70+ pixels per tile. Empty space around a
+        // small map is the right look — that's how the original C&C presents
+        // bounded missions.
+        let fitZoom = max(vpW / mapPixW, vpH / mapPixH)
+        renderState.gameZoomLevel = max(1.0, min(1.5, fitZoom))
+    } else {
+        renderState.gameZoomLevel = 1.0
+    }
+
+    var focusX: Double? = nil
+    var focusY: Double? = nil
+
+    if let scenario = scenarioData {
+        for id in [26, 98] {
+            if let wp = scenario.waypoints.first(where: { $0.id == id }) {
+                let pos = cellToPixel(wp.cell)
+                focusX = Double(pos.px) + 12.0
+                focusY = Double(pos.py) + 12.0
+                break
+            }
+        }
+    }
+
+    if focusX == nil, let world = session.world {
+        var sumX = 0.0, sumY = 0.0, count = 0
+        for obj in world.objects where obj.house == world.playerHouse && obj.strength > 0 {
+            sumX += obj.worldX
+            sumY += obj.worldY
+            count += 1
+        }
+        if count > 0 {
+            focusX = sumX / Double(count)
+            focusY = sumY / Double(count)
+        }
+    }
+
+    if focusX == nil, let bounds = session.world?.mapBounds {
+        focusX = Double((bounds.x + bounds.width / 2) * 24) + 12.0
+        focusY = Double((bounds.y + bounds.height / 2) * 24) + 12.0
+    }
+
+    if let fx = focusX, let fy = focusY {
+        renderState.gameCameraX = fx - vpW / renderState.gameZoomLevel / 2.0
+        renderState.gameCameraY = fy - vpH / renderState.gameZoomLevel / 2.0
+    } else if let bounds = session.world?.mapBounds {
+        renderState.gameCameraX = Double(bounds.x * 24)
+        renderState.gameCameraY = Double(bounds.y * 24)
+    }
+    clampGameCamera()
+}
+
 /// Clamp the game camera to map bounds
-private func clampGameCamera() {
+func clampGameCamera() {
     let vpW = Double(renderState.windowWidth - sidebarWidth) / renderState.gameZoomLevel
     let vpH = Double(renderState.windowHeight) / renderState.gameZoomLevel
     let minCamX: Double

@@ -61,10 +61,10 @@ enum GameAnimType: String, CaseIterable {
     case burnMed = "BURN-M"
     case burnBig = "BURN-L"
 
-    // Building on fire
-    case onFireSmall = "ONIFIRE1"
-    case onFireMed = "ONIFIRE3"
-    case onFireBig = "ONIFIRE2"
+    // Building on fire — see data table for SHP name (BURN-S/M/L per VC adata.cpp)
+    case onFireSmall = "ONFIRE1"
+    case onFireMed = "ONFIRE3"
+    case onFireBig = "ONFIRE2"
 
     // Smoke
     case smokeM = "SMOKE_M"
@@ -223,26 +223,28 @@ let animTypeDataTable: [GameAnimType: AnimTypeData] = [
         damage: 0, delay: 1, startFrame: 0, loopStart: 0, loopEnd: -1,
         stages: -1, loops: 0, chainTo: nil
     ),
+    // OnFire animations share BURN-S/M/L SHPs with the .burn* anims but use a
+    // looping/sticky config (matches VC adata.cpp lines 390-452).
     .onFireSmall: AnimTypeData(
-        name: "ONIFIRE1", size: 24, biggest: 0,
+        name: "BURN-S", size: 11, biggest: 13,
         isNormalized: false, isWhiteTrans: false, isScorcher: false, isCrater: false,
-        isSticky: true, isGroundLayer: true, isTranslucent: false, isFlame: true,
-        damage: 0, delay: 2, startFrame: 0, loopStart: 0, loopEnd: -1,
-        stages: -1, loops: 127, chainTo: nil
+        isSticky: true, isGroundLayer: true, isTranslucent: false, isFlame: false,
+        damage: 8, delay: 1, startFrame: 0, loopStart: 30, loopEnd: 62,
+        stages: -1, loops: 4, chainTo: .smokeM
     ),
     .onFireMed: AnimTypeData(
-        name: "ONIFIRE3", size: 32, biggest: 0,
+        name: "BURN-M", size: 14, biggest: 13,
         isNormalized: false, isWhiteTrans: false, isScorcher: false, isCrater: false,
-        isSticky: true, isGroundLayer: true, isTranslucent: false, isFlame: true,
-        damage: 0, delay: 2, startFrame: 0, loopStart: 0, loopEnd: -1,
-        stages: -1, loops: 127, chainTo: nil
+        isSticky: true, isGroundLayer: true, isTranslucent: false, isFlame: false,
+        damage: 16, delay: 1, startFrame: 0, loopStart: 30, loopEnd: 62,
+        stages: -1, loops: 4, chainTo: .onFireSmall
     ),
     .onFireBig: AnimTypeData(
-        name: "ONIFIRE2", size: 48, biggest: 0,
-        isNormalized: false, isWhiteTrans: false, isScorcher: false, isCrater: false,
-        isSticky: true, isGroundLayer: true, isTranslucent: false, isFlame: true,
-        damage: 0, delay: 2, startFrame: 0, loopStart: 0, loopEnd: -1,
-        stages: -1, loops: 127, chainTo: nil
+        name: "BURN-L", size: 23, biggest: 13,
+        isNormalized: false, isWhiteTrans: false, isScorcher: true, isCrater: false,
+        isSticky: true, isGroundLayer: true, isTranslucent: false, isFlame: false,
+        damage: 24, delay: 1, startFrame: 0, loopStart: 30, loopEnd: 62,
+        stages: -1, loops: 4, chainTo: .onFireMed
     ),
     .smokePuff: AnimTypeData(
         name: "SMOKEY", size: 24, biggest: 2,

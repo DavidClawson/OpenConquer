@@ -61,17 +61,29 @@ func renderGameCursor(_ renderer: OpaquePointer?, world: GameWorld) {
         let worldPos = gameScreenToWorld(input.mouseX, input.mouseY)
         let selected = world.selectedObjects()
 
-        // Check if hovering over a damaged friendly building in repair mode → repair wrench cursor
+        // Check if hovering over a friendly building in repair mode → repair wrench cursor
         var hoveringDamagedBuilding = false
         if session.isRepairMode {
             for obj in world.objects {
                 if obj.kind != .structure { continue }
                 if obj.house != world.playerHouse { continue }
                 if obj.strength <= 0 { continue }
-                if obj.strength >= obj.maxStrength { continue }
                 if isWorldPosOnBuilding(worldX: worldPos.worldX, worldY: worldPos.worldY, building: obj) {
                     cursor = cursorRepair
                     hoveringDamagedBuilding = true
+                    break
+                }
+            }
+        }
+        // Also show repair cursor when hovering over own building with no units selected
+        // (user hasn't entered repair mode but we should still indicate interactability)
+        if !hoveringDamagedBuilding && !session.isRepairMode && selected.isEmpty {
+            for obj in world.objects {
+                if obj.kind != .structure { continue }
+                if obj.house != world.playerHouse { continue }
+                if obj.strength <= 0 { continue }
+                if isWorldPosOnBuilding(worldX: worldPos.worldX, worldY: worldPos.worldY, building: obj) {
+                    cursor = cursorCanSelect
                     break
                 }
             }
@@ -94,9 +106,22 @@ func renderGameCursor(_ renderer: OpaquePointer?, world: GameWorld) {
 
             if isHoveringMCV {
                 cursor = cursorDeploy
-            } else if let _ = findEnemyAtWorldPos(worldX: worldPos.worldX, worldY: worldPos.worldY) {
-                // Check for enemy under cursor -> attack cursor
-                cursor = cursorCanAttack
+            } else if let enemy = findEnemyAtWorldPos(worldX: worldPos.worldX, worldY: worldPos.worldY) {
+                // Check if any selected unit is an engineer targeting an enemy building → capture cursor
+                if enemy.kind == .structure {
+                    var hasEngineer = false
+                    for obj in selected {
+                        if obj.kind == .infantry && obj.house == world.playerHouse,
+                           let data = getInfantryTypeDataByName(obj.typeName.uppercased()),
+                           data.canCapture {
+                            hasEngineer = true
+                            break
+                        }
+                    }
+                    cursor = hasEngineer ? cursorEnter : cursorCanAttack
+                } else {
+                    cursor = cursorCanAttack
+                }
             } else {
                 // Check if terrain is passable for any selected unit
                 let hoverCellX = Int(worldPos.worldX) / 24
@@ -158,6 +183,8 @@ func drawProceduralCursor(_ renderer: OpaquePointer?, cursor: CursorDef) {
         drawCursorAttackMove(renderer, mx: mx, my: my)
     } else if cursor.startFrame == cursorCanSelect.startFrame {
         drawCursorSelect(renderer, mx: mx, my: my)
+    } else if cursor.startFrame == cursorEnter.startFrame {
+        drawCursorEnter(renderer, mx: mx, my: my)
     } else if cursor.startFrame == cursorRepair.startFrame {
         drawCursorRepair(renderer, mx: mx, my: my)
     } else if cursor.startFrame == cursorSell.startFrame {
@@ -296,6 +323,32 @@ private func drawCursorSelect(_ renderer: OpaquePointer?, mx: Int32, my: Int32) 
     SDL_RenderDrawLine(renderer, mx - sz, my + sz, mx - sz, my + sz - corner)
     SDL_RenderDrawLine(renderer, mx + sz, my + sz, mx + sz - corner, my + sz)
     SDL_RenderDrawLine(renderer, mx + sz, my + sz, mx + sz, my + sz - corner)
+}
+
+private func drawCursorEnter(_ renderer: OpaquePointer?, mx: Int32, my: Int32) {
+    // Arrow pointing into a building shape (capture/enter cursor)
+    let sz: Int32 = 9
+    let pulse = abs(sin(Double(renderState.cursorAnimFrame) * 0.2))
+    let alpha = UInt8(180 + Int(pulse * 75))
+
+    // Building outline (small square)
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 200)
+    var bgRect = SDL_Rect(x: mx - sz - 1, y: my - sz - 1, w: sz * 2 + 3, h: sz * 2 + 3)
+    SDL_RenderDrawRect(renderer, &bgRect)
+
+    SDL_SetRenderDrawColor(renderer, 255, 220, 0, alpha)
+    var bldgRect = SDL_Rect(x: mx - sz, y: my - sz, w: sz * 2 + 1, h: sz * 2 + 1)
+    SDL_RenderDrawRect(renderer, &bldgRect)
+
+    // Arrow pointing right into center
+    SDL_SetRenderDrawColor(renderer, 0, 220, 0, 255)
+    SDL_RenderDrawLine(renderer, mx - sz + 2, my, mx + 2, my)
+    SDL_RenderDrawLine(renderer, mx - sz + 2, my - 1, mx + 2, my - 1)
+    // Arrowhead
+    SDL_RenderDrawLine(renderer, mx + 2, my, mx - 2, my - 4)
+    SDL_RenderDrawLine(renderer, mx + 2, my, mx - 2, my + 4)
+    SDL_RenderDrawLine(renderer, mx + 2, my - 1, mx - 2, my - 5)
+    SDL_RenderDrawLine(renderer, mx + 2, my - 1, mx - 2, my + 3)
 }
 
 private func drawCursorRepair(_ renderer: OpaquePointer?, mx: Int32, my: Int32) {

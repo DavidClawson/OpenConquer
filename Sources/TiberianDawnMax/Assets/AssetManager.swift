@@ -44,6 +44,13 @@ class AssetManager {
         for sub in subArchives {
             mixManager.registerSubArchive(sub)
         }
+        // Theater MIX files contain theater-specific sprites (tiberium TI1-TI12,
+        // smudges CR1-CR6/SC1-SC6, building damage frames, etc.)
+        // These are nested inside GENERAL.MIX in the original game data.
+        let theaterArchives = ["TEMPERAT.MIX", "DESERT.MIX", "WINTER.MIX"]
+        for sub in theaterArchives {
+            mixManager.registerSubArchive(sub)
+        }
         print("Total entries after sub-archives: \(mixManager.totalEntries)")
 
         if hasRemasteredAudio {

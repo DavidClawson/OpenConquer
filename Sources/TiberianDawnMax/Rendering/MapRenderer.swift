@@ -562,9 +562,11 @@ func renderMapViewer(_ renderer: OpaquePointer?) {
             if screenX > vw || screenY > vh || screenX + 24 < 0 || screenY + 24 < 0 { continue }
 
             let density = world.map.tiberiumDensity[cell] ?? 1
-            let tiName = "TI\(density)"
+            let variant = world.map.tiberiumVariant[cell] ?? density
+            let tiName = "TI\(min(max(variant, 1), 12))"
+            let frame = min(max(density - 1, 0), 11)
 
-            if let info = getObjectTexture(renderer, typeName: tiName, frame: 0, house: .neutral, theater: theater) {
+            if let info = getObjectTexture(renderer, typeName: tiName, frame: frame, house: .neutral, theater: theater) {
                 var dstRect = SDL_Rect(x: screenX, y: screenY, w: Int32(info.width), h: Int32(info.height))
                 SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
             } else {

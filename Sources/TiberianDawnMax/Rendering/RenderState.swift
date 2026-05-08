@@ -43,6 +43,8 @@ class RenderState {
     // MARK: - Window
     var windowWidth: Int32 = 1920
     var windowHeight: Int32 = 1200
+    var displayScale: Double = 1.0  // HiDPI scale factor (2.0 on Retina)
+    var sdlRenderer: OpaquePointer? = nil  // SDL_Renderer* for logical size updates
 
     // MARK: - Palette
     var gamePalette: [(r: UInt8, g: UInt8, b: UInt8)] = []

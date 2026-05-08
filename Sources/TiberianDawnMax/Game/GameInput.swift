@@ -13,9 +13,10 @@ func isWorldPosOnBuilding(worldX: Double, worldY: Double, building: GameObject) 
     let halfH = Double(size.h * 24) / 2.0
     // Horizontal: match footprint width
     guard abs(worldX - building.worldX) <= halfW else { return false }
-    // Vertical: extend upward by halfH to cover the sprite above the footprint
+    // Vertical: building sprite is bottom-anchored — it can extend above the footprint.
+    // Accept clicks within the footprint (±halfH) plus extra above for the visible sprite.
     let dy = worldY - building.worldY
-    return dy >= -halfH * 2.0 && dy <= halfH
+    return dy >= -halfH - 24.0 && dy <= halfH
 }
 
 // MARK: - Coordinate Conversion
@@ -48,7 +49,7 @@ func handleGameLeftDrag(_ x: Int32, _ y: Int32) {
     if let sx = input.selectionBoxStartX, let sy = input.selectionBoxStartY {
         let dx = abs(Int(x) - Int(sx))
         let dy = abs(Int(y) - Int(sy))
-        if dx > 4 || dy > 4 {
+        if dx > 8 || dy > 8 {
             input.isDragging = true
         }
     }
@@ -71,6 +72,7 @@ func handleGameLeftUp(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
             world.deselectAll()
         }
 
+        var selectedAny = false
         for obj in world.objects {
             if obj.kind == .structure { continue }
             if obj.house != world.playerHouse { continue }  // Only select friendly units
@@ -78,6 +80,37 @@ func handleGameLeftUp(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
             if obj.worldX >= topLeft.worldX && obj.worldX <= bottomRight.worldX &&
                obj.worldY >= topLeft.worldY && obj.worldY <= bottomRight.worldY {
                 obj.isSelected = true
+                selectedAny = true
+            }
+        }
+
+        // If the drag box was small and caught no units, treat as a single click
+        // This lets players select buildings even with slight mouse movement
+        let dragW = maxSX - minSX
+        let dragH = maxSY - minSY
+        if !selectedAny && dragW < 24 && dragH < 24 {
+            let clickWorldPos = gameScreenToWorld(x, y)
+            for obj in world.objects {
+                if obj.kind != .structure { continue }
+                if obj.house != world.playerHouse { continue }
+                if obj.strength <= 0 { continue }
+                if isWorldPosOnBuilding(worldX: clickWorldPos.worldX, worldY: clickWorldPos.worldY, building: obj) {
+                    if session.isRepairMode {
+                        if obj.strength < obj.maxStrength {
+                            if obj.isRepairing {
+                                obj.isRepairing = false
+                                obj.mission = .guard_
+                            } else {
+                                obj.isRepairing = true
+                                obj.mission = .repair
+                            }
+                        }
+                        session.isRepairMode = false
+                    } else {
+                        obj.isSelected = true
+                    }
+                    break
+                }
             }
         }
     } else {
@@ -140,7 +173,7 @@ func handleGameLeftUp(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
         // MCV deploy: if a selected MCV is clicked on, deploy it
         if let clicked = nearest,
            clicked.isSelected,
-           clicked.typeName.uppercased() == "MCV",
+           clicked.isMCV,
            clicked.house == world.playerHouse,
            clicked.mission != .unload {
             clicked.mission = .unload
@@ -234,9 +267,19 @@ func handleGameRightClick(_ x: Int32, _ y: Int32, shiftHeld: Bool = false) {
             obj.isAttackMoving = false
             obj.moveWaypoints = []
             obj.groupMoveSpeed = nil
-            // Commando targeting a building → sabotage mission (C4)
-            if obj.typeName.uppercased() == "RMBO" && enemy.kind == .structure {
-                obj.mission = .sabotage
+            // Special missions when targeting a building
+            if enemy.kind == .structure {
+                if obj.isCommando {
+                    // Commando targeting a building → sabotage mission (C4)
+                    obj.mission = .sabotage
+                } else if obj.kind == .infantry,
+                          let data = getInfantryTypeDataByName(obj.typeName.uppercased()),
+                          data.canCapture {
+                    // Engineer targeting an enemy building → capture mission
+                    obj.mission = .capture
+                } else {
+                    obj.mission = .attack
+                }
             } else {
                 obj.mission = .attack
             }

@@ -530,7 +530,7 @@ class AudioManager {
         var desired = SDL_AudioSpec()
         desired.freq = Int32(outputSampleRate)
         desired.format = UInt16(AUDIO_S16LSB)
-        desired.channels = 1  // Mono output for simplicity
+        desired.channels = 2  // Stereo output for spatial panning
         desired.samples = 1024
         desired.callback = nil  // We'll use SDL_QueueAudio
 
@@ -615,32 +615,12 @@ class AudioManager {
         var pan: Float = 0.0
 
         if let wx = worldX, let wy = worldY {
-            // Distance from camera center (in world coordinates)
-            let zoom = max(1.0, renderState.gameZoomLevel)
-            let visibleWorldW = Double(renderState.windowWidth - sidebarWidth) / zoom
-            let visibleWorldH = Double(renderState.windowHeight) / zoom
-            let camCenterX = renderState.gameCameraX + visibleWorldW / 2.0
-            let camCenterY = renderState.gameCameraY + visibleWorldH / 2.0
-            let dx = wx - camCenterX
-            let dy = wy - camCenterY
-            let dist = sqrt(dx * dx + dy * dy)
-
-            // Viewport-based attenuation in world coordinates
-            let viewRadius = sqrt(visibleWorldW * visibleWorldW + visibleWorldH * visibleWorldH) / 2.0
-            let minDist = viewRadius        // Full volume within the viewport
-            let maxDist = viewRadius * 2.0  // Fade to zero at 2x viewport radius
-            if dist > maxDist {
-                return  // Too far, don't play
-            } else if dist > minDist {
-                let falloff = Float(1.0 - (dist - minDist) / (maxDist - minDist))
-                volume *= falloff
+            let spatial = calculateSpatialAudio(worldX: wx, worldY: wy)
+            if spatial.volume <= 0 {
+                return  // Too far away, don't play
             }
-
-            // Stereo panning (in world coordinates)
-            if visibleWorldW > 0 {
-                pan = Float(dx / (visibleWorldW / 2.0))
-                pan = max(-1.0, min(1.0, pan))
-            }
+            volume *= spatial.volume
+            pan = spatial.pan
         }
 
         // Evict oldest sound if at limit
@@ -717,6 +697,7 @@ class AudioManager {
                 decodedSamples = audio.samples
                 sampleRate = audio.sampleRate
                 loaded = true
+                print("AudioManager: Loaded '\(name)' from \(audio.source.rawValue) (\(audio.samples.count) samples, \(audio.sampleRate)Hz)")
             }
 
             // Try AUD from MIX
@@ -841,7 +822,8 @@ class AudioManager {
                 musicLoading = false
                 isMusicPlaying = true
                 consecutiveTrackFailures = 0
-                print("AudioManager: Playing theme '\(r.theme.title)' (\(r.samples.count) samples, \(r.sampleRate)Hz)")
+                let maxAmp = r.samples.prefix(min(r.samples.count, 44100)).reduce(Int16(0)) { max(abs($0), abs($1)) }
+                print("AudioManager: Playing theme '\(r.theme.title)' (\(r.samples.count) samples, \(r.sampleRate)Hz, peak=\(maxAmp))")
             } else {
                 musicLoading = false
                 if !r.loaded {
@@ -867,19 +849,20 @@ class AudioManager {
         // Keep the queue fed but not overstuffed — target ~100ms of buffered audio.
         // If the queue already has enough, skip this frame to avoid latency buildup.
         let queued = SDL_GetQueuedAudioSize(audioDevice)
-        let targetQueueBytes = UInt32(outputSampleRate / 5 * 2)  // ~200ms in bytes
+        let targetQueueBytes = UInt32(outputSampleRate / 5 * 4)  // ~200ms in bytes (stereo Int16 = 4 bytes/frame)
         if queued > targetQueueBytes { return }
 
         // Generate enough audio to cover the gap until next tick.
         // At 15 FPS game loop, we need ~67ms of audio per tick.
         // Generate ~100ms to provide headroom against frame time variation.
-        let bufferSize = outputSampleRate / 10
-        var mixBuffer = [Float](repeating: 0.0, count: bufferSize)
+        let frameCount = outputSampleRate / 10  // number of stereo frames
+        let stereoSampleCount = frameCount * 2  // interleaved L/R samples
+        var mixBuffer = [Float](repeating: 0.0, count: stereoSampleCount)
 
-        // Mix active sound effects
+        // Mix active sound effects (stereo with panning)
         var completedIndices = [Int]()
         for (i, _) in activeSounds.enumerated() {
-            mixSoundInto(&mixBuffer, sound: &activeSounds[i])
+            mixSoundInto(&mixBuffer, frameCount: frameCount, sound: &activeSounds[i])
             if activeSounds[i].offset >= activeSounds[i].samples.count {
                 completedIndices.append(i)
             }
@@ -888,9 +871,9 @@ class AudioManager {
             activeSounds.remove(at: i)
         }
 
-        // Mix EVA speech
+        // Mix EVA speech (center-panned, pan=0)
         if var speech = activeSpeech {
-            mixSoundInto(&mixBuffer, sound: &speech)
+            mixSoundInto(&mixBuffer, frameCount: frameCount, sound: &speech)
             activeSpeech = speech
             if speech.offset >= speech.samples.count {
                 activeSpeech = nil
@@ -902,20 +885,22 @@ class AudioManager {
             }
         }
 
-        // Mix music (with proper resampling for sample rate differences)
+        // Mix music (center-panned, with proper resampling for sample rate differences)
         if isMusicPlaying && !musicSamples.isEmpty {
             let musicVol = musicVolume * masterVolume
             let ratio = Double(musicSampleRate) / Double(outputSampleRate)
             var srcPos = Double(musicOffset)
 
-            for i in 0..<bufferSize {
+            for i in 0..<frameCount {
                 let srcIdx = Int(srcPos)
                 if srcIdx < musicSamples.count {
                     // Linear interpolation for smoother resampling
                     let frac = Float(srcPos - Double(srcIdx))
                     let s0 = Float(musicSamples[srcIdx])
                     let s1 = srcIdx + 1 < musicSamples.count ? Float(musicSamples[srcIdx + 1]) : s0
-                    mixBuffer[i] += (s0 + (s1 - s0) * frac) * musicVol
+                    let sample = (s0 + (s1 - s0) * frac) * musicVol
+                    mixBuffer[i * 2] += sample      // Left
+                    mixBuffer[i * 2 + 1] += sample  // Right
                     srcPos += ratio
                 } else if isMusicLooping {
                     srcPos = 0
@@ -929,15 +914,15 @@ class AudioManager {
             musicOffset = Int(srcPos)
         }
 
-        // Convert to Int16 and queue
-        var output = [Int16](repeating: 0, count: bufferSize)
-        for i in 0..<bufferSize {
+        // Convert to Int16 interleaved stereo and queue
+        var output = [Int16](repeating: 0, count: stereoSampleCount)
+        for i in 0..<stereoSampleCount {
             let clamped = max(-32767.0, min(32767.0, mixBuffer[i]))
             output[i] = Int16(clamped)
         }
 
         _ = output.withUnsafeBufferPointer { buf in
-            SDL_QueueAudio(audioDevice, buf.baseAddress, UInt32(bufferSize * 2))
+            SDL_QueueAudio(audioDevice, buf.baseAddress, UInt32(stereoSampleCount * 2))
         }
     }
 
@@ -1001,16 +986,63 @@ class AudioManager {
         return reports[Int.random(in: 0..<reports.count)]
     }
 
-    /// Mix a single sound into the output buffer with resampling
-    private func mixSoundInto(_ buffer: inout [Float], sound: inout ActiveSound) {
+    // MARK: - Sound Spatialization
+
+    /// Calculate volume attenuation and stereo pan for a world-position sound.
+    /// Returns volume (0.0–1.0) and pan (-1.0 left .. +1.0 right, capped at ±0.25).
+    private func calculateSpatialAudio(worldX: Double, worldY: Double) -> (volume: Float, pan: Float) {
+        let zoom = max(1.0, renderState.gameZoomLevel)
+        let viewportW = Double(renderState.windowWidth - sidebarWidth) / zoom
+        let viewportH = Double(renderState.windowHeight) / zoom
+        let camCenterX = renderState.gameCameraX + viewportW / 2.0
+        let camCenterY = renderState.gameCameraY + viewportH / 2.0
+
+        let dx = worldX - camCenterX
+        let dy = worldY - camCenterY
+
+        // Check if the sound source is within the visible viewport (full volume)
+        let halfW = viewportW / 2.0
+        let halfH = viewportH / 2.0
+        let edgeDistX = max(0.0, abs(dx) - halfW)
+        let edgeDistY = max(0.0, abs(dy) - halfH)
+        let edgeDist = sqrt(edgeDistX * edgeDistX + edgeDistY * edgeDistY)
+
+        // Linear falloff from viewport edge to ~360px (15 cells * 24px) beyond
+        let falloffRange: Double = 360.0
+        var volume: Float = 1.0
+        if edgeDist > falloffRange {
+            return (volume: 0.0, pan: 0.0)  // Beyond max hearing distance
+        } else if edgeDist > 0 {
+            volume = Float(1.0 - edgeDist / falloffRange)
+        }
+
+        // Stereo panning: map horizontal offset to ±0.25 max (subtle)
+        var pan: Float = 0.0
+        if halfW > 0 {
+            pan = Float(dx / halfW) * 0.25
+            pan = max(-0.25, min(0.25, pan))
+        }
+
+        return (volume: volume, pan: pan)
+    }
+
+    /// Mix a single sound into the stereo output buffer with resampling and panning.
+    /// Buffer is interleaved stereo: [L0, R0, L1, R1, ...] with `frameCount` frames.
+    private func mixSoundInto(_ buffer: inout [Float], frameCount: Int, sound: inout ActiveSound) {
         let vol = sound.volume
+        // Convert pan (-1..+1) to left/right gain using constant-power-ish linear pan
+        // pan = 0 -> both 1.0; pan = -0.25 -> left louder; pan = +0.25 -> right louder
+        let leftGain = vol * min(1.0, 1.0 - sound.pan)
+        let rightGain = vol * min(1.0, 1.0 + sound.pan)
 
         // Fast path: same sample rate (most sounds are 22050Hz = outputSampleRate)
         if sound.sourceSampleRate == outputSampleRate {
             let remaining = sound.samples.count - sound.offset
-            let count = min(buffer.count, remaining)
+            let count = min(frameCount, remaining)
             for i in 0..<count {
-                buffer[i] += Float(sound.samples[sound.offset + i]) * vol
+                let sample = Float(sound.samples[sound.offset + i])
+                buffer[i * 2] += sample * leftGain
+                buffer[i * 2 + 1] += sample * rightGain
             }
             sound.offset += count
             return
@@ -1020,7 +1052,7 @@ class AudioManager {
         let ratio = Double(sound.sourceSampleRate) / Double(outputSampleRate)
         var srcPos = Double(sound.offset)
 
-        for i in 0..<buffer.count {
+        for i in 0..<frameCount {
             let srcIdx = Int(srcPos)
             if srcIdx >= sound.samples.count {
                 sound.offset = sound.samples.count
@@ -1031,7 +1063,9 @@ class AudioManager {
             let frac = Float(srcPos - Double(srcIdx))
             let s0 = Float(sound.samples[srcIdx])
             let s1 = srcIdx + 1 < sound.samples.count ? Float(sound.samples[srcIdx + 1]) : s0
-            buffer[i] += (s0 + (s1 - s0) * frac) * vol
+            let sample = (s0 + (s1 - s0) * frac)
+            buffer[i * 2] += sample * leftGain
+            buffer[i * 2 + 1] += sample * rightGain
 
             srcPos += ratio
         }

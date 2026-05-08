@@ -203,6 +203,18 @@ class GameObject {
     private(set) var cachedSpeedType: SpeedType = .foot
     private(set) var cachedIsCrusher: Bool = false
     private(set) var cachedIsCrushable: Bool = false
+    // Identity flags resolved once at type-cache time so combat/AI/movement
+    // code can ask `obj.isHarvester` instead of `obj.typeName.uppercased() == "HARV"`.
+    private(set) var cachedIsHarvester: Bool = false
+    private(set) var cachedIsMCV: Bool = false
+    private(set) var cachedIsGunboat: Bool = false
+    private(set) var cachedIsCommando: Bool = false
+    private(set) var cachedIsDefenseStructure: Bool = false
+    private(set) var cachedIsPowerPlant: Bool = false
+    private(set) var cachedIsRefinery: Bool = false
+    private(set) var cachedIsAircraftPad: Bool = false
+    private(set) var cachedIsWall: Bool = false
+    private(set) var cachedIsSAMSite: Bool = false
 
     /// Resolve type data from tables and cache it
     private func cacheTypeData() {
@@ -231,6 +243,9 @@ class GameObject {
                 cachedSpeedType = data.speed
                 cachedIsCrusher = data.isCrusher
                 cachedIsCrushable = data.isCrushable
+                cachedIsHarvester = ut.isHarvester
+                cachedIsMCV = ut.isMCV
+                cachedIsGunboat = ut.isGunboat
                 ammo = data.ammo
             }
         case .infantry:
@@ -243,6 +258,7 @@ class GameObject {
                 cachedCost = data.cost
                 cachedSpeedType = .foot
                 cachedIsCrushable = true  // All infantry are crushable
+                cachedIsCommando = it.isCommando
             }
         case .structure:
             if let st = StructType.from(iniName: upper), let data = buildingTypeDataTable[st] {
@@ -255,6 +271,12 @@ class GameObject {
                 cachedHasTurret = data.hasTurret
                 powerOutput = data.powerProduction
                 powerDrain = data.powerDrain
+                cachedIsDefenseStructure = st.isDefenseStructure
+                cachedIsPowerPlant = st.isPowerPlant
+                cachedIsRefinery = st.isRefinery
+                cachedIsAircraftPad = st.isAircraftPad
+                cachedIsWall = st.isWall
+                cachedIsSAMSite = st.isSAMSite
             }
         }
     }
@@ -272,6 +294,16 @@ class GameObject {
     var speedType: SpeedType { cachedSpeedType }
     var isCrusher: Bool { cachedIsCrusher }
     var isCrushable: Bool { cachedIsCrushable }
+    var isHarvester: Bool { cachedIsHarvester }
+    var isMCV: Bool { cachedIsMCV }
+    var isGunboat: Bool { cachedIsGunboat }
+    var isCommando: Bool { cachedIsCommando }
+    var isDefenseStructure: Bool { cachedIsDefenseStructure }
+    var isPowerPlant: Bool { cachedIsPowerPlant }
+    var isRefinery: Bool { cachedIsRefinery }
+    var isAircraftPad: Bool { cachedIsAircraftPad }
+    var isWall: Bool { cachedIsWall }
+    var isSAMSite: Bool { cachedIsSAMSite }
 
     /// Damage ratio as fraction (1.0 = full health, 0.0 = dead)
     var healthFraction: Double {

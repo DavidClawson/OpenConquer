@@ -72,8 +72,7 @@ func returnToBase(_ obj: GameObject) {
 
     for other in world.objects {
         guard other.kind == .structure && other.house == obj.house && other.strength > 0 else { continue }
-        let upper = other.typeName.uppercased()
-        guard upper == "HPAD" || upper == "AFLD" else { continue }
+        guard other.isAircraftPad else { continue }
 
         // Skip pads already occupied by another aircraft
         if world.occupiedPads.contains(other.id) { continue }
@@ -149,8 +148,7 @@ extension GameObject {
                     let landedCell = cell
                     for other in world.objects {
                         guard other.kind == .structure && other.house == house && other.strength > 0 else { continue }
-                        let upper = other.typeName.uppercased()
-                        if (upper == "HPAD" || upper == "AFLD") && other.cell == landedCell {
+                        if other.isAircraftPad && other.cell == landedCell {
                             // Rearm at this pad
                             rearmAircraft()
                             break

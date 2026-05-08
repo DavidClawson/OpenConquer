@@ -236,9 +236,21 @@ func decodeIMAADPCM(_ data: Data, sampleCount: Int) -> [Int16] {
     var samples = [Int16]()
     samples.reserveCapacity(sampleCount)
 
-    var predictor: Int32 = 0
-    var stepIndex: Int = 0
-    var index = 0
+    // Each IMA ADPCM chunk starts with a 4-byte header:
+    //   Int16: initial predictor value
+    //   Int16: initial step index (only low byte used)
+    // Matches Vanilla Conquer soscomp.cpp sosCODECDecompressData
+    guard data.count >= 4 else { return samples }
+
+    let initPredictor = Int16(bitPattern: UInt16(data[0]) | (UInt16(data[1]) << 8))
+    let initIndex = Int(UInt16(data[2]) | (UInt16(data[3]) << 8))
+
+    var predictor: Int32 = Int32(initPredictor)
+    var stepIndex: Int = max(0, min(88, initIndex))
+    var index = 4  // Skip past chunk header
+
+    // First sample is the predictor itself
+    samples.append(initPredictor)
 
     while index < data.count && samples.count < sampleCount {
         let byte = data[index]

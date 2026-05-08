@@ -87,14 +87,13 @@ func tickAI() {
         }
 
         // Skip harvesters and MCVs — they have their own behavior
-        let upper = obj.typeName.uppercased()
-        if upper == "HARV" {
+        if obj.isHarvester {
             if obj.mission == .guard_ || obj.mission == .stop {
                 obj.mission = .harvest
             }
             continue
         }
-        if upper == "MCV" { continue }
+        if obj.isMCV { continue }
 
         // Hunt mission — actively seek and destroy
         if obj.mission == .hunt {
@@ -186,8 +185,7 @@ func rallyEnemyUnits(world: GameWorld) {
         if obj.house == world.playerHouse || obj.house == .neutral { continue }
         if obj.kind == .structure { continue }
         if obj.strength <= 0 { continue }
-        let upper = obj.typeName.uppercased()
-        if upper == "HARV" || upper == "MCV" { continue }
+        if obj.isHarvester || obj.isMCV { continue }
         if obj.mission == .guard_ || obj.mission == .stop {
             idleUnits.append(obj)
         }
@@ -215,8 +213,7 @@ func escalateAI(world: GameWorld) {
         if obj.house == world.playerHouse || obj.house == .neutral { continue }
         if obj.kind == .structure { continue }
         if obj.strength <= 0 { continue }
-        let upper = obj.typeName.uppercased()
-        if upper == "HARV" || upper == "MCV" { continue }
+        if obj.isHarvester || obj.isMCV { continue }
         if obj.mission == .guard_ || obj.mission == .stop {
             obj.mission = .hunt
         }
@@ -340,9 +337,8 @@ private func aiPickVehicle(
     var combatVehicleCount = 0
     for obj in world.objects {
         guard obj.house == house && obj.strength > 0 else { continue }
-        let upper = obj.typeName.uppercased()
-        if upper == "HARV" { harvesterCount += 1 }
-        if obj.kind == .unit && upper != "HARV" && upper != "MCV" { combatVehicleCount += 1 }
+        if obj.isHarvester { harvesterCount += 1 }
+        if obj.kind == .unit && !obj.isHarvester && !obj.isMCV { combatVehicleCount += 1 }
     }
 
     // Priority 1: Need at least 1 harvester if we have a refinery
@@ -560,9 +556,8 @@ func tickAIBuilding() {
         var harvesterCount = 0
         for obj in world.objects {
             guard obj.house == house && obj.strength > 0 else { continue }
-            let upper = obj.typeName.uppercased()
-            if upper == "PROC" { refineryCount += 1 }
-            if upper == "HARV" { harvesterCount += 1 }
+            if obj.isRefinery { refineryCount += 1 }
+            if obj.isHarvester { harvesterCount += 1 }
         }
 
         // Pick a structure to build based on priority
@@ -713,10 +708,11 @@ func findAIBuildLocation(typeName: String, house: House) -> Int? {
     let upper = typeName.uppercased()
 
     // Determine if this is a defense structure (prefer base edges)
-    let isDefense = (upper == "GTWR" || upper == "ATWR" || upper == "OBLI" ||
-                     upper == "GUN" || upper == "SAM")
-    // Power plants prefer interior positions
-    let isPower = (upper == "NUKE" || upper == "NUK2")
+    // / power plant (prefer interior). Resolved via the StructType enum so
+    // the role-flag list stays in one place (Data/GameTypes.swift).
+    let st = StructType.from(iniName: upper)
+    let isDefense = st?.isDefenseStructure ?? false
+    let isPower = st?.isPowerPlant ?? false
 
     // Collect all existing buildings for this AI house
     var ownedBuildings: [(cellX: Int, cellY: Int, w: Int, h: Int)] = []
@@ -927,8 +923,7 @@ func tickAIAttackWaves(world: GameWorld) {
         for obj in world.objects {
             guard obj.house == house && obj.strength > 0 else { continue }
             guard obj.kind == .unit || obj.kind == .infantry else { continue }
-            let upper = obj.typeName.uppercased()
-            if upper == "HARV" || upper == "MCV" { continue }
+            if obj.isHarvester || obj.isMCV { continue }
             guard obj.mission == .guard_ || obj.mission == .stop else { continue }
             guard obj.isArmed else { continue }
             guard obj.aiTacticalRole == .none else { continue }
@@ -973,7 +968,7 @@ func tickAIAttackWaves(world: GameWorld) {
         if target == nil {
             for obj in world.objects {
                 guard obj.house == world.playerHouse && obj.strength > 0 else { continue }
-                guard obj.kind == .structure || obj.typeName.uppercased() == "HARV" else { continue }
+                guard obj.kind == .structure || obj.isHarvester else { continue }
                 let dx = obj.worldX - aiBase.x
                 let dy = obj.worldY - aiBase.y
                 let dist = sqrt(dx * dx + dy * dy)
@@ -1003,8 +998,7 @@ func tickAIDamagedRetreat(world: GameWorld) {
         if obj.house == world.playerHouse || obj.house == .neutral { continue }
         if obj.kind == .structure { continue }
         if obj.strength <= 0 { continue }
-        let upper = obj.typeName.uppercased()
-        if upper == "HARV" || upper == "MCV" { continue }
+        if obj.isHarvester || obj.isMCV { continue }
 
         // Only retreat units that are in combat (attacking) and badly hurt
         guard obj.mission == .attack else { continue }
@@ -1052,7 +1046,7 @@ func tickAIHarvesterManagement() {
         var harvesterCount = 0
         for obj in world.objects {
             guard obj.house == house && obj.strength > 0 else { continue }
-            if obj.typeName.uppercased() == "HARV" { harvesterCount += 1 }
+            if obj.isHarvester { harvesterCount += 1 }
         }
 
         // If no harvesters and unit queue is idle, prioritize building one

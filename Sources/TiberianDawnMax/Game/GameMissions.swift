@@ -345,7 +345,7 @@ extension GameObject {
             let arrived = !moveOneStep()
             if arrived {
                 // Check if we're a harvester at a refinery
-                if typeName.uppercased() == "HARV" {
+                if isHarvester {
                     mission = .harvest
                     missionStatus = 0
                 } else {
@@ -357,8 +357,7 @@ extension GameObject {
         }
 
         // Find appropriate building to return to
-        let upper = typeName.uppercased()
-        if upper == "HARV" {
+        if isHarvester {
             // Harvester: find refinery
             if let refinery = findNearestRefinery() {
                 moveTargetX = refinery.worldX
@@ -401,17 +400,18 @@ extension GameObject {
             return
         }
 
-        let dx = target.worldX - worldX
-        let dy = target.worldY - worldY
-        let dist = sqrt(dx * dx + dy * dy)
+        // Compute distance to nearest edge of the building footprint, not its center
+        let edgeDist = distanceToBuilding(target)
 
         // Face the target
-        if dist > 0.5 {
+        let dx = target.worldX - worldX
+        let dy = target.worldY - worldY
+        if dx * dx + dy * dy > 0.25 {
             facing = directionToFacing(dx: dx, dy: dy)
         }
 
-        // Check if adjacent to building (within ~36px, roughly 1.5 cells)
-        if dist < 36.0 {
+        // Check if adjacent to building (within ~1.5 cells of the footprint edge)
+        if edgeDist < 20.0 {
             // Check if this infantry type can capture
             let upper = typeName.uppercased()
             if let it = InfantryType.from(iniName: upper), let data = infantryTypeDataTable[it] {
@@ -447,13 +447,16 @@ extension GameObject {
             mission = .guard_
             attackTarget = nil
         } else {
-            // Move toward the building
-            moveTargetX = target.worldX
-            moveTargetY = target.worldY
+            // Move toward the nearest edge of the building
+            let nearEdge = nearestBuildingEdgePoint(target)
+            moveTargetX = nearEdge.x
+            moveTargetY = nearEdge.y
+            let edgeCellX = Int(nearEdge.x) / 24
+            let edgeCellY = Int(nearEdge.y) / 24
             if movePath.isEmpty {
                 movePath = findPath(
                     fromX: cellX, fromY: cellY,
-                    toX: target.cellX, toY: target.cellY,
+                    toX: edgeCellX, toY: edgeCellY,
                     ignoring: self,
                     speedType: .foot
                 )
@@ -485,17 +488,19 @@ extension GameObject {
             return
         }
 
+        // Compute distance to nearest edge of the building footprint
+        let edgeDist = distanceToBuilding(target)
+
         let dx = target.worldX - worldX
         let dy = target.worldY - worldY
-        let dist = sqrt(dx * dx + dy * dy)
 
         // Face the target
-        if dist > 0.5 {
+        if dx * dx + dy * dy > 0.25 {
             facing = directionToFacing(dx: dx, dy: dy)
         }
 
-        // Check if adjacent to building (within ~24px)
-        if dist < 24.0 {
+        // Check if adjacent to building (within ~20px of the footprint edge)
+        if edgeDist < 20.0 {
             // Plant C4: destroy the building instantly
             target.strength = 0
             target.lastDamagedTick = world.tickCount
@@ -534,13 +539,16 @@ extension GameObject {
             mission = .guard_
             return
         } else {
-            // Move toward the building
-            moveTargetX = target.worldX
-            moveTargetY = target.worldY
+            // Move toward the nearest edge of the building
+            let nearEdge = nearestBuildingEdgePoint(target)
+            moveTargetX = nearEdge.x
+            moveTargetY = nearEdge.y
+            let edgeCellX = Int(nearEdge.x) / 24
+            let edgeCellY = Int(nearEdge.y) / 24
             if movePath.isEmpty {
                 movePath = findPath(
                     fromX: cellX, fromY: cellY,
-                    toX: target.cellX, toY: target.cellY,
+                    toX: edgeCellX, toY: edgeCellY,
                     ignoring: self,
                     speedType: .foot
                 )
@@ -553,9 +561,7 @@ extension GameObject {
 
     /// Unload: MCV deploys into construction yard, transports disembark passengers
     func tickUnload() {
-        let upper = typeName.uppercased()
-
-        if upper == "MCV" {
+        if isMCV {
             tickMCVDeploy()
         } else if isTransporter {
             // If transport still has a move target, move there first before unloading
@@ -708,7 +714,7 @@ extension GameObject {
         }
 
         // Refinery: spawn a free harvester at the building exit
-        if upper == "PROC" {
+        if isRefinery {
             let size = buildingSize("PROC")
             // Spawn below the refinery footprint (exit point)
             let exitX = worldX
@@ -728,7 +734,9 @@ extension GameObject {
             world.addObject(harv)
         }
 
-        // Helipad: spawn a free Orca (GDI) or Apache (Nod)
+        // Helipad: spawn a free Orca (GDI) or Apache (Nod) when the player
+        // builds an HPAD specifically (AFLD is the airstrip equivalent and
+        // has its own arrival flow via tickAirstripArrival).
         if upper == "HPAD" {
             let aircraft = (house == .badGuy) ? "HELI" : "ORCA"
             let heli = GameObject(
@@ -901,6 +909,31 @@ extension GameObject {
         recalculateAllHousePower()
 
         print("Building sold: \(typeName) for $\(refundAmount)")
+    }
+
+    // MARK: - Building Distance Helpers
+
+    /// Distance from this object to the nearest edge of a building's footprint.
+    func distanceToBuilding(_ building: GameObject) -> Double {
+        let size = buildingSize(building.typeName)
+        let halfW = Double(size.w * 24) / 2.0
+        let halfH = Double(size.h * 24) / 2.0
+        // Clamp to the building rect to find the nearest point on the footprint
+        let nearestX = max(building.worldX - halfW, min(worldX, building.worldX + halfW))
+        let nearestY = max(building.worldY - halfH, min(worldY, building.worldY + halfH))
+        let dx = worldX - nearestX
+        let dy = worldY - nearestY
+        return sqrt(dx * dx + dy * dy)
+    }
+
+    /// Returns the point on the building footprint edge closest to this object.
+    func nearestBuildingEdgePoint(_ building: GameObject) -> (x: Double, y: Double) {
+        let size = buildingSize(building.typeName)
+        let halfW = Double(size.w * 24) / 2.0
+        let halfH = Double(size.h * 24) / 2.0
+        let nearestX = max(building.worldX - halfW, min(worldX, building.worldX + halfW))
+        let nearestY = max(building.worldY - halfH, min(worldY, building.worldY + halfH))
+        return (x: nearestX, y: nearestY)
     }
 
     // MARK: - Patrol (Loop through waypoints, engage enemies along the way)

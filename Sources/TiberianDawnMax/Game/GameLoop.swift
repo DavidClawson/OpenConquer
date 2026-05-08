@@ -34,8 +34,18 @@ func updateGame() {
 
 // MARK: - Game Tick
 
+/// One-shot flag to initialize event bus debug logging on first tick
+private var _eventBusInitialized = false
+
 func gameTick() {
     guard let world = session.world else { return }
+
+    // Initialize event bus debug logging once on the first tick
+    if !_eventBusInitialized {
+        _eventBusInitialized = true
+        setupEventBusDebugLogging()
+    }
+
     world.tickCount += 1
 
     // Save previous positions for render interpolation
@@ -124,7 +134,7 @@ func gameTick() {
         }
 
         // VC special case: Gunboat always hunts regardless of assigned mission
-        if obj.typeName.uppercased() == "BOAT" && obj.cachedSpeedType == .float_ {
+        if obj.isGunboat && obj.cachedSpeedType == .float_ {
             obj.mission = .hunt
             obj.tickGunboatHunt()
             continue
@@ -237,31 +247,47 @@ func gameTick() {
         }
     }
 
-    // Spawn fire/smoke on damaged buildings (original C&C behavior)
-    // Only check periodically to avoid spamming animations
+    // Spawn fire/smoke on damaged objects (original C&C behavior).
+    // Only check periodically to avoid spamming animations.
     if world.tickCount % 30 == 0 {
         for obj in world.objects {
-            guard obj.kind == .structure && obj.strength > 0 else { continue }
-            let health = obj.healthFraction
+            guard obj.strength > 0 else { continue }
+            // Infantry don't smoke — only buildings and vehicles.
+            guard obj.kind == .structure || obj.kind == .unit else { continue }
+            // Aircraft in flight don't trail smoke (the explosion fires on impact).
+            if obj.isAircraft && obj.altitude > 0 { continue }
 
-            // Check if there's already a fire/smoke animation attached to this building
+            let health = obj.healthFraction
+            // One persistent damage anim per object — wait for it to clear before respawning
             let hasFireAnim = session.activeAnimations.contains { $0.attachedToId == obj.id }
 
-            if health <= 0.25 && !hasFireAnim {
-                // Heavy damage: spawn fire animation on building
-                let size = buildingSize(obj.typeName)
-                let halfW = Double(size.w * 24) / 2.0
-                let halfH = Double(size.h * 24) / 2.0
-                let ox = Double.random(in: -halfW * 0.5...halfW * 0.5)
-                let oy = Double.random(in: -halfH * 0.5...halfH * 0.5)
-                let anim = GameAnimation(type: .onFireBig, worldX: obj.worldX + ox, worldY: obj.worldY + oy)
-                anim.attachedToId = obj.id
-                session.activeAnimations.append(anim)
-            } else if health <= 0.5 && health > 0.25 && !hasFireAnim {
-                // Half damage: spawn smoke animation on building
-                let anim = GameAnimation(type: .smokeM, worldX: obj.worldX, worldY: obj.worldY)
-                anim.attachedToId = obj.id
-                session.activeAnimations.append(anim)
+            if obj.kind == .structure {
+                if health <= 0.25 && !hasFireAnim {
+                    // Heavy damage: building-sized fire across the footprint.
+                    let size = buildingSize(obj.typeName)
+                    let halfW = Double(size.w * 24) / 2.0
+                    let halfH = Double(size.h * 24) / 2.0
+                    let ox = Double.random(in: -halfW * 0.5...halfW * 0.5)
+                    let oy = Double.random(in: -halfH * 0.5...halfH * 0.5)
+                    let anim = GameAnimation(type: .onFireBig, worldX: obj.worldX + ox, worldY: obj.worldY + oy)
+                    anim.attachedToId = obj.id
+                    session.activeAnimations.append(anim)
+                } else if health <= 0.5 && health > 0.25 && !hasFireAnim {
+                    let anim = GameAnimation(type: .smokeM, worldX: obj.worldX, worldY: obj.worldY)
+                    anim.attachedToId = obj.id
+                    session.activeAnimations.append(anim)
+                }
+            } else {
+                // Vehicles: smaller smoke at half health, bigger fire at quarter health.
+                if health <= 0.25 && !hasFireAnim {
+                    let anim = GameAnimation(type: .onFireSmall, worldX: obj.worldX, worldY: obj.worldY)
+                    anim.attachedToId = obj.id
+                    session.activeAnimations.append(anim)
+                } else if health <= 0.5 && health > 0.25 && !hasFireAnim {
+                    let anim = GameAnimation(type: .smokeM, worldX: obj.worldX, worldY: obj.worldY)
+                    anim.attachedToId = obj.id
+                    session.activeAnimations.append(anim)
+                }
             }
         }
     }
@@ -309,7 +335,7 @@ func gameTick() {
             if cx < bounds.x - 1 || cx > bounds.x + bounds.width ||
                cy < bounds.y - 1 || cy > bounds.y + bounds.height {
                 // Gunboat: bounce at edges (handled by tickGunboatHunt), don't remove
-                if obj.typeName.uppercased() == "BOAT" { continue }
+                if obj.isGunboat { continue }
                 obj.strength = 0
             }
         }
@@ -325,6 +351,9 @@ func gameTick() {
     // Sync sidebar credits with HouseState
     let playerState = getHouseState(world.playerHouse)
     playerState.credits = session.sidebarCredits
+
+    // Flush all queued game events to subscribers
+    eventBus.flush()
 }
 
 // MARK: - Movement Extensions

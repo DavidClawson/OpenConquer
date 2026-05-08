@@ -492,6 +492,9 @@ struct SavedTrigger: Codable {
 struct SavedTiberiumEntry: Codable {
     let cell: Int
     let density: Int
+    /// Sprite variant 1..12 (which TI<N>.SHP to draw). Optional so older
+    /// saves load fine — at restore we fall back to the cell's density.
+    var variant: Int?
 }
 
 struct SavedSmudge: Codable {
@@ -635,11 +638,13 @@ func saveGame(slot: Int, description: String = "") -> Bool {
         ))
     }
 
-    // Serialize tiberium density
+    // Serialize tiberium density + variant
     let map = world.map
     var tiberiumDensityEntries: [SavedTiberiumEntry] = []
     for (cell, density) in map.tiberiumDensity {
-        tiberiumDensityEntries.append(SavedTiberiumEntry(cell: cell, density: density))
+        tiberiumDensityEntries.append(SavedTiberiumEntry(
+            cell: cell, density: density, variant: map.tiberiumVariant[cell]
+        ))
     }
 
     // Serialize smudges
@@ -908,9 +913,14 @@ func loadGame(slot: Int) -> Bool {
             let map = world.map
             map.tiberiumCells = Set(savedTibCells)
             map.tiberiumDensity.removeAll()
+            map.tiberiumVariant.removeAll()
             if let densityEntries = saveData.tiberiumDensity {
                 for entry in densityEntries {
                     map.tiberiumDensity[entry.cell] = entry.density
+                    // Older saves don't have variant — keep the legacy mapping
+                    // (variant = density) so visuals stay continuous, then new
+                    // growth/spread will populate fresh variants.
+                    map.tiberiumVariant[entry.cell] = entry.variant ?? entry.density
                 }
             }
             map.tiberiumScan = saveData.tiberiumScan ?? 0

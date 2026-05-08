@@ -167,7 +167,7 @@ func doReinforcements(teamName: String) {
             if data.isTransporter && data.speed == .hover {
                 hasWaterTransport = true  // Hovercraft/LST
             }
-            if upper == "BOAT" {
+            if ut.isGunboat {
                 hasGunboat = true  // Gunboat arrives via SOURCE_SHIPPING
             }
         }

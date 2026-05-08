@@ -47,7 +47,7 @@ struct BuildingTypeData {
 
 // MARK: - Building Type Data Table
 
-let buildingTypeDataTable: [StructType: BuildingTypeData] = [
+var buildingTypeDataTable: [StructType: BuildingTypeData] = [
 
     // MARK: Weapons Factory
     .weap: BuildingTypeData(

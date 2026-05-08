@@ -15,30 +15,31 @@ func initTiberiumCells() {
     guard let map = session.world?.map else { return }
     map.tiberiumCells.removeAll()
     map.tiberiumDensity.removeAll()
+    map.tiberiumVariant.removeAll()
     guard let scenario = map.scenarioData else {
         print("GameEconomy: No scenarioData available for tiberium init (map.scenarioData is nil)")
         return
     }
-    print("GameEconomy: Scanning \(scenario.overlays.count) overlays for tiberium")
-    // Log first few overlays for debugging
-    for (i, ov) in scenario.overlays.prefix(10).enumerated() {
-        print("  overlay[\(i)]: cell=\(ov.cell) type='\(ov.typeName)'")
-    }
-    // First pass: register all tiberium cells
+    // First pass: register all tiberium cells.
+    // The scenario's TI<N> overlay name is the *sprite variant* (which of the
+    // 12 ground shapes to draw) — NOT the density. Density (0-11 in C&C, 1-12
+    // here) is the maturity / frame index within that variant's SHP.
     for overlay in scenario.overlays {
         let upper = overlay.typeName.uppercased()
         if upper.hasPrefix("TI") {
             let numPart = upper.dropFirst(2)
             if let num = Int(numPart), num >= 1 && num <= 12 {
                 map.tiberiumCells.insert(overlay.cell)
-                // Use the overlay's TI number as initial density (TI1=sparse, TI12=full)
-                map.tiberiumDensity[overlay.cell] = num
+                map.tiberiumVariant[overlay.cell] = num
+                // Start density low — Tiberium_Adjust below raises it based on
+                // how surrounded a cell is, mirroring VC's initial growth pass.
+                map.tiberiumDensity[overlay.cell] = 1
             }
         }
     }
 
-    // Second pass: adjust density based on neighbor count (VC Tiberium_Adjust)
-    // Cells surrounded by more tiberium should be denser
+    // Second pass: density rises with neighbor count (VC Tiberium_Adjust).
+    // Cells surrounded by more tiberium start at a higher maturity frame.
     let adjTable = [0, 1, 3, 4, 6, 7, 8, 10, 11]
     for cell in map.tiberiumCells {
         let cx = cell % 64
@@ -56,10 +57,8 @@ func initTiberiumCells() {
                 }
             }
         }
-        // Use max of original TI number and neighbor-based density
         let neighborDensity = adjTable[min(adjCount, adjTable.count - 1)] + 1
-        let current = map.tiberiumDensity[cell] ?? 1
-        map.tiberiumDensity[cell] = min(max(current, neighborDensity), 12)
+        map.tiberiumDensity[cell] = min(neighborDensity, 12)
     }
     print("GameEconomy: Found \(map.tiberiumCells.count) tiberium cells")
 }
@@ -130,7 +129,9 @@ extension GameObject {
                 let dy = refinery.worldY - worldY
                 let dist = sqrt(dx * dx + dy * dy)
 
-                if dist < 36.0 {
+                // Dock distance based on refinery footprint (3x3 = 72px wide)
+                let dockDist = Double(buildingSize(refinery.typeName).w * 24) / 2.0 + 24.0
+                if dist < dockDist {
                     // At refinery — deposit
                     var creditsGained = tiberiumLoad * tiberiumValue
                     let houseState = getHouseState(house)
@@ -146,6 +147,10 @@ extension GameObject {
                     // Keep sidebar credits in sync for the player
                     if house == session.world?.playerHouse {
                         session.sidebarCredits += creditsGained
+                    }
+                    // Emit harvest event for the credits deposited
+                    if creditsGained > 0 {
+                        eventBus.emit(.tiberiumHarvested(house: house, amount: creditsGained))
                     }
                     tiberiumLoad = 0
                     // Clear movement to go find more tiberium
@@ -182,6 +187,7 @@ extension GameObject {
                     if density <= 1 {
                         world.map.tiberiumCells.remove(cell)
                         world.map.tiberiumDensity.removeValue(forKey: cell)
+                        world.map.tiberiumVariant.removeValue(forKey: cell)
                     } else {
                         world.map.tiberiumDensity[cell] = density - 1
                     }
@@ -379,9 +385,11 @@ extension GameMap {
                     if occupied { continue }
                 }
 
-                // Spread tiberium to this cell
+                // Spread tiberium to this cell. Pick a random visual variant
+                // 1..12 so spread tiles aren't all identical clones.
                 tiberiumCells.insert(adjCell)
                 tiberiumDensity[adjCell] = 1
+                tiberiumVariant[adjCell] = Int.random(in: 1...12)
                 break
             }
         }

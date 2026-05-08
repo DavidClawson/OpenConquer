@@ -58,7 +58,7 @@ struct UnitTypeData {
 
 // MARK: - Unit Type Data Table
 
-let unitTypeDataTable: [UnitType: UnitTypeData] = [
+var unitTypeDataTable: [UnitType: UnitTypeData] = [
 
     .htank: UnitTypeData(
         type: .htank, iniName: "HTNK", fullName: "Mammoth Tank",

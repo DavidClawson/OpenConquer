@@ -18,8 +18,16 @@ class GameMap {
     /// Set of cell indices that contain tiberium overlays
     var tiberiumCells: Set<Int> = Set()
 
-    /// Tiberium density per cell (1-12, matching TI1-TI12 overlay types)
+    /// Tiberium density / growth stage per cell (1-12). Drives both harvest
+    /// yield and the SHP frame drawn — frame = density - 1 (so density 12
+    /// shows the mature bright-green frame 11).
     var tiberiumDensity: [Int: Int] = [:]
+
+    /// Tiberium SHP variant per cell (1-12). C&C ships TI1.SHP through
+    /// TI12.SHP — different sprite shapes, each with 12 maturity frames.
+    /// The variant picks which shape to render; density picks which frame.
+    /// Defaults to 1 if missing (legacy saves).
+    var tiberiumVariant: [Int: Int] = [:]
 
     /// Scan position for tiberium growth/spread (VC TiberiumScan)
     var tiberiumScan: Int = 0
@@ -61,6 +69,18 @@ var staticPassability: [Bool] {
 // Water template types (from templateTable in MapLoader.swift)
 private let waterTemplateTypes: Set<Int> = [1, 2]  // W1, W2
 
+/// Overlay-type metadata for passability. Mirrors Vanilla-Conquer odata.cpp:
+/// walls (LAND_WALL: SBAG/CYCL/BRIK/BARB/WOOD) block movement; tiberium
+/// (TI1-TI12), roads (ROAD/CONC), crates (WCRATE/SCRATE), and the flag spot
+/// stay passable.
+private let blockingOverlayTypes: Set<String> = [
+    "SBAG",   // Sandbag wall
+    "CYCL",   // Cyclone (chain-link) fence
+    "BRIK",   // Brick/concrete wall
+    "BARB",   // Barbed wire
+    "WOOD",   // Wood fence
+]
+
 /// Build the static passability map from terrain data.
 /// Called once after loading a scenario into game mode.
 func buildPassabilityMap() {
@@ -86,8 +106,20 @@ func buildPassabilityMap() {
         }
 
         // Mark terrain objects as impassable in BOTH maps
+        // (trees T01-T18/TC01-TC14, civilian decor V01-V18, rocks SPLIT*/ROCK*)
         for terrainObj in scenario.terrain {
             let cell = terrainObj.cell
+            if cell >= 0 && cell < 4096 {
+                landPassability[cell] = false
+                waterPassability[cell] = false
+            }
+        }
+
+        // Mark wall-type overlays as impassable. Tiberium, roads, crates, and
+        // flag spots are skipped — units must be able to walk over them.
+        for overlay in scenario.overlays {
+            guard blockingOverlayTypes.contains(overlay.typeName.uppercased()) else { continue }
+            let cell = overlay.cell
             if cell >= 0 && cell < 4096 {
                 landPassability[cell] = false
                 waterPassability[cell] = false
