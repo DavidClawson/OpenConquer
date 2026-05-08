@@ -10,6 +10,14 @@ let maxTiberiumLoad: Int = 20
 /// Credits per unit of tiberium
 let tiberiumValue: Int = 25
 
+/// Compute the cell a harvester should drive to for unloading.
+/// PROC's footprint center is structurally impassable, so we dock one cell
+/// south of the PROC center — that's where the visible bay door faces.
+/// Returns (cellX, cellY) of the dock point.
+func harvesterDockCell(refinery: GameObject) -> (cellX: Int, cellY: Int) {
+    return (cellX: refinery.cellX, cellY: refinery.cellY + 2)
+}
+
 /// Scan scenario overlays for tiberium
 func initTiberiumCells() {
     guard let map = session.world?.map else { return }
@@ -125,14 +133,22 @@ extension GameObject {
         if tiberiumLoad >= maxTiberiumLoad {
             // Full — return to refinery
             if let refinery = findNearestRefinery() {
-                let dx = refinery.worldX - worldX
-                let dy = refinery.worldY - worldY
+                // The refinery's worldX/worldY is the CENTER of its 3x3
+                // footprint, which is impassable. Pathing to it would never
+                // succeed and the harvester would stall just outside.
+                // Dock at the cell directly south of the PROC center —
+                // one cell beyond the building footprint, where the bay
+                // door faces. The harvester deposits when within ~half a
+                // cell of that dock point.
+                let dock = harvesterDockCell(refinery: refinery)
+                let dockWorldX = Double(dock.cellX * 24) + 12.0
+                let dockWorldY = Double(dock.cellY * 24) + 12.0
+                let dx = dockWorldX - worldX
+                let dy = dockWorldY - worldY
                 let dist = sqrt(dx * dx + dy * dy)
 
-                // Dock distance based on refinery footprint (3x3 = 72px wide)
-                let dockDist = Double(buildingSize(refinery.typeName).w * 24) / 2.0 + 24.0
-                if dist < dockDist {
-                    // At refinery — deposit
+                if dist < 14.0 {
+                    // At dock — deposit
                     var creditsGained = tiberiumLoad * tiberiumValue
                     let houseState = getHouseState(house)
                     // Enforce silo capacity: only store up to capacity limit
@@ -158,13 +174,13 @@ extension GameObject {
                     moveTargetY = nil
                     movePath = []
                 } else {
-                    // Move toward refinery
-                    moveTargetX = refinery.worldX
-                    moveTargetY = refinery.worldY
+                    // Drive to the dock cell, not the refinery's blocked center.
+                    moveTargetX = dockWorldX
+                    moveTargetY = dockWorldY
                     if movePath.isEmpty {
                         movePath = findPath(
                             fromX: cellX, fromY: cellY,
-                            toX: refinery.cellX, toY: refinery.cellY,
+                            toX: dock.cellX, toY: dock.cellY,
                             ignoring: self,
                             speedType: .harvester
                         )

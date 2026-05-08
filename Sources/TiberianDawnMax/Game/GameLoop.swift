@@ -416,28 +416,44 @@ extension GameObject {
                 return .blocked
             }
 
-            // Check if next path cell is occupied before entering it
-            if let world = session.world,
-               let occupantId = world.occupancy[nextCellIdx],
-               occupantId != id {
-                if let occupant = world.findObject(id: occupantId) {
+            // Inspect whoever's currently in the next path cell.
+            //   - friendlies: transit through them (squad movement);
+            //   - crushable enemies if we're a crusher: run them over;
+            //   - any other enemy: wait and re-path.
+            // Final-cell occupancy (not stacking on a friend at rest) is
+            // enforced by `findPath` rerouting around full destinations.
+            if let world = session.world, let ids = world.occupancy[nextCellIdx] {
+                let isFinalCell = movePath.count == 1
+                var blocked = false
+                for occupantId in ids where occupantId != id {
+                    guard let occupant = world.findObject(id: occupantId) else { continue }
                     if isCrusher && occupant.isCrushable && isEnemy(self, occupant) {
-                        // Crush enemy infantry: kill them and continue moving
                         occupant.applyDamage(amount: occupant.strength + 1, attackerHouse: house)
                         occupant.spawnDeathEffects()
                         audioManager.play(audioManager.infantryDeathScream(), worldX: occupant.worldX, worldY: occupant.worldY)
                         session.campaign.trackKill(victimHouse: occupant.house, victimKind: occupant.kind)
-                        let attackerState = getHouseState(house)
-                        let victimState = getHouseState(occupant.house)
-                        victimState.unitsLost += 1
-                        attackerState.unitsKilled += 1
-                    } else if occupant.house == house {
-                        // Friendly unit — pass through (original C&C allows this)
-                    } else {
-                        // Enemy unit blocking — wait and repath next tick
-                        movePath = []
-                        return .blocked
+                        getHouseState(occupant.house).unitsLost += 1
+                        getHouseState(house).unitsKilled += 1
+                        continue
                     }
+                    if occupant.house == house {
+                        // Friendly: never crush. If this is the final cell
+                        // and entering would violate stacking, repath so we
+                        // don't stop on top of them.
+                        if isFinalCell &&
+                           !isCellEnterableAsDestination(cell: nextCellIdx, mover: self) {
+                            blocked = true
+                            break
+                        }
+                        continue
+                    }
+                    // Enemy non-crushable: blocked.
+                    blocked = true
+                    break
+                }
+                if blocked {
+                    movePath = []
+                    return .blocked
                 }
             }
 

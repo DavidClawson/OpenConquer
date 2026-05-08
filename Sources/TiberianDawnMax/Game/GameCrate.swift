@@ -121,7 +121,7 @@ private func spawnCrateIfPossible() {
         guard landPassability[cell] else { continue }
 
         // Must not be occupied by a building or unit
-        if world.occupancy[cell] != nil { continue }
+        if world.occupancy[cell]?.isEmpty == false { continue }
 
         // Must not have tiberium
         if world.map.tiberiumCells.contains(cell) { continue }

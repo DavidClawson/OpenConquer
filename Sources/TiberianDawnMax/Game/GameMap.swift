@@ -264,6 +264,14 @@ func passabilityMap(for speed: SpeedType) -> [Bool] {
 
 // MARK: - Dynamic Occupancy
 
+/// Maximum infantry that can share a single cell.
+/// Original C&C allows 5, with each occupant assigned a sub-cell offset
+/// (NW/N/NE/W/Center/E/SW/S/SE). Until sub-cell offset rendering is in
+/// place this is set to 1 so a cluster of soldiers doesn't visibly stack
+/// at the same pixel — the multi-occupant scaffolding stays in place so
+/// raising this back to 5 later only requires adding render offsets.
+let maxInfantryPerCell = 1
+
 /// Rebuild occupancy grid from current object positions
 func updateOccupancy() {
     guard let world = session.world else { return }
@@ -271,38 +279,86 @@ func updateOccupancy() {
 
     for obj in world.objects {
         if obj.kind == .structure { continue }  // Structures use static passability
+        if obj.strength <= 0 { continue }
         let cell = obj.cell
         if cell >= 0 && cell < 4096 {
-            world.occupancy[cell] = obj.id
+            world.occupancy[cell, default: []].append(obj.id)
         }
     }
 }
 
+/// Convenience: any vehicle/aircraft in this cell? (structures excluded —
+/// they use static passability.)
+func cellHasVehicle(_ cell: Int, world: GameWorld, ignoringId: Int? = nil) -> Bool {
+    guard let ids = world.occupancy[cell] else { return false }
+    for id in ids where id != ignoringId {
+        if let obj = world.findObject(id: id), obj.kind == .unit { return true }
+    }
+    return false
+}
+
+/// Count infantry currently in this cell (for the 5-per-cell stacking rule).
+func cellInfantryCount(_ cell: Int, world: GameWorld, ignoringId: Int? = nil) -> Int {
+    guard let ids = world.occupancy[cell] else { return 0 }
+    var count = 0
+    for id in ids where id != ignoringId {
+        if let obj = world.findObject(id: id), obj.kind == .infantry { count += 1 }
+    }
+    return count
+}
+
 // MARK: - Passability Check
 
+/// Can `mover` enter `cell` for transit?
+/// Friendly units allow passthrough so squad movement stays smooth; enemies
+/// block. Cell occupancy is checked separately at arrival via
+/// `isCellEnterableAsDestination` so units don't permanently stack.
 func isCellPassable(cellX: Int, cellY: Int, ignoring: GameObject? = nil, speedType: SpeedType = .foot) -> Bool {
     guard cellX >= 0 && cellX < 64 && cellY >= 0 && cellY < 64 else { return false }
     let cell = cellY * 64 + cellX
 
-    // Check passability for this speed type
+    // Static terrain passability (walls, water, structures, trees, etc.)
     let passMap = passabilityMap(for: speedType)
     if !passMap[cell] { return false }
 
-    // Check dynamic occupancy — friendly units can pass through each other
-    if let world = session.world, let occupantId = world.occupancy[cell] {
-        if let ignoring = ignoring, occupantId == ignoring.id {
-            return true
-        }
-        // Allow passing through friendly units
-        if let ignoring = ignoring,
-           let occupant = world.findObject(id: occupantId),
-           occupant.house == ignoring.house {
-            return true
-        }
-        return false
+    // Dynamic occupants. Allow self and friendlies; block enemies.
+    guard let world = session.world, let ids = world.occupancy[cell] else { return true }
+    for occupantId in ids {
+        if occupantId == ignoring?.id { continue }
+        guard let occupant = world.findObject(id: occupantId) else { continue }
+        if let mover = ignoring, occupant.house == mover.house { continue }
+        return false  // enemy in cell — blocked
     }
-
     return true
+}
+
+/// Can `mover` come to rest in `cell`? Stricter than `isCellPassable`:
+/// vehicles need the cell free of any other unit; infantry need the cell free
+/// of vehicles and with fewer than `maxInfantryPerCell` infantry already
+/// present. This is what stops squads from collapsing onto a single cell.
+func isCellEnterableAsDestination(cell: Int, mover: GameObject) -> Bool {
+    guard cell >= 0 && cell < 4096 else { return false }
+    guard let world = session.world else { return true }
+
+    // Static passability still has to hold.
+    let passMap = passabilityMap(for: mover.cachedSpeedType)
+    if !passMap[cell] { return false }
+
+    // Vehicles and aircraft are "vehicle-class" for occupancy purposes.
+    let moverIsVehicle = mover.kind == .unit
+    let moverId = mover.id
+
+    if moverIsVehicle {
+        // Vehicle destination: no other vehicle, no infantry occupying.
+        if cellHasVehicle(cell, world: world, ignoringId: moverId) { return false }
+        if cellInfantryCount(cell, world: world, ignoringId: moverId) > 0 { return false }
+        return true
+    } else {
+        // Infantry destination: no vehicle, and infantry count < 5.
+        if cellHasVehicle(cell, world: world, ignoringId: moverId) { return false }
+        if cellInfantryCount(cell, world: world, ignoringId: moverId) >= maxInfantryPerCell { return false }
+        return true
+    }
 }
 
 // MARK: - A* Pathfinding (Binary Heap)
@@ -370,27 +426,41 @@ func findPath(fromX: Int, fromY: Int, toX: Int, toY: Int,
 
     let passMap = passabilityMap(for: speedType)
 
-    // If target is impassable, find nearest passable cell within 5-cell radius
+    // Reroute the destination if the requested cell can't actually be the
+    // unit's resting place — either the static terrain forbids it (water,
+    // tree, building) OR another unit already occupies it under the
+    // 1-vehicle / 5-infantry rules. The latter is what makes squads spread
+    // out around a click point instead of collapsing onto one cell.
     let targetCell = toY * 64 + toX
-    if !passMap[targetCell] {
+    let targetEnterable: Bool = {
+        if !passMap[targetCell] { return false }
+        if let mover = ignoring {
+            return isCellEnterableAsDestination(cell: targetCell, mover: mover)
+        }
+        return true
+    }()
+    if !targetEnterable {
         var bestX = toX, bestY = toY
         var bestDist = Double.infinity
         for dy in -5...5 {
             for dx in -5...5 {
                 let nx = toX + dx
                 let ny = toY + dy
-                if nx >= 0 && nx < 64 && ny >= 0 && ny < 64 &&
-                   passMap[ny * 64 + nx] {
-                    let dist = sqrt(Double(dx * dx + dy * dy))
-                    if dist < bestDist {
-                        bestDist = dist
-                        bestX = nx
-                        bestY = ny
-                    }
+                guard nx >= 0 && nx < 64 && ny >= 0 && ny < 64 else { continue }
+                let cellIdx = ny * 64 + nx
+                if !passMap[cellIdx] { continue }
+                if let mover = ignoring,
+                   !isCellEnterableAsDestination(cell: cellIdx, mover: mover) { continue }
+                let dist = sqrt(Double(dx * dx + dy * dy))
+                if dist < bestDist {
+                    bestDist = dist
+                    bestX = nx
+                    bestY = ny
                 }
             }
         }
         if bestDist == Double.infinity { return [] }
+        if bestX == fromX && bestY == fromY { return [] }
         return findPath(fromX: fromX, fromY: fromY, toX: bestX, toY: bestY,
                        ignoring: ignoring, maxSteps: maxSteps, speedType: speedType)
     }
@@ -466,8 +536,9 @@ func findPath(fromX: Int, fromY: Int, toX: Int, toY: Int,
 
             // Base movement cost + soft penalty for occupied cells
             var moveCost = dir.cost
-            if let occ = occupancy, let occupantId = occ[neighborCell] {
-                if occupantId != ignoringId {
+            if let occ = occupancy, let occupants = occ[neighborCell] {
+                let othersHere = occupants.contains { $0 != ignoringId }
+                if othersHere {
                     moveCost += 3.0  // Soft penalty: prefer unoccupied cells
                 }
             }

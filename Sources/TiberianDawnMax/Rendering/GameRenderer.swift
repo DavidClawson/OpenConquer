@@ -346,6 +346,21 @@ func renderGame(_ renderer: OpaquePointer?) {
             let spriteY = screenY + pixH - Int32(info.height)
             var dstRect = SDL_Rect(x: spriteX, y: spriteY, w: Int32(info.width), h: Int32(info.height))
             SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
+
+            // Weapons Factory has a separate roof/door SHP (WEAP2) drawn on
+            // top of the body. Vanilla-Conquer building.cpp:508-514 picks
+            // frame = Door_Stage() (0=closed, 1-3=opening, etc.) plus +4 for
+            // damaged variants. Until production-driven door animation is
+            // wired up we draw frame 0 always so the roof at least appears.
+            if obj.typeName.uppercased() == "WEAP" {
+                let overlayFrame = obj.healthFraction < 0.5 ? 4 : 0
+                if let roof = getObjectTexture(renderer, typeName: "WEAP2", frame: overlayFrame, house: obj.house, theater: theater) {
+                    let rx = screenX
+                    let ry = screenY + pixH - Int32(roof.height)
+                    var roofRect = SDL_Rect(x: rx, y: ry, w: Int32(roof.width), h: Int32(roof.height))
+                    SDL_RenderCopy(renderer, roof.texture, nil, &roofRect)
+                }
+            }
         } else {
             let hc = obj.house.displayColor
             SDL_SetRenderDrawColor(renderer, hc.r, hc.g, hc.b, 160)

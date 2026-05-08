@@ -377,7 +377,11 @@ class GameWorld {
     var tickCount: Int = 0
     var theater: TheaterType = .temperate
     var mapBounds: MapBounds?
-    var occupancy: [Int: Int] = [:]  // cell -> object id occupying it
+    /// Cell -> object IDs currently in that cell. Multiple entries allowed
+    /// because the original C&C lets up to 5 infantry share a cell with
+    /// sub-cell positioning. Vehicles still claim the cell exclusively;
+    /// `cellHasVehicle()` and `cellInfantryCount()` consult this map.
+    var occupancy: [Int: [Int]] = [:]
     var occupiedPads: Set<Int> = []  // object IDs of helipads/airstrips currently occupied by a landing/landed aircraft
     var playerHouse: House = .goodGuy
     var map: GameMap = GameMap()
