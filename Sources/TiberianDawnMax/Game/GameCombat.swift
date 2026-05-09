@@ -64,8 +64,11 @@ func isAntiAirOnly(_ obj: GameObject) -> Bool {
     return bData.isAntiAircraft
 }
 
-/// Find the nearest enemy within range of an object
-func findNearestEnemy(_ obj: GameObject, range: Double) -> GameObject? {
+/// Find the nearest enemy within range of an object.
+/// Acquisition is gated by `obj.house`'s line-of-sight: enemies in the
+/// attacker's own fog of war are not picked up. Pass `requireVisibility: false`
+/// for cases where visibility shouldn't matter (e.g. scripted hunts).
+func findNearestEnemy(_ obj: GameObject, range: Double, requireVisibility: Bool = true) -> GameObject? {
     guard let world = session.world else { return nil }
     var nearest: GameObject? = nil
     var nearestDist = Double.infinity
@@ -77,6 +80,14 @@ func findNearestEnemy(_ obj: GameObject, range: Double) -> GameObject? {
         if !isEnemy(obj, other) { continue }
         // Anti-aircraft weapons (SAM) can only target aircraft
         if aaOnly && !other.isAircraft { continue }
+        // Visibility gate: can't acquire something we can't see.
+        // Aircraft are exempt — they're spotted from the air, so AA
+        // weapons (SAM, gunboat, rocket infantry) engage at full
+        // weapon range even when their own sightRange is shorter.
+        if requireVisibility && !other.isAircraft {
+            let cell = other.cellY * 64 + other.cellX
+            if !canHouseSee(cell: cell, house: obj.house) { continue }
+        }
 
         let dx = other.worldX - obj.worldX
         let dy = other.worldY - obj.worldY
@@ -123,6 +134,7 @@ extension GameObject {
         if let world = session.world {
             lastDamagedTick = world.tickCount
             lastWhoHurtMe = attackerHouse
+            if let aId = attackerId { lastAttackerId = aId }
         }
         if strength <= 0 {
             strength = 0
@@ -159,7 +171,20 @@ extension GameObject {
         if kind == .infantry {
             let fearIncrease = min(255 - Int(fear), adjustedDamage * 3)
             fear = UInt8(min(255, Int(fear) + fearIncrease))
+            // First contact reflex — drop prone immediately so the next
+            // tickFear keeps them down. Avoids the "infantry stand-still
+            // until fear hits 100" delay where they catch a full burst
+            // before reacting.
+            if !isProne && fear >= fearAnxious {
+                isProne = true
+            }
         }
+
+        // Return-fire reflex: if hit while not actively engaging, snap
+        // to attack the attacker. Prevents units from walking through
+        // machine-gun fire toward an unrelated objective. Skips when
+        // already busy with an attack/capture/sabotage so we don't thrash.
+        evaluateRetaliation()
 
         // Spring "attacked" trigger if attached
         if let trigName = triggerName {
@@ -167,6 +192,49 @@ extension GameObject {
         }
 
         return false
+    }
+
+    /// Snap to attack the most recent attacker if we're not already
+    /// engaged. Called from applyDamage. Skipped for structures (defense
+    /// turrets retarget via tickGuardScan), aircraft (handled by their
+    /// own attack tick), harvesters (run away — handled elsewhere), and
+    /// anything currently in a non-overridable mission.
+    func evaluateRetaliation() {
+        guard let world = session.world else { return }
+        guard kind == .unit || kind == .infantry else { return }
+        guard isArmed else { return }
+        if isHarvester || isMCV { return }
+        // Don't override these missions — player or scripted control
+        switch mission {
+        case .attack, .capture, .sabotage, .enter, .unload,
+             .selling, .deconstruction, .construction, .repair, .missile:
+            return
+        default:
+            break
+        }
+        guard let aid = lastAttackerId,
+              let attacker = world.findObject(id: aid),
+              attacker.strength > 0,
+              isEnemy(self, attacker) else { return }
+        // Don't chase attackers we can't reach — if our weapon range is
+        // shorter than the distance, going prone is the safer reaction.
+        let range = resolveWeapon()?.range ?? 96.0
+        let dx = attacker.worldX - worldX
+        let dy = attacker.worldY - worldY
+        let dist = sqrt(dx * dx + dy * dy)
+        // Allow some pursuit — up to 3x weapon range.
+        guard dist <= range * 3.0 else { return }
+
+        // Save a moving mission so we can resume after the threat dies.
+        if mission == .move || mission == .hunt || mission == .patrol ||
+           mission == .guardArea {
+            suspendedMission = mission
+        }
+        attackTarget = aid
+        mission = .attack
+        movePath = []
+        moveTargetX = nil
+        moveTargetY = nil
     }
 
     /// Rotate turret toward target facing. Returns true when aligned.

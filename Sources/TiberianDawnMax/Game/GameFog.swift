@@ -29,29 +29,51 @@ func updateFog() {
         }
     }
 
-    // For each friendly unit/structure, reveal cells within sight range
-    // Uses actual sight range from type data tables (matches original C&C behavior)
+    // Reset per-house visibility — we rebuild it from scratch each tick.
+    // Houses with no surviving objects naturally drop out of the dict.
+    map.houseVisibility.removeAll(keepingCapacity: true)
+
+    // For each unit/structure, reveal cells within sight range — for the
+    // player's fogState (only player house) and for each house's
+    // visibility map (every house, used to gate AI target acquisition).
     for obj in world.objects {
-        if obj.house != world.playerHouse { continue }
         if obj.strength <= 0 { continue }
+        if obj.house == .neutral { continue }
 
         let sight = max(2, obj.sightRange)
         let cx = obj.cellX
         let cy = obj.cellY
+        let isPlayer = obj.house == world.playerHouse
 
-        // Simple circle reveal
+        // Lazily allocate the per-house bool grid on first sighting.
+        if map.houseVisibility[obj.house] == nil {
+            map.houseVisibility[obj.house] = Array(repeating: false, count: 4096)
+        }
+
         for dy in -sight...sight {
             for dx in -sight...sight {
                 let nx = cx + dx
                 let ny = cy + dy
                 if nx < 0 || nx >= 64 || ny < 0 || ny >= 64 { continue }
-                // Circle check
-                if dx * dx + dy * dy <= sight * sight {
-                    map.fogState[ny * 64 + nx] = .visible
+                if dx * dx + dy * dy > sight * sight { continue }
+                let cell = ny * 64 + nx
+                map.houseVisibility[obj.house]?[cell] = true
+                if isPlayer {
+                    map.fogState[cell] = .visible
                 }
             }
         }
     }
+}
+
+/// True if the given house has line-of-sight to the cell. Neutral house
+/// is always considered seeing (civilian/world targets are universally visible).
+/// A house with no surviving objects sees nothing.
+func canHouseSee(cell: Int, house: House) -> Bool {
+    if house == .neutral { return true }
+    guard cell >= 0 && cell < 4096 else { return false }
+    guard let map = session.world?.map else { return false }
+    return map.houseVisibility[house]?[cell] ?? false
 }
 
 /// Check if a cell is currently visible

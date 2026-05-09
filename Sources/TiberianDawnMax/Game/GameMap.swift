@@ -44,8 +44,14 @@ class GameMap {
     /// Persistent ground smudges (craters, scorch marks)
     var smudges: [Smudge] = []
 
-    /// Fog state for each of the 4096 cells
+    /// Fog state for each of the 4096 cells (player perspective: unexplored/explored/visible)
     var fogState: [FogLevel] = Array(repeating: .unexplored, count: 4096)
+
+    /// Per-house live visibility. `true` at index `cell` means the house has
+    /// at least one living unit/structure with line-of-sight to that cell.
+    /// Used to gate AI target acquisition so units can't fire at enemies in
+    /// their own fog of war. Recomputed each tick alongside fogState.
+    var houseVisibility: [House: [Bool]] = [:]
 }
 
 // MARK: - Backward-Compatible Passability Globals

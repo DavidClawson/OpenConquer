@@ -571,6 +571,13 @@ class PlayingScreen: MenuScreen {
     private var showingEndScreen: Bool = false
     private var endScreenButtons: [(label: String, x: Int32, y: Int32, w: Int32, h: Int32, action: String)] = []
 
+    // Dwell counter for right-edge pan. Counts consecutive frames the
+    // cursor has spent in the right edge zone heading toward the sidebar.
+    // Pan only kicks in once this exceeds rightEdgeDwellThreshold, so brisk
+    // moves toward the sidebar to click a button don't accidentally scroll.
+    private var rightEdgeDwellFrames: Int = 0
+    private let rightEdgeDwellThreshold: Int = 8
+
     func render(_ renderer: OpaquePointer?) {
         // Start gameplay music on first render
         if !musicStarted {
@@ -1161,11 +1168,22 @@ class PlayingScreen: MenuScreen {
             let speed = minSpeed + (maxSpeed - minSpeed) * depth * depth
             renderState.gameCameraX = max(minCamX, renderState.gameCameraX - speed)
         }
-        // Right edge
-        if mx >= gameAreaWidth - edgeZone {
-            let depth = (mx - (gameAreaWidth - edgeZone)) / edgeZone
-            let speed = minSpeed + (maxSpeed - minSpeed) * depth * depth
-            renderState.gameCameraX = min(maxCamX, renderState.gameCameraX + speed)
+        // Right edge — gated by a dwell counter so moving toward the
+        // sidebar to click a button doesn't accidentally trigger a pan.
+        // The counter is reset whenever the cursor is in the sidebar
+        // (true dead zone) or out of the edge zone entirely.
+        if mx >= gameAreaWidth {
+            // Cursor is over the sidebar — never pan.
+            rightEdgeDwellFrames = 0
+        } else if mx >= gameAreaWidth - edgeZone {
+            rightEdgeDwellFrames += 1
+            if rightEdgeDwellFrames >= rightEdgeDwellThreshold {
+                let depth = (mx - (gameAreaWidth - edgeZone)) / edgeZone
+                let speed = minSpeed + (maxSpeed - minSpeed) * depth * depth
+                renderState.gameCameraX = min(maxCamX, renderState.gameCameraX + speed)
+            }
+        } else {
+            rightEdgeDwellFrames = 0
         }
         // Top edge
         if my < edgeZone {
