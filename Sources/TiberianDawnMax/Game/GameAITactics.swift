@@ -34,6 +34,14 @@ private enum AITactic {
 // MARK: - Master Tactical Tick
 
 /// Main entry point for AI tactical behaviors. Called from tickAI().
+///
+/// B3-P4: each tactic is split into a PURE `decide*` (gate predicate + the
+/// management-independent selection — no RNG, no mutation) and an EFFECTFUL
+/// `apply*` (the per-unit state machine: mutation + the RNG draws via
+/// retreatToBase / scout-target / flank jitter). The decide is called first and
+/// consumes no RNG, so the simulation digest is unchanged. Where a tactic's
+/// selection genuinely depends on its own management mutations (hit-and-run
+/// attacker selection), that selection stays in apply — see decideHitAndRun.
 func tickAITactics() {
     guard let world = session.world else { return }
 
@@ -47,22 +55,28 @@ func tickAITactics() {
 
         // Recon / scouting — every 90 ticks (~6 seconds check interval)
         if isTacticEnabled(.recon) && world.tickCount % 90 == 0 {
-            tickAIRecon(house: house, houseState: state, world: world)
+            applyRecon(decideRecon(house: house, houseState: state, world: world),
+                       houseState: state, world: world)
         }
 
         // Hit-and-run — every 60 ticks (~4 seconds check interval)
         if isTacticEnabled(.hitAndRun) && world.tickCount % 60 == 0 {
-            tickAIHitAndRun(house: house, houseState: state, world: world)
+            if let plan = decideHitAndRun(house: house, houseState: state, world: world) {
+                applyHitAndRun(plan, house: house, houseState: state, world: world)
+            }
         }
 
         // Harvester harassment — every 90 ticks (~6 seconds check interval)
         if isTacticEnabled(.harassment) && world.tickCount % 90 == 0 {
-            tickAIHarvestHarass(house: house, houseState: state, world: world)
+            applyHarass(decideHarass(house: house, houseState: state, world: world),
+                        houseState: state, world: world)
         }
 
         // Flanking follow-up — check every 15 ticks for delayed flank engagement
         if isTacticEnabled(.flanking) && world.tickCount % 15 == 0 {
-            tickAIFlankFollowUp(house: house, houseState: state, world: world)
+            if decideFlankFollowUp(houseState: state, world: world) {
+                applyFlankFollowUp(house: house, houseState: state, world: world)
+            }
         }
     }
 }
@@ -90,20 +104,25 @@ private func expireEnemyMemory(houseState: HouseState, currentTick: Int) {
 
 // MARK: - 1. Recon / Scouting
 
-/// Send a fast scout unit to explore unexplored areas of the map.
-/// Called every 90 ticks but only dispatches a scout every 1350 ticks (90 seconds).
-func tickAIRecon(house: House, houseState: HouseState, world: GameWorld) {
+/// What recon wants to do this tick (pure decision; see decideRecon).
+enum ReconAction {
+    case none
+    case tickExisting(GameObject)                              // active scout: run its behavior
+    case dispatch(scout: GameObject, biasX: Double, biasY: Double)  // send a new scout
+}
+
+/// PURE (B3-P4): decide the recon action. No RNG, no mutation. Called every 90
+/// ticks but only dispatches a new scout every 1350 ticks (90 seconds).
+func decideRecon(house: House, houseState: HouseState, world: GameWorld) -> ReconAction {
     // Only send a new scout every 1350 ticks (90 seconds)
     let ticksSinceLastScout = world.tickCount - houseState.aiLastScoutTick
-    guard ticksSinceLastScout >= 1350 else { return }
+    guard ticksSinceLastScout >= 1350 else { return .none }
 
     // Check if current scout is still alive and active
     if let scoutId = houseState.aiScoutUnitId,
        let scout = world.findObject(id: scoutId),
        scout.strength > 0 && scout.aiTacticalRole == .scout {
-        // Scout is still active — check if it reached destination or spotted enemies
-        tickScoutBehavior(scout: scout, houseState: houseState, world: world)
-        return
+        return .tickExisting(scout)
     }
 
     // No active scout — find the fastest idle unit to send
@@ -123,34 +142,46 @@ func tickAIRecon(house: House, houseState: HouseState, world: GameWorld) {
         }
     }
 
-    guard let scout = bestUnit else { return }
+    guard let scout = bestUnit else { return .none }
 
-    // Pick a scout target: random cell biased toward map center from AI base
-    guard let aiBase = findHouseBase(house: house, world: world) else { return }
+    // Pick a scout target: cell biased toward map center from AI base
+    guard let aiBase = findHouseBase(house: house, world: world) else { return .none }
     let mapCenterX = 32.0 * 24.0
     let mapCenterY = 32.0 * 24.0
-
-    // Bias toward area between base and map center
     let biasX = (aiBase.x + mapCenterX) / 2.0
     let biasY = (aiBase.y + mapCenterY) / 2.0
+    return .dispatch(scout: scout, biasX: biasX, biasY: biasY)
+}
 
-    // Add randomness (up to 15 cells in any direction)
-    let targetX = biasX + rndDouble(-360...360)
-    let targetY = biasY + rndDouble(-360...360)
+/// EFFECTFUL (B3-P4): execute the recon action. The scout-target ±360px draw is
+/// the only RNG in the dispatch path; the active-scout path runs the (RNG-free)
+/// scout state machine.
+func applyRecon(_ action: ReconAction, houseState: HouseState, world: GameWorld) {
+    switch action {
+    case .none:
+        return
+    case .tickExisting(let scout):
+        // Scout still active — check if it reached destination or spotted enemies
+        tickScoutBehavior(scout: scout, houseState: houseState, world: world)
+    case .dispatch(let scout, let biasX, let biasY):
+        // Add randomness (up to 15 cells in any direction)
+        let targetX = biasX + rndDouble(-360...360)
+        let targetY = biasY + rndDouble(-360...360)
 
-    // Clamp to map bounds
-    let clampedX = max(72, min(64 * 24 - 72, targetX))
-    let clampedY = max(72, min(64 * 24 - 72, targetY))
+        // Clamp to map bounds
+        let clampedX = max(72, min(64 * 24 - 72, targetX))
+        let clampedY = max(72, min(64 * 24 - 72, targetY))
 
-    // Dispatch the scout
-    scout.moveTargetX = clampedX
-    scout.moveTargetY = clampedY
-    scout.mission = .move
-    scout.movePath = []
-    scout.aiTacticalRole = .scout
-    houseState.aiScoutUnitId = scout.id
-    houseState.aiLastScoutTick = world.tickCount
-    houseState.aiScoutTargetCell = Int(clampedY / 24) * 64 + Int(clampedX / 24)
+        // Dispatch the scout
+        scout.moveTargetX = clampedX
+        scout.moveTargetY = clampedY
+        scout.mission = .move
+        scout.movePath = []
+        scout.aiTacticalRole = .scout
+        houseState.aiScoutUnitId = scout.id
+        houseState.aiLastScoutTick = world.tickCount
+        houseState.aiScoutTargetCell = Int(clampedY / 24) * 64 + Int(clampedX / 24)
+    }
 }
 
 /// Handle active scout behavior: detect enemies and retreat, or pick new target.
@@ -196,13 +227,58 @@ private func tickScoutBehavior(scout: GameObject, houseState: HouseState, world:
 
 // MARK: - 2. Hit-and-Run Tactics
 
-/// Send fast units to harass slow/valuable targets, then retreat.
-/// Called every 60 ticks but only initiates every 900 ticks (60 seconds).
-func tickAIHitAndRun(house: House, houseState: HouseState, world: GameWorld) {
+/// A decided hit-and-run engagement (B3-P4). `target` is the management-
+/// independent enemy pick; `nil` means "no new engagement, just manage existing".
+struct HitRunDecision { let target: GameObject? }
+
+/// PURE (B3-P4): decide hit-and-run. Returns nil if the 900-tick cooldown hasn't
+/// elapsed (apply is skipped entirely). Otherwise selects the priority enemy
+/// target — a read-only enemy scan, independent of the management mutations apply
+/// performs. No RNG, no mutation. Attacker selection is deliberately NOT here:
+/// it depends on units the management phase may release to idle, so it lives in
+/// apply, after management.
+func decideHitAndRun(house: House, houseState: HouseState, world: GameWorld) -> HitRunDecision? {
     // Only initiate every 900 ticks (60 seconds)
     let ticksSinceLast = world.tickCount - houseState.aiLastHitAndRunTick
-    guard ticksSinceLast >= 900 else { return }
+    guard ticksSinceLast >= 900 else { return nil }
 
+    // Find a target: enemy harvesters are priority, then isolated slow units
+    var target: GameObject? = nil
+    var targetPriority = 0
+
+    for obj in world.objects {
+        guard obj.strength > 0 else { continue }
+        guard obj.house != house && obj.house != .neutral else { continue }
+        guard obj.kind == .unit || obj.kind == .infantry else { continue }
+
+        if obj.isHarvester {
+            // Harvesters are highest priority
+            if targetPriority < 3 {
+                target = obj
+                targetPriority = 3
+            }
+        } else if obj.speed <= 1.5 && obj.isArmed {
+            // Slow combat units are secondary targets
+            if targetPriority < 2 {
+                target = obj
+                targetPriority = 2
+            }
+        } else if !obj.isArmed {
+            // Unarmed units (MCVs, etc.) are tertiary
+            if targetPriority < 1 {
+                target = obj
+                targetPriority = 1
+            }
+        }
+    }
+
+    return HitRunDecision(target: target)
+}
+
+/// EFFECTFUL (B3-P4): run hit-and-run. Manages existing hit-run units (RNG via
+/// retreatToBase), then — if a target was decided — selects 1-2 fast idle
+/// attackers (post-management state) and sends them in.
+func applyHitAndRun(_ decision: HitRunDecision, house: House, houseState: HouseState, world: GameWorld) {
     // First, manage existing hit-and-run units
     for obj in world.objects {
         guard obj.house == house && obj.strength > 0 else { continue }
@@ -263,37 +339,7 @@ func tickAIHitAndRun(house: House, houseState: HouseState, world: GameWorld) {
         }
     }
 
-    // Find a target: enemy harvesters are priority, then isolated slow units
-    var target: GameObject? = nil
-    var targetPriority = 0
-
-    for obj in world.objects {
-        guard obj.strength > 0 else { continue }
-        guard obj.house != house && obj.house != .neutral else { continue }
-        guard obj.kind == .unit || obj.kind == .infantry else { continue }
-
-        if obj.isHarvester {
-            // Harvesters are highest priority
-            if targetPriority < 3 {
-                target = obj
-                targetPriority = 3
-            }
-        } else if obj.speed <= 1.5 && obj.isArmed {
-            // Slow combat units are secondary targets
-            if targetPriority < 2 {
-                target = obj
-                targetPriority = 2
-            }
-        } else if !obj.isArmed {
-            // Unarmed units (MCVs, etc.) are tertiary
-            if targetPriority < 1 {
-                target = obj
-                targetPriority = 1
-            }
-        }
-    }
-
-    guard let hitTarget = target else { return }
+    guard let hitTarget = decision.target else { return }
 
     // Find 1-2 fast idle units that are faster than the target
     var attackers: [GameObject] = []
@@ -406,11 +452,16 @@ func applyFlankingTactics(units: [GameObject], target: GameObject,
     houseState.aiFlankAttackTargetId = target.id
 }
 
-/// Check if flank group should now engage (30 tick delay after main group).
-private func tickAIFlankFollowUp(house: House, houseState: HouseState, world: GameWorld) {
-    guard let delayTick = houseState.aiFlankDelayTick else { return }
-    guard world.tickCount >= delayTick else { return }
+/// PURE (B3-P4): true once the 30-tick flank delay has elapsed and a flank group
+/// is pending. No RNG, no mutation.
+func decideFlankFollowUp(houseState: HouseState, world: GameWorld) -> Bool {
+    guard let delayTick = houseState.aiFlankDelayTick else { return false }
+    return world.tickCount >= delayTick
+}
 
+/// EFFECTFUL (B3-P4): send the pending flank group to attack (±36px target
+/// jitter RNG per unit), then clear the flank state.
+func applyFlankFollowUp(house: House, houseState: HouseState, world: GameWorld) {
     // Time to engage — send flank group to attack
     for unitId in houseState.aiFlankUnitIds {
         guard let unit = world.findObject(id: unitId),
@@ -445,21 +496,27 @@ private func tickAIFlankFollowUp(house: House, houseState: HouseState, world: Ga
 
 // MARK: - 4. Harvester Harassment
 
-/// Send a fast unit to harass enemy harvesters that are far from their base.
-/// Called every 90 ticks but only dispatches every 1800 ticks (2 minutes).
-func tickAIHarvestHarass(house: House, houseState: HouseState, world: GameWorld) {
+/// What harassment wants to do this tick (pure decision; see decideHarass).
+enum HarassAction {
+    case none
+    case tickExisting(GameObject)                              // active harasser: run its behavior
+    case scan(harasser: GameObject?, target: GameObject?)      // no active harasser: clear id, maybe dispatch
+}
+
+/// PURE (B3-P4): decide harassment. No RNG, no mutation. Called every 90 ticks
+/// but only dispatches every 1800 ticks (2 minutes). When no harasser is active,
+/// returns the (target, harasser) selection for apply to act on; the active path
+/// early-returns so selection and the existing-harasser tick never interleave.
+func decideHarass(house: House, houseState: HouseState, world: GameWorld) -> HarassAction {
     let ticksSinceLast = world.tickCount - houseState.aiLastHarassTick
-    guard ticksSinceLast >= 1800 else { return }
+    guard ticksSinceLast >= 1800 else { return .none }
 
     // Check if current harasser is still active
     if let harassId = houseState.aiHarassUnitId,
        let harasser = world.findObject(id: harassId),
        harasser.strength > 0 && harasser.aiTacticalRole == .harasser {
-        // Check if player sent defenders — retreat if combat units within 6 cells
-        tickHarasserBehavior(harasser: harasser, houseState: houseState, world: world)
-        return
+        return .tickExisting(harasser)
     }
-    houseState.aiHarassUnitId = nil
 
     // Find a player harvester that is far from player buildings (>8 cells)
     var bestHarv: GameObject? = nil
@@ -487,8 +544,6 @@ func tickAIHarvestHarass(house: House, houseState: HouseState, world: GameWorld)
         }
     }
 
-    guard let targetHarv = bestHarv else { return }
-
     // Find a fast idle unit to send
     var bestUnit: GameObject? = nil
     var bestSpeed: Double = 0
@@ -506,15 +561,31 @@ func tickAIHarvestHarass(house: House, houseState: HouseState, world: GameWorld)
         }
     }
 
-    guard let harasser = bestUnit else { return }
+    return .scan(harasser: bestUnit, target: bestHarv)
+}
 
-    // Send to attack the harvester
-    harasser.attackTarget = targetHarv.id
-    harasser.mission = .attack
-    harasser.movePath = []
-    harasser.aiTacticalRole = .harasser
-    houseState.aiHarassUnitId = harasser.id
-    houseState.aiLastHarassTick = world.tickCount
+/// EFFECTFUL (B3-P4): execute the harass action. RNG appears only in the
+/// existing-harasser retreat path (via retreatToBase); dispatch itself is
+/// RNG-free.
+func applyHarass(_ action: HarassAction, houseState: HouseState, world: GameWorld) {
+    switch action {
+    case .none:
+        return
+    case .tickExisting(let harasser):
+        // Check if player sent defenders — retreat if combat units within 6 cells
+        tickHarasserBehavior(harasser: harasser, houseState: houseState, world: world)
+    case .scan(let harasser, let target):
+        houseState.aiHarassUnitId = nil
+        guard let targetHarv = target, let harasserUnit = harasser else { return }
+
+        // Send to attack the harvester
+        harasserUnit.attackTarget = targetHarv.id
+        harasserUnit.mission = .attack
+        harasserUnit.movePath = []
+        harasserUnit.aiTacticalRole = .harasser
+        houseState.aiHarassUnitId = harasserUnit.id
+        houseState.aiLastHarassTick = world.tickCount
+    }
 }
 
 /// Check if harasser should retreat due to approaching defenders.

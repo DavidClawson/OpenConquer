@@ -64,8 +64,18 @@ A suggested ordering is at the end.
 >   flank RNG order can't be reshaped without changing the digest — fine-grained
 >   mapping deferred to the P5 flag-flip. Digests byte-identical: 2500t
 >   `0x76C4D7D28B207A08`, 4000t SCG `0xAD2FA4BFC4723E0A`, SCB `0xC6BACBDF0518D5B7`.
-> - Still to do: B3-P4 (tactics), B3-P5 (flip flag + re-baseline), B4-E0..E7
->   (see docs/B3_B4_PLAN.md), A3 stage 2 (F3).
+> - **B3-P4 done + verified:** tactics (recon/hit-and-run/harass/flank-follow-up)
+>   migrated to the decide/apply split. Pure deciders: `decideRecon` (→ReconAction),
+>   `decideHitAndRun` (→HitRunDecision, gate + management-independent target pick),
+>   `decideHarass` (→HarassAction), `decideFlankFollowUp` (Bool gate). Effectful
+>   appliers hold all RNG (scout-target ±360, retreatToBase ±24, flank jitter ±36)
+>   and mutation. Key faithfulness call: hit-and-run *attacker* selection stays in
+>   apply because the management phase can release units to idle and thus change
+>   the eligible set — only the (enemy) target pick is hoisted to decide. Digests
+>   byte-identical: 2500t `0x76C4D7D28B207A08`, 4000t SCG `0xAD2FA4BFC4723E0A`,
+>   SCB `0xC6BACBDF0518D5B7`; reset-check + ai-parity green.
+> - Still to do: B3-P5 (flip flag + re-baseline; first allowed behavior change),
+>   B4-E0..E7 (see docs/B3_B4_PLAN.md), A3 stage 2 (F3).
 
 ### A1. Harvester docking animation (missing)  — ✅ implemented
 
