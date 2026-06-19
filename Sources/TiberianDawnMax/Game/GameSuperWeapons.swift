@@ -318,8 +318,8 @@ func deployNuclearStrike(worldX: Double, worldY: Double) {
 
     // Also spawn secondary explosions
     for _ in 0..<4 {
-        let ox = Double.random(in: -36...36)
-        let oy = Double.random(in: -36...36)
+        let ox = rndDouble(-36...36)
+        let oy = rndDouble(-36...36)
         spawnAnimation(.fball1, worldX: worldX + ox, worldY: worldY + oy)
     }
 
@@ -360,7 +360,7 @@ func deployNuclearStrike(worldX: Double, worldY: Double) {
             if cx >= 0 && cx < 64 && cy >= 0 && cy < 64 {
                 let scorch = SmudgeType.allCases.filter { $0.rawValue.hasPrefix("scorch") }
                 if !scorch.isEmpty {
-                    let chosen = scorch[Int.random(in: 0..<scorch.count)]
+                    let chosen = scorch[rndInt(0..<scorch.count)]
                     let smudgeCell = cy * 64 + cx
                     session.world?.map.smudges.append(Smudge(type: chosen, cell: smudgeCell))
                 }
@@ -448,8 +448,8 @@ func tickScreenEffects() {
         renderState.screenShakeDuration -= 1
         let progress = Double(renderState.screenShakeDuration) / 45.0
         let intensity = renderState.screenShakeIntensity * progress
-        renderState.screenShakeOffsetX = Int32(Double.random(in: -intensity...intensity))
-        renderState.screenShakeOffsetY = Int32(Double.random(in: -intensity...intensity))
+        renderState.screenShakeOffsetX = Int32(rndDouble(-intensity...intensity))
+        renderState.screenShakeOffsetY = Int32(rndDouble(-intensity...intensity))
     } else {
         renderState.screenShakeOffsetX = 0
         renderState.screenShakeOffsetY = 0
@@ -468,7 +468,8 @@ func tickAISuperWeapons() {
     guard let world = session.world else { return }
 
     // Process for each AI house
-    for (house, state) in session.houseStates {
+    for house in session.houseStates.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
+        guard let state = session.houseStates[house] else { continue }
         guard !state.isHuman else { continue }
 
         // AI Ion Cannon

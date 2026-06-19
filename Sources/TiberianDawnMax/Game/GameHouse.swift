@@ -50,6 +50,10 @@ class HouseState {
     var aiFlankTargetY: Double? = nil    // Flank group's attack target Y
     var aiFlankAttackTargetId: Int? = nil // Flank group's attack target object ID
 
+    // B3 decision layer (scaffolding; see Game/GameAIBrain.swift). Auto-reset
+    // per world because initHouseStates() recreates fresh HouseStates.
+    var aiBrain = AIBrain()
+
     init(type: House, credits: Int, isHuman: Bool) {
         self.type = type
         self.credits = credits

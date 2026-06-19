@@ -37,7 +37,8 @@ private enum AITactic {
 func tickAITactics() {
     guard let world = session.world else { return }
 
-    for (house, state) in session.houseStates {
+    for house in session.houseStates.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
+        guard let state = session.houseStates[house] else { continue }
         if house == world.playerHouse || house == .neutral { continue }
         if !state.productionEnabled { continue }
 
@@ -134,8 +135,8 @@ func tickAIRecon(house: House, houseState: HouseState, world: GameWorld) {
     let biasY = (aiBase.y + mapCenterY) / 2.0
 
     // Add randomness (up to 15 cells in any direction)
-    let targetX = biasX + Double.random(in: -360...360)
-    let targetY = biasY + Double.random(in: -360...360)
+    let targetX = biasX + rndDouble(-360...360)
+    let targetY = biasY + rndDouble(-360...360)
 
     // Clamp to map bounds
     let clampedX = max(72, min(64 * 24 - 72, targetX))
@@ -334,8 +335,8 @@ func applyFlankingTactics(units: [GameObject], target: GameObject,
             unit.attackTarget = target.id
             unit.mission = .attack
             unit.movePath = []
-            let offsetX = Double.random(in: -36...36)
-            let offsetY = Double.random(in: -36...36)
+            let offsetX = rndDouble(-36...36)
+            let offsetY = rndDouble(-36...36)
             unit.moveTargetX = target.worldX + offsetX
             unit.moveTargetY = target.worldY + offsetY
         }
@@ -348,8 +349,8 @@ func applyFlankingTactics(units: [GameObject], target: GameObject,
             unit.attackTarget = target.id
             unit.mission = .attack
             unit.movePath = []
-            let offsetX = Double.random(in: -36...36)
-            let offsetY = Double.random(in: -36...36)
+            let offsetX = rndDouble(-36...36)
+            let offsetY = rndDouble(-36...36)
             unit.moveTargetX = target.worldX + offsetX
             unit.moveTargetY = target.worldY + offsetY
         }
@@ -373,7 +374,7 @@ func applyFlankingTactics(units: [GameObject], target: GameObject,
 
     // Flank waypoint: target + perpendicular * 8 cells (192 pixels)
     // Randomly pick left or right flank
-    let flankSide = Bool.random() ? 1.0 : -1.0
+    let flankSide = rndBool() ? 1.0 : -1.0
     let flankWaypointX = max(72, min(64 * 24 - 72, target.worldX + perpX * 192.0 * flankSide))
     let flankWaypointY = max(72, min(64 * 24 - 72, target.worldY + perpY * 192.0 * flankSide))
 
@@ -382,16 +383,16 @@ func applyFlankingTactics(units: [GameObject], target: GameObject,
         unit.attackTarget = target.id
         unit.mission = .attack
         unit.movePath = []
-        let offsetX = Double.random(in: -36...36)
-        let offsetY = Double.random(in: -36...36)
+        let offsetX = rndDouble(-36...36)
+        let offsetY = rndDouble(-36...36)
         unit.moveTargetX = target.worldX + offsetX
         unit.moveTargetY = target.worldY + offsetY
     }
 
     // Flank group moves to flank waypoint first, then attacks after 30 tick delay
     for unit in flankUnits {
-        unit.moveTargetX = flankWaypointX + Double.random(in: -24...24)
-        unit.moveTargetY = flankWaypointY + Double.random(in: -24...24)
+        unit.moveTargetX = flankWaypointX + rndDouble(-24...24)
+        unit.moveTargetY = flankWaypointY + rndDouble(-24...24)
         unit.mission = .move
         unit.movePath = []
         unit.aiTacticalRole = .flank
@@ -422,8 +423,8 @@ private func tickAIFlankFollowUp(house: House, houseState: HouseState, world: Ga
             unit.attackTarget = target.id
             unit.mission = .attack
             unit.movePath = []
-            unit.moveTargetX = target.worldX + Double.random(in: -36...36)
-            unit.moveTargetY = target.worldY + Double.random(in: -36...36)
+            unit.moveTargetX = target.worldX + rndDouble(-36...36)
+            unit.moveTargetY = target.worldY + rndDouble(-36...36)
         } else if let tx = houseState.aiFlankTargetX, let ty = houseState.aiFlankTargetY {
             // Original target dead — attack-move to its position
             unit.moveTargetX = tx
@@ -571,8 +572,8 @@ private func retreatToBase(unit: GameObject, house: House, world: GameWorld) {
     }
 
     unit.attackTarget = nil
-    unit.moveTargetX = bestX + Double.random(in: -24...24)
-    unit.moveTargetY = bestY + Double.random(in: -24...24)
+    unit.moveTargetX = bestX + rndDouble(-24...24)
+    unit.moveTargetY = bestY + rndDouble(-24...24)
     unit.mission = .move
     unit.movePath = []
 }

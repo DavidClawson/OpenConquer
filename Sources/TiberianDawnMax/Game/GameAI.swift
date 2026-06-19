@@ -197,8 +197,8 @@ func rallyEnemyUnits(world: GameWorld) {
         let squad = Array(idleUnits.prefix(squadSize))
         for unit in squad {
             // Add some randomness to the target so they don't all stack
-            let offsetX = Double.random(in: -48...48)
-            let offsetY = Double.random(in: -48...48)
+            let offsetX = rndDouble(-48...48)
+            let offsetY = rndDouble(-48...48)
             unit.moveTargetX = max(12, min(64 * 24 - 12, playerBase.x + offsetX))
             unit.moveTargetY = max(12, min(64 * 24 - 12, playerBase.y + offsetY))
             unit.mission = .move
@@ -227,7 +227,7 @@ func tryAutocreateTeam() {
     guard !autocreateTypes.isEmpty else { return }
 
     // Pick a random autocreate team type
-    let type = autocreateTypes[Int.random(in: 0..<autocreateTypes.count)]
+    let type = autocreateTypes[rndInt(0..<autocreateTypes.count)]
 
     if let team = createAndRecruitTeam(type: type) {
         if team.memberCount > 0 {
@@ -247,7 +247,8 @@ func tickAIProduction() {
     guard let world = session.world else { return }
     let costMult = aiCostMultiplier()
 
-    for (house, state) in session.houseStates {
+    for house in session.houseStates.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
+        guard let state = session.houseStates[house] else { continue }
         // Skip player and neutral houses
         if house == world.playerHouse || house == .neutral { continue }
         // Must have production enabled (via beginProduction trigger or auto-enable after delay)
@@ -322,15 +323,31 @@ private func tickAIQueue(
     }
 }
 
-/// Pick a vehicle for the AI to build based on heuristics.
+/// Pick a vehicle for the AI to build. Thin shim over the B3 decide/apply split:
+/// `decideUnitBuild` (pure) chooses the plan, `applyBuildPlan` does the single
+/// weighted RNG draw. Behavior — and RNG consumption — is identical to the
+/// former inline implementation (gated by `--determinism`).
 private func aiPickVehicle(
     house: House,
     houseState: HouseState,
     owned: Set<String>,
     costMultiplier: Double
 ) -> (typeName: String, cost: Int, buildTime: Int)? {
-    guard owned.contains("WEAP") || owned.contains("AFLD") else { return nil }
-    guard let world = session.world else { return nil }
+    return applyBuildPlan(decideUnitBuild(house: house, houseState: houseState,
+                                          owned: owned, costMultiplier: costMultiplier))
+}
+
+/// PURE (B3-P2): decide what vehicle to build, without consuming RNG. Returns a
+/// `.forced` plan for the priority harvester (no draw) or a `.weighted` pool for
+/// combat vehicles (one draw in apply). Mirrors the former aiPickVehicle body.
+func decideUnitBuild(
+    house: House,
+    houseState: HouseState,
+    owned: Set<String>,
+    costMultiplier: Double
+) -> AIBuildPlan {
+    guard owned.contains("WEAP") || owned.contains("AFLD") else { return .none }
+    guard let world = session.world else { return .none }
 
     // Count existing harvesters and combat vehicles for this house
     var harvesterCount = 0
@@ -341,12 +358,12 @@ private func aiPickVehicle(
         if obj.kind == .unit && !obj.isHarvester && !obj.isMCV { combatVehicleCount += 1 }
     }
 
-    // Priority 1: Need at least 1 harvester if we have a refinery
+    // Priority 1: Need at least 1 harvester if we have a refinery (no RNG draw)
     if harvesterCount == 0 && owned.contains("PROC") {
         if let data = getUnitTypeDataByName("HARV") {
             let cost = Int(Double(data.cost) * costMultiplier)
             let ticks = max(30, cost / 5)
-            return (typeName: "HARV", cost: cost, buildTime: ticks)
+            return .forced(BuildCandidate(name: "HARV", weight: 0, cost: cost, buildTime: ticks))
         }
     }
 
@@ -354,108 +371,117 @@ private func aiPickVehicle(
     let isNod = (houseToHousesType(house) == .bad)
 
     // Build pool based on faction
-    var candidates: [(name: String, weight: Int)] = []
+    var pool: [(name: String, weight: Int)] = []
     if owned.contains("WEAP") {
         if isNod {
-            candidates.append((name: "LTNK", weight: 4))
-            candidates.append((name: "BGGY", weight: 3))
-            candidates.append((name: "FTNK", weight: 2))
-            candidates.append((name: "ARTY", weight: 2))
-            candidates.append((name: "APC", weight: 1))
+            pool.append((name: "LTNK", weight: 4))
+            pool.append((name: "BGGY", weight: 3))
+            pool.append((name: "FTNK", weight: 2))
+            pool.append((name: "ARTY", weight: 2))
+            pool.append((name: "APC", weight: 1))
             if owned.contains("AFLD") {
-                candidates.append((name: "STNK", weight: 2))
+                pool.append((name: "STNK", weight: 2))
             }
         } else {
-            candidates.append((name: "MTNK", weight: 5))
-            candidates.append((name: "JEEP", weight: 3))
-            candidates.append((name: "MSAM", weight: 2))
-            candidates.append((name: "APC", weight: 1))
-            candidates.append((name: "MLRS", weight: 2))
+            pool.append((name: "MTNK", weight: 5))
+            pool.append((name: "JEEP", weight: 3))
+            pool.append((name: "MSAM", weight: 2))
+            pool.append((name: "APC", weight: 1))
+            pool.append((name: "MLRS", weight: 2))
             if houseState.credits > 1500 {
-                candidates.append((name: "HTNK", weight: 2))
+                pool.append((name: "HTNK", weight: 2))
             }
         }
     }
 
-    // Filter candidates to only what this house can actually build
-    candidates = candidates.filter { candidate in
-        if let ut = UnitType.from(iniName: candidate.name),
-           let data = unitTypeDataTable[ut] {
-            return houseState.canBuildUnit(data)
-        }
-        return false
+    // Filter to what this house can build, precomputing cost/buildTime (pure).
+    var candidates: [BuildCandidate] = []
+    for c in pool {
+        guard let ut = UnitType.from(iniName: c.name),
+              let data = unitTypeDataTable[ut],
+              houseState.canBuildUnit(data) else { continue }
+        let cost = Int(Double(data.cost) * costMultiplier)
+        let ticks = max(30, cost / 5)
+        candidates.append(BuildCandidate(name: c.name, weight: c.weight, cost: cost, buildTime: ticks))
     }
 
-    guard !candidates.isEmpty else { return nil }
-
-    // Weighted random selection
-    let totalWeight = candidates.reduce(0) { $0 + $1.weight }
-    var roll = Int.random(in: 0..<totalWeight)
-    for candidate in candidates {
-        roll -= candidate.weight
-        if roll < 0 {
-            if let data = getUnitTypeDataByName(candidate.name) {
-                let cost = Int(Double(data.cost) * costMultiplier)
-                let ticks = max(30, cost / 5)
-                return (typeName: candidate.name, cost: cost, buildTime: ticks)
-            }
-            break
-        }
-    }
-
-    return nil
+    guard !candidates.isEmpty else { return .none }
+    return .weighted(candidates)
 }
 
-/// Pick an infantry for the AI to build based on heuristics.
+/// Pick an infantry for the AI to build. Shim over the decide/apply split (see
+/// aiPickVehicle). RNG consumption is identical to the former inline version.
 private func aiPickInfantry(
     house: House,
     houseState: HouseState,
     owned: Set<String>,
     costMultiplier: Double
 ) -> (typeName: String, cost: Int, buildTime: Int)? {
+    return applyBuildPlan(decideInfantryBuild(house: house, houseState: houseState,
+                                              owned: owned, costMultiplier: costMultiplier))
+}
+
+/// PURE (B3-P2): decide what infantry to build, without consuming RNG. Always a
+/// `.weighted` pool (no priority/forced case). Mirrors the former body.
+func decideInfantryBuild(
+    house: House,
+    houseState: HouseState,
+    owned: Set<String>,
+    costMultiplier: Double
+) -> AIBuildPlan {
     let isNod = (houseToHousesType(house) == .bad)
 
-    var candidates: [(name: String, weight: Int)] = []
+    var pool: [(name: String, weight: Int)] = []
     if isNod {
-        candidates.append((name: "E1", weight: 5))
-        candidates.append((name: "E3", weight: 3))
-        candidates.append((name: "E4", weight: 2))
+        pool.append((name: "E1", weight: 5))
+        pool.append((name: "E3", weight: 3))
+        pool.append((name: "E4", weight: 2))
         if owned.contains("TMPL") {
-            candidates.append((name: "E5", weight: 1))
+            pool.append((name: "E5", weight: 1))
         }
     } else {
-        candidates.append((name: "E1", weight: 5))
-        candidates.append((name: "E2", weight: 3))
-        candidates.append((name: "E3", weight: 3))
+        pool.append((name: "E1", weight: 5))
+        pool.append((name: "E2", weight: 3))
+        pool.append((name: "E3", weight: 3))
     }
 
-    // Filter to what the house can actually build
-    candidates = candidates.filter { candidate in
-        if let it = InfantryType.from(iniName: candidate.name),
-           let data = infantryTypeDataTable[it] {
-            return houseState.canBuildInfantry(data)
-        }
-        return false
+    // Filter to what the house can build, precomputing cost/buildTime (pure).
+    var candidates: [BuildCandidate] = []
+    for c in pool {
+        guard let it = InfantryType.from(iniName: c.name),
+              let data = infantryTypeDataTable[it],
+              houseState.canBuildInfantry(data) else { continue }
+        let cost = Int(Double(data.cost) * costMultiplier)
+        let ticks = max(20, cost / 5)
+        candidates.append(BuildCandidate(name: c.name, weight: c.weight, cost: cost, buildTime: ticks))
     }
 
-    guard !candidates.isEmpty else { return nil }
+    guard !candidates.isEmpty else { return .none }
+    return .weighted(candidates)
+}
 
-    let totalWeight = candidates.reduce(0) { $0 + $1.weight }
-    var roll = Int.random(in: 0..<totalWeight)
-    for candidate in candidates {
-        roll -= candidate.weight
-        if roll < 0 {
-            if let it = InfantryType.from(iniName: candidate.name),
-               let data = infantryTypeDataTable[it] {
-                let cost = Int(Double(data.cost) * costMultiplier)
-                let ticks = max(20, cost / 5)
-                return (typeName: candidate.name, cost: cost, buildTime: ticks)
+/// EFFECTFUL (B3-P2): turn a production plan into the chosen build. The ONLY
+/// place a production RNG draw happens — exactly one `rndInt(0..<totalWeight)`
+/// for `.weighted`, none for `.forced`, matching the procedural AI's behavior.
+func applyBuildPlan(_ plan: AIBuildPlan) -> (typeName: String, cost: Int, buildTime: Int)? {
+    switch plan {
+    case .none:
+        return nil
+    case .forced(let c):
+        return (typeName: c.name, cost: c.cost, buildTime: c.buildTime)
+    case .weighted(let candidates):
+        guard !candidates.isEmpty else { return nil }
+        let totalWeight = candidates.reduce(0) { $0 + $1.weight }
+        guard totalWeight > 0 else { return nil }
+        var roll = rndInt(0..<totalWeight)
+        for c in candidates {
+            roll -= c.weight
+            if roll < 0 {
+                return (typeName: c.name, cost: c.cost, buildTime: c.buildTime)
             }
-            break
         }
+        return nil
     }
-
-    return nil
 }
 
 /// Spawn a completed AI unit at the appropriate factory.
@@ -512,7 +538,8 @@ private func spawnAIUnit(_ typeName: String, house: House, world: GameWorld) {
 func tickAIStructureProduction() {
     guard let world = session.world else { return }
 
-    for (house, state) in session.houseStates {
+    for house in session.houseStates.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
+        guard let state = session.houseStates[house] else { continue }
         if house == world.playerHouse || house == .neutral { continue }
         if !state.productionEnabled { continue }
 
@@ -538,7 +565,8 @@ func tickAIStructureProduction() {
 func tickAIBuilding() {
     guard let world = session.world else { return }
 
-    for (house, state) in session.houseStates {
+    for house in session.houseStates.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
+        guard let state = session.houseStates[house] else { continue }
         if house == world.playerHouse || house == .neutral { continue }
         if !state.productionEnabled { continue }
 
@@ -561,7 +589,7 @@ func tickAIBuilding() {
         }
 
         // Pick a structure to build based on priority
-        if let choice = aiPickStructure(
+        if let choice = decideStructureBuild(
             house: house, houseState: state, owned: owned,
             isNod: isNod, costMultiplier: costMult,
             refineryCount: refineryCount, harvesterCount: harvesterCount
@@ -574,8 +602,10 @@ func tickAIBuilding() {
     }
 }
 
-/// Pick the highest-priority structure for the AI to build.
-private func aiPickStructure(
+/// PURE (B3-P2): pick the highest-priority structure for the AI to build via a
+/// deterministic priority ladder — consumes NO RNG. The effectful enqueue
+/// (spendCredits + queue.start) stays in `tickAIBuilding`.
+func decideStructureBuild(
     house: House,
     houseState: HouseState,
     owned: Set<String>,
@@ -827,7 +857,7 @@ func findAIBuildLocation(typeName: String, house: House) -> Int? {
                 }
 
                 // Small random factor to avoid always placing in same spot
-                score += Double.random(in: 0.0...2.0)
+                score += rndDouble(0.0...2.0)
 
                 if score > bestScore {
                     bestScore = score
@@ -910,7 +940,8 @@ func tickAIAttackWaves(world: GameWorld) {
     let attackInterval = aiAttackInterval()
     let threshold = aiAttackThreshold()
 
-    for (house, state) in session.houseStates {
+    for house in session.houseStates.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
+        guard let state = session.houseStates[house] else { continue }
         if house == world.playerHouse || house == .neutral { continue }
         if !state.productionEnabled { continue }
 
@@ -1035,7 +1066,8 @@ func findHouseBase(house: House, world: GameWorld) -> (x: Double, y: Double)? {
 func tickAIHarvesterManagement() {
     guard let world = session.world else { return }
 
-    for (house, state) in session.houseStates {
+    for house in session.houseStates.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
+        guard let state = session.houseStates[house] else { continue }
         if house == world.playerHouse || house == .neutral { continue }
         if !state.productionEnabled { continue }
 
