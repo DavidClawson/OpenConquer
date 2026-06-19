@@ -74,8 +74,18 @@ A suggested ordering is at the end.
 >   the eligible set — only the (enemy) target pick is hoisted to decide. Digests
 >   byte-identical: 2500t `0x76C4D7D28B207A08`, 4000t SCG `0xAD2FA4BFC4723E0A`,
 >   SCB `0xC6BACBDF0518D5B7`; reset-check + ai-parity green.
-> - Still to do: B3-P5 (flip flag + re-baseline; first allowed behavior change),
->   B4-E0..E7 (see docs/B3_B4_PLAN.md), A3 stage 2 (F3).
+> - **B3 complete at parity (P5 reframed):** the decide/apply split was done
+>   *in place* (the procedural tick functions call the pure deciders / effectful
+>   appliers directly), validated by byte-identical digests at every step —
+>   rather than as a parallel goal loop behind a flag. So P5's literal "flip the
+>   flag" was moot: the `aiUseGoalLayer` flag gated nothing and was removed, and
+>   the top-level `decide()`/`apply()` + goal vocabulary (AIGoal/ScoredGoal/
+>   AIDecision) are now documented as the **reserved seam** for the next stage
+>   (goal-scoring AI + B4 planner preview), exercised by `--ai-trace`/`--ai-parity`.
+>   No behavior change; digests unchanged. The decide/apply layer — B3's actual
+>   goal — is live and clean.
+> - Still to do: smarter AI (populate the goal-scoring seam — make `decide`
+>   real), B4-E0..E7 (see docs/B3_B4_PLAN.md), A3 stage 2 (F3).
 
 ### A1. Harvester docking animation (missing)  — ✅ implemented
 

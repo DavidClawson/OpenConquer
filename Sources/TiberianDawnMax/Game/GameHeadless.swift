@@ -207,9 +207,9 @@ func headlessAIParityCommand(scenario: String, ticks: Int) -> Int32 {
 /// At every decide tick, prints one line per AI house:
 ///   `tick | house | goals=N | top=<goal>:<score> | decisions=M`
 /// Deterministic; localizes divergence far better than an end-state digest and
-/// is the data the B4 "why" panel will consume. In B3-P1 the brain has no goals
-/// and decide returns nothing, so lines read `goals=0 ... decisions=0` — the
-/// plumbing is what's being established here. Always exits 0.
+/// is the data the B4 "why" panel will consume. Until the goal-scoring layer is
+/// populated, the brain has no goals and `decide` returns nothing, so lines read
+/// `goals=0 ... decisions=0` — this exercises the reserved seam. Always exits 0.
 func headlessAITraceCommand(scenario: String, ticks: Int) -> Int32 {
     let seed: UInt64 = 0xD1CE_D1CE_D1CE_D1CE
     print("ai-trace: scenario=\(scenario) ticks=\(ticks)")

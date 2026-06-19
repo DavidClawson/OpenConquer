@@ -1,31 +1,35 @@
 import Foundation
 
-// MARK: - B3: AI decision layer (scored-goal single decider)
+// MARK: - B3: AI decision layer
 //
-// This file is the *inert scaffolding* for the AI decision layer (B3-P1). It
-// introduces the vocabulary the layer will speak in — scored goals and an
-// Equatable list of decisions — plus a per-house `AIBrain` and the pure
-// `decide` / effectful `apply` split described in docs/B3_B4_PLAN.md §1.
+// The AI is split into a PURE decide phase (reads world/house/brain, chooses
+// what to do, advances no RNG, mutates nothing) and an EFFECTFUL apply phase
+// (the only place the global `gameRng` advances and world/house state mutates).
 //
-// Nothing here is wired into the live `tickAI()` path yet: `aiUseGoalLayer` is
-// `false`, so the existing procedural AI runs unchanged and the world digest is
-// byte-identical to before this file existed. Subsequent phases (B3-P2..P5)
-// migrate one procedural seam at a time into `decide`/`apply`, each gated by
-// `--ai-parity` and `--determinism`.
+// That split is LIVE today, expressed as per-behavior pairs the procedural tick
+// functions call directly (validated by byte-identical `--determinism` digests
+// at every step — see docs/IMPROVEMENT_PLAN.md):
+//   • Production  — decideUnitBuild / decideInfantryBuild / decideStructureBuild
+//                   (→ AIBuildPlan) + applyBuildPlan          (GameAI.swift)
+//   • Attack/rally/escalation — decideAttackWave / decideRally / decideEscalation
+//                   + applyAttackWave / applyRally / applyEscalation (GameAI.swift)
+//   • Tactics     — decideRecon / decideHitAndRun / decideHarass / decideFlankFollowUp
+//                   + applyRecon / applyHitAndRun / applyHarass / applyFlankFollowUp
+//                   (GameAITactics.swift)
+//
+// The types and the top-level `decide` / `apply` below are the RESERVED SEAM for
+// the next stage: a per-house goal-scoring layer (populating `AIBrain.goals` and
+// emitting `[AIDecision]`) and the B4 mission-planner's "explain/preview the AI"
+// surface. They are intentionally NOT yet populated — `decide` returns no
+// decisions today — but they compile, are exercised by `--ai-trace` /
+// `--ai-parity`, and define the vocabulary that stage will speak.
 //
 // Determinism contract (the linchpin — see plan §1.5):
-//   1. `decide` is PURE: it reads world/house/brain, returns `[AIDecision]`,
-//      mutates nothing, and never advances the global `gameRng`. Tie-breaks draw
+//   1. decide is PURE: never advances the global `gameRng`. Tie-breaks must draw
 //      from a LOCAL `GameRandom` seeded by `deriveDecideSeed`.
-//   2. `apply` is the ONLY place the global `gameRng` advances, in the same
-//      count and order as the procedural code it replaces.
+//   2. apply is the ONLY place the global `gameRng` advances.
 //   3. Per-house iteration is sorted by `House.rawValue` wherever a per-house
-//      decision draws RNG (the B3-P0 fix, already landed in GameAI.swift).
-
-/// Master switch for the goal-based decision layer. Stays `false` until each
-/// migrated seam is proven at parity with the procedural AI; flipping it on is
-/// B3-P5, accompanied by a deliberate digest re-baseline.
-var aiUseGoalLayer = false
+//      decision draws RNG (the B3-P0 fix, in GameAI.swift / GameAITactics.swift).
 
 // MARK: Goals
 
@@ -118,22 +122,23 @@ func deriveDecideSeed(_ worldSeed: UInt64, _ house: House, _ tick: Int) -> UInt6
     return h
 }
 
-/// PURE: read world/house/brain, emit decisions. Mutates nothing; never touches
-/// the global `gameRng`. Tie-breaks must use a LOCAL `GameRandom(seed:)`.
-///
-/// B3-P1 stub: returns no decisions, so the goal layer is a no-op even if the
-/// flag were flipped. Subsequent phases populate this seam by seam.
+/// RESERVED SEAM (PURE): the future per-house goal-scoring entry point. When
+/// populated it will read world/house/brain and emit `[AIDecision]`, mutating
+/// nothing and never touching the global `gameRng` (tie-breaks via a LOCAL
+/// `GameRandom(seed:)`). Today it yields no decisions — the live AI decisions
+/// flow through the per-behavior deciders listed in the file header. The
+/// `--ai-trace` / `--ai-parity` harness exercises this entry point (and asserts
+/// its purity), so the seam stays honest as it gets filled in.
 func decide(world: GameWorld, house: House, state: HouseState,
             brain: AIBrain, seed: UInt64, tick: Int) -> [AIDecision] {
     _ = (world, house, state, brain, seed, tick)
     return []
 }
 
-/// EFFECTFUL: the ONLY site that mutates objects/queues/roles and advances the
-/// global `gameRng`. Applies each decision as the exact mutation the procedural
-/// AI performs today.
-///
-/// B3-P1 stub: nothing to apply yet.
+/// RESERVED SEAM (EFFECTFUL): the counterpart that will execute a goal layer's
+/// `[AIDecision]` — the single site advancing the global `gameRng` for that path.
+/// Unused until `decide` emits decisions; the live effects flow through the
+/// per-behavior appliers (applyBuildPlan / applyAttackWave / applyRecon / …).
 func apply(_ decisions: [AIDecision], world: GameWorld, house: House,
            state: HouseState, tick: Int) {
     _ = (decisions, world, house, state, tick)

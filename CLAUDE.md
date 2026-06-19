@@ -65,8 +65,10 @@ When reimplementing a behavior, grep the C++ for the relevant `Mission_*`,
   interpolates between ticks. `gameTick()` is the one discrete update: occupancy
   rebuild → fog → per-object mission ticks → AI → triggers → tiberium growth →
   remove dead.
-- **Caveat — not yet deterministic:** ~60 raw `Int/Double.random` calls with no
-  seeded RNG. Replays / AI lookahead / planner-preview all depend on fixing this.
+- **Deterministic:** all *simulation* randomness flows through the seeded
+  `gameRng` (see Conventions); same seed + same inputs → identical run, across
+  processes and across two `initGameWorld` calls in one process. The headless
+  harness guards this.
 
 ## Folder map (`Sources/TiberianDawnMax/`)
 
@@ -101,13 +103,18 @@ Key files to know: `Game/GameState.swift` (object model + Mission enum),
 - Prefer guards over force-unwraps; several `queue.item!` / `.last!` sites exist
   and are crash risks (see plan).
 
-## Known outstanding issues (2026-06)
+## Status & where to build next (2026-06)
 
-See `docs/IMPROVEMENT_PLAN.md` for full root-cause analysis and fix designs.
+See `docs/IMPROVEMENT_PLAN.md` for full history; `docs/B3_B4_PLAN.md` for the
+AI/editor design.
 
-1. **Harvester docking animation** is missing — harvester teleport-deposits at the
-   dock cell; `isTethered` is declared but never set in-sim.
-2. **Building damage-state frames** don't show — `pickStructureFrame` reads the SHP
-   frame count from a cache that isn't warm yet; `MapRenderer` hardcodes frame 0.
-3. **Pathfinding ignores cliffs/slopes/boulders** — there is no per-cell LandType
-   model; `buildPassabilityMap` only blocks a hardcoded set of templates.
+- **Fixed:** harvester refinery docking animation, building damage-state frames,
+  and terrain (cliff/tree/water) pathfinding via a per-cell LandType model.
+- **AI decision layer (B3):** complete at parity. All AI decisions (production,
+  attack/rally/escalation, tactics) are split into pure `decideX` + effectful
+  `applyX` (`GameAI.swift`, `GameAITactics.swift`). The top-level `decide()` /
+  `apply()` and goal vocabulary in `GameAIBrain.swift` are a **reserved seam**,
+  not yet populated — that's where a goal-scoring "smarter AI" plugs in.
+- **Next:** populate the goal-scoring seam (smarter AI), or B4 mission editor
+  (`docs/B3_B4_PLAN.md`, E0+); A3 stage-2 speed-cost weighting in A* (F3) is
+  deferred.
