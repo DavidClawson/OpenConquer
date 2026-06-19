@@ -136,6 +136,7 @@ class GameObject {
 
     // Harvesting (units only)
     var tiberiumLoad: Int = 0
+    var dockTimer: Int = 0          // Transient counter driving the refinery dock slide-in/out animation
 
     // Animation state (infantry walk cycle, fire animation)
     var animFrame: Int = 0          // Current animation frame offset (0 = stand, 1+ = walk cycle)
@@ -376,6 +377,7 @@ class GameWorld {
     var objects: [GameObject] = []
     var nextObjectId: Int = 0
     var tickCount: Int = 0
+    var randomSeed: UInt64 = 0       // Seed used for the deterministic sim RNG (see GameRandom)
     var theater: TheaterType = .temperate
     var mapBounds: MapBounds?
     /// Cell -> object IDs currently in that cell. Multiple entries allowed

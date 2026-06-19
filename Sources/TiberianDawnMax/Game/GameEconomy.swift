@@ -10,6 +10,23 @@ let maxTiberiumLoad: Int = 20
 /// Credits per unit of tiberium
 let tiberiumValue: Int = 25
 
+// MARK: - Harvester docking tuning
+
+/// Tiberium units deposited per tick while unloading at the refinery.
+/// At maxTiberiumLoad=20 this empties a full harvester over ~20 ticks (~1.3s).
+let harvesterUnloadRate: Int = 1
+
+/// Ticks the harvester takes to slide into / back out of the refinery bay.
+let harvesterDockSlideTicks: Int = 8
+
+/// How far (pixels) the harvester sprite slides north into the bay when docked.
+let harvesterDockDepth: Double = 22.0
+
+// missionStatus values used by the harvester while returning to a refinery:
+let dockApproaching = 0   // driving to the dock cell (or out harvesting)
+let dockUnloading   = 1   // seated in the bay, depositing tiberium
+let dockBackingOut  = 2   // sliding back out of the bay before heading to the field
+
 /// Compute the cell a harvester should drive to for unloading.
 /// PROC's footprint center is structurally impassable, so we dock one cell
 /// south of the PROC center — that's where the visible bay door faces.
@@ -81,8 +98,12 @@ extension GameObject {
         let upper = typeName.uppercased()
         if upper != "HARV" { return }
 
+        // Are we mid-dock (seated in the bay or backing out)? Once we're at our
+        // own refinery we ignore threats and never re-path for tiberium.
+        let isDocking = (missionStatus == dockUnloading) || (missionStatus == dockBackingOut)
+
         // Harvester threat avoidance: check for nearby enemy combat units every 15 ticks
-        if world.tickCount % 15 == 0 {
+        if !isDocking && world.tickCount % 15 == 0 {
             let fleeRange = 5.0 * 24.0  // 5 cells in pixels
             var nearestEnemy: GameObject? = nil
             var nearestEnemyDist = Double.infinity
@@ -130,46 +151,87 @@ extension GameObject {
         }
 
         // State machine based on current conditions
-        if tiberiumLoad >= maxTiberiumLoad {
-            // Full — return to refinery
-            if let refinery = findNearestRefinery() {
-                // The refinery's worldX/worldY is the CENTER of its 3x3
-                // footprint, which is impassable. Pathing to it would never
-                // succeed and the harvester would stall just outside.
-                // Dock at the cell directly south of the PROC center —
-                // one cell beyond the building footprint, where the bay
-                // door faces. The harvester deposits when within ~half a
-                // cell of that dock point.
-                let dock = harvesterDockCell(refinery: refinery)
-                let dockWorldX = Double(dock.cellX * 24) + 12.0
-                let dockWorldY = Double(dock.cellY * 24) + 12.0
-                let dx = dockWorldX - worldX
-                let dy = dockWorldY - worldY
-                let dist = sqrt(dx * dx + dy * dy)
+        if tiberiumLoad >= maxTiberiumLoad || isDocking {
+            // Full, or already docking — run the refinery docking sequence.
+            guard let refinery = findNearestRefinery() else {
+                // No refinery — abandon the dock and just sit.
+                missionStatus = dockApproaching
+                isTethered = false
+                dockTimer = 0
+                moveTargetX = nil
+                moveTargetY = nil
+                movePath = []
+                return
+            }
 
+            // The refinery's worldX/worldY is the CENTER of its 3x3 footprint,
+            // which is impassable. Dock one cell south of the PROC center — one
+            // cell beyond the footprint, where the bay door faces. We can't
+            // physically drive into the bay (the footprint blocks pathing), so
+            // the "into the bay" motion is a render offset on a tethered unit,
+            // mirroring the original engine's RADIO_TETHER docking.
+            let dock = harvesterDockCell(refinery: refinery)
+            let dockWorldX = Double(dock.cellX * 24) + 12.0
+            let dockWorldY = Double(dock.cellY * 24) + 12.0
+            let dx = dockWorldX - worldX
+            let dy = dockWorldY - worldY
+            let dist = sqrt(dx * dx + dy * dy)
+
+            // Safety: if we hold a docking sub-state but aren't actually at the
+            // bay (e.g. the player redirected us mid-dock, or the refinery moved
+            // because the nearest one changed), drop back to approaching so we
+            // never deposit tiberium away from the refinery.
+            if (missionStatus == dockUnloading || missionStatus == dockBackingOut) && dist > 24.0 {
+                missionStatus = dockApproaching
+                isTethered = false
+                dockTimer = 0
+            }
+
+            switch missionStatus {
+            case dockUnloading:
+                // Seated in the bay: stay put, face into the refinery (north),
+                // slide in, then meter out the load.
+                isTethered = true
+                facing = 0
+                moveTargetX = nil
+                moveTargetY = nil
+                movePath = []
+                dockTimer += 1
+                // Wait for the slide-in to finish before depositing.
+                if dockTimer >= harvesterDockSlideTicks {
+                    if tiberiumLoad > 0 {
+                        let chunk = min(harvesterUnloadRate, tiberiumLoad)
+                        depositTiberium(load: chunk)
+                        tiberiumLoad -= chunk
+                    }
+                    if tiberiumLoad <= 0 {
+                        // Empty — begin backing out of the bay.
+                        missionStatus = dockBackingOut
+                        dockTimer = 0
+                        isTethered = false
+                    }
+                }
+
+            case dockBackingOut:
+                // Slide back out of the bay before resuming harvesting.
+                isTethered = false
+                moveTargetX = nil
+                moveTargetY = nil
+                movePath = []
+                dockTimer += 1
+                if dockTimer >= harvesterDockSlideTicks {
+                    missionStatus = dockApproaching
+                    dockTimer = 0
+                }
+
+            default:
+                // Approaching the dock cell.
                 if dist < 14.0 {
-                    // At dock — deposit
-                    var creditsGained = tiberiumLoad * tiberiumValue
-                    let houseState = getHouseState(house)
-                    // Enforce silo capacity: only store up to capacity limit
-                    if houseState.capacity > 0 {
-                        let currentStored = houseState.tiberium
-                        let spaceLeft = max(0, houseState.capacity - currentStored)
-                        let creditsToStore = min(creditsGained, spaceLeft)
-                        houseState.tiberium += creditsToStore
-                        creditsGained = creditsToStore
-                    }
-                    houseState.addCredits(creditsGained)
-                    // Keep sidebar credits in sync for the player
-                    if house == session.world?.playerHouse {
-                        session.sidebarCredits += creditsGained
-                    }
-                    // Emit harvest event for the credits deposited
-                    if creditsGained > 0 {
-                        eventBus.emit(.tiberiumHarvested(house: house, amount: creditsGained))
-                    }
-                    tiberiumLoad = 0
-                    // Clear movement to go find more tiberium
+                    // Arrived — begin docking.
+                    missionStatus = dockUnloading
+                    dockTimer = 0
+                    isTethered = true
+                    facing = 0
                     moveTargetX = nil
                     moveTargetY = nil
                     movePath = []
@@ -187,10 +249,6 @@ extension GameObject {
                     }
                     let _ = moveOneStep()
                 }
-            } else {
-                // No refinery — just sit
-                moveTargetX = nil
-                moveTargetY = nil
             }
         } else if world.map.tiberiumCells.contains(cell) {
             // On tiberium — harvest
@@ -241,6 +299,50 @@ extension GameObject {
                     tiberiumLoad = maxTiberiumLoad  // Force return
                 }
             }
+        }
+    }
+
+    /// Deposit `load` units of tiberium into this harvester's house, honoring
+    /// silo capacity. Factored out of tickHarvest so the unload can be metered
+    /// over several ticks instead of dumped in one lump.
+    func depositTiberium(load: Int) {
+        guard load > 0 else { return }
+        var creditsGained = load * tiberiumValue
+        let houseState = getHouseState(house)
+        // Enforce silo capacity: only store up to the capacity limit.
+        if houseState.capacity > 0 {
+            let spaceLeft = max(0, houseState.capacity - houseState.tiberium)
+            let creditsToStore = min(creditsGained, spaceLeft)
+            houseState.tiberium += creditsToStore
+            creditsGained = creditsToStore
+        }
+        houseState.addCredits(creditsGained)
+        // Keep sidebar credits in sync for the player.
+        if house == session.world?.playerHouse {
+            session.sidebarCredits += creditsGained
+        }
+        if creditsGained > 0 {
+            eventBus.emit(.tiberiumHarvested(house: house, amount: creditsGained))
+        }
+    }
+
+    /// Render-space offset (pixels) that slides a docked harvester into and out
+    /// of the refinery bay. Returns zero unless this is a harvester actively
+    /// docking on a Harvest mission, so a redirected harvester never floats.
+    func harvesterDockOffset() -> (dx: Double, dy: Double) {
+        guard isHarvester, mission == .harvest else { return (0, 0) }
+        let slide = Double(max(1, harvesterDockSlideTicks))
+        switch missionStatus {
+        case dockUnloading:
+            // Slide north into the bay as dockTimer ramps to slide length.
+            let frac = min(1.0, Double(dockTimer) / slide)
+            return (0, -harvesterDockDepth * frac)
+        case dockBackingOut:
+            // Slide back out (full depth -> 0) as dockTimer ramps.
+            let frac = min(1.0, Double(dockTimer) / slide)
+            return (0, -harvesterDockDepth * (1.0 - frac))
+        default:
+            return (0, 0)
         }
     }
 
@@ -325,7 +427,7 @@ extension GameMap {
                         tiberiumGrowthCandidates.append(cell)
                     } else {
                         // Reservoir sampling — replace a random existing entry
-                        tiberiumGrowthCandidates[Int.random(in: 0..<tiberiumGrowthCandidates.count)] = cell
+                        tiberiumGrowthCandidates[rndInt(0..<tiberiumGrowthCandidates.count)] = cell
                     }
                 }
 
@@ -334,7 +436,7 @@ extension GameMap {
                     if tiberiumSpreadCandidates.count < GameMap.maxCandidates {
                         tiberiumSpreadCandidates.append(cell)
                     } else {
-                        tiberiumSpreadCandidates[Int.random(in: 0..<tiberiumSpreadCandidates.count)] = cell
+                        tiberiumSpreadCandidates[rndInt(0..<tiberiumSpreadCandidates.count)] = cell
                     }
                 }
             }
@@ -356,7 +458,7 @@ extension GameMap {
         // Process up to 4 growth candidates per cycle for visible growth rate
         let growthPicks = min(4, tiberiumGrowthCandidates.count)
         for _ in 0..<growthPicks {
-            let pick = Int.random(in: 0..<tiberiumGrowthCandidates.count)
+            let pick = rndInt(0..<tiberiumGrowthCandidates.count)
             let cell = tiberiumGrowthCandidates[pick]
             if tiberiumCells.contains(cell) {
                 let current = tiberiumDensity[cell] ?? 1
@@ -370,13 +472,13 @@ extension GameMap {
         // Process up to 2 spread candidates per cycle
         let spreadPicks = min(2, tiberiumSpreadCandidates.count)
         for _ in 0..<spreadPicks {
-            let pick = Int.random(in: 0..<tiberiumSpreadCandidates.count)
+            let pick = rndInt(0..<tiberiumSpreadCandidates.count)
             let cell = tiberiumSpreadCandidates[pick]
             let cx = cell % 64
             let cy = cell / 64
 
             // Start from a random direction and try all 8 adjacent cells
-            let startDir = Int.random(in: 0..<8)
+            let startDir = rndInt(0..<8)
             for i in 0..<8 {
                 let dir = (startDir + i) % 8
                 let offset = GameMap.adjacentOffsets[dir]
@@ -405,7 +507,7 @@ extension GameMap {
                 // 1..12 so spread tiles aren't all identical clones.
                 tiberiumCells.insert(adjCell)
                 tiberiumDensity[adjCell] = 1
-                tiberiumVariant[adjCell] = Int.random(in: 1...12)
+                tiberiumVariant[adjCell] = rndInt(1...12)
                 break
             }
         }

@@ -133,48 +133,21 @@ func buildPassabilityMap() {
         }
     }
 
-    // Mark water/land tiles appropriately for each map.
-    // For pure water (W1, W2): land-impassable, water-passable.
-    // For shore/river/falls/ford: use per-icon pixel analysis to determine
-    // which sub-tiles are water vs. land. Tiles with predominantly blue/water
-    // pixels are marked land-impassable.
-    // For bridges: land-passable, water-impassable.
-    let theater = scenarioData?.theater ?? .temperate
-    let palette = renderState.gamePalette
-    var shoreICNCache: [String: ICNFile] = [:]
-
+    // Classify each cell from its template's land type (ported from the
+    // original CDATA.CPP TemplateTypeClass land data — see TemplateLandData.swift
+    // and cellLandType below). This replaces the old name-prefix + pixel-analysis
+    // heuristics, which left cliffs/slopes (LAND_ROCK) and boulders passable.
+    //   - Ground units can't enter water, rock (cliffs/boulders), or wall cells.
+    //   - Naval units can only traverse water.
+    // Per-icon exceptions (e.g. the walkable ramp icon of a slope, the deck of a
+    // bridge, the fordable icons of a river) are honored via altIcons.
     for i in 0..<4096 {
-        let templateType = Int(mapCells[i].templateType)
-        if templateType != 0xFF && templateType < templateTable.count {
-            let name = templateTable[templateType].icnName.uppercased()
-            if name == "W1" || name == "W2" {
-                // Pure open water: impassable for land, passable for water
-                landPassability[i] = false
-                // waterPassability[i] stays true
-            } else if name.hasPrefix("SH") || name.hasPrefix("RV") ||
-                      name.hasPrefix("FALLS") || name.hasPrefix("FORD") {
-                // Shore/river/falls/ford: analyze per-icon pixel data
-                // to classify each sub-tile as water vs. land.
-                let iconIndex = Int(mapCells[i].iconIndex)
-                let isWater = isIconWater(
-                    icnName: name, iconIndex: iconIndex,
-                    theater: theater, palette: palette,
-                    cache: &shoreICNCache
-                )
-                if isWater {
-                    landPassability[i] = false
-                }
-                // waterPassability stays true for boats
-            } else if name.hasPrefix("BRIDGE") {
-                // Bridges: passable by land, not by water
-                // landPassability[i] stays true
-                waterPassability[i] = false
-            } else {
-                // Regular land: passable for land, impassable for water
-                waterPassability[i] = false
-            }
-        } else {
-            // Default land cell: impassable for water
+        let land = cellLandType(templateType: mapCells[i].templateType,
+                                iconIndex: mapCells[i].iconIndex)
+        if land == .water || land == .rock || land == .wall {
+            landPassability[i] = false
+        }
+        if land != .water {
             waterPassability[i] = false
         }
     }
@@ -194,63 +167,20 @@ func buildPassabilityMap() {
 
     let landImpassable = landPassability.filter { !$0 }.count
     let waterImpassable = waterPassability.filter { !$0 }.count
-    let shoreWaterCells = shoreICNCache.isEmpty ? 0 :
-        (0..<4096).filter { i in
-            let tt = Int(mapCells[i].templateType)
-            if tt == 0xFF || tt >= templateTable.count { return false }
-            let n = templateTable[tt].icnName.uppercased()
-            return (n.hasPrefix("SH") || n.hasPrefix("RV")) && !landPassability[i]
-        }.count
-    print("GameMap: Built passability map, \(landImpassable) land-impassable, \(waterImpassable) water-impassable cells, \(shoreWaterCells) shore water cells")
+    print("GameMap: Built passability map, \(landImpassable) land-impassable, \(waterImpassable) water-impassable cells")
 }
 
-// MARK: - Per-Icon Water Detection
-
-/// Determine if a specific icon within a shore/river template is predominantly water
-/// by analyzing its pixel data against the palette. Water pixels are identified by
-/// having a dominant blue channel in the RGB palette color.
-func isIconWater(
-    icnName: String, iconIndex: Int,
-    theater: TheaterType, palette: [(r: UInt8, g: UInt8, b: UInt8)],
-    cache: inout [String: ICNFile]
-) -> Bool {
-    // Load ICN file from MIX if not cached
-    if cache[icnName] == nil {
-        let filename = icnName + theater.suffix
-        if let data = mixManager.retrieve(filename) {
-            cache[icnName] = try? ICNFile(data: data)
-        }
-    }
-
-    guard let icn = cache[icnName], let pixels = icn.tile(icon: iconIndex) else {
-        return false  // Can't load tile data — assume land (safe default)
-    }
-
-    guard !palette.isEmpty else { return false }
-
-    // Count pixels that look like water (blue-dominant in the palette)
-    var waterPixels = 0
-    var totalPixels = 0
-
-    for pixel in pixels {
-        let palIdx = Int(pixel)
-        guard palIdx > 0 && palIdx < palette.count else { continue }  // Skip index 0 (transparent)
-        totalPixels += 1
-        let c = palette[palIdx]
-        let r = Int(c.r)
-        let g = Int(c.g)
-        let b = Int(c.b)
-        // Water is blue-dominant: blue channel significantly exceeds red and green
-        // Also catch dark water (low overall but still blue-ish)
-        if b > r + 30 && b > g + 10 && b > 60 {
-            waterPixels += 1
-        }
-    }
-
-    guard totalPixels > 0 else { return false }
-
-    // If more than 50% of visible pixels are water-colored, classify as water
-    return Double(waterPixels) / Double(totalPixels) > 0.50
+/// Land type of a cell, resolved from its template + icon index. Mirrors
+/// CellClass::Recalc_Attributes (CELL.CPP:~500-520): default to the template's
+/// land type, but use the alternate land type for icons listed in altIcons.
+/// Returns .clear for empty/unknown templates (clear terrain).
+func cellLandType(templateType: UInt8, iconIndex: UInt8) -> LandType {
+    let tt = Int(templateType)
+    if tt == 0xFF || tt >= templateTable.count { return .clear }
+    let name = templateTable[tt].icnName.uppercased()
+    guard let data = templateLandData[name] else { return .clear }
+    if data.altIcons.contains(Int(iconIndex)) { return data.altLand }
+    return data.land
 }
 
 /// Get the appropriate passability map for a given speed type

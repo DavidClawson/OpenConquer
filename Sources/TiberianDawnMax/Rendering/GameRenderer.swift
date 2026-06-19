@@ -37,8 +37,13 @@ func pickStructureFrame(_ obj: GameObject) -> Int {
     let isCritical = obj.strength <= 1
     let isDamaged = healthFrac < 0.5
 
-    // Resolve total SHP frame count from the cache (populated on first render).
-    let frameCount = renderState.objectSHPCache[upper]?.frames.count ?? 0
+    // Resolve total frame count. Prefer the remastered manifest (preloaded at
+    // startup) since HD buildings are drawn from PNGs and never populate the
+    // classic SHP cache; fall back to the classic SHP cache otherwise. The
+    // caller is responsible for warming the classic cache before this runs.
+    let frameCount = remasteredFrameCount(upper)
+        ?? renderState.objectSHPCache[upper]?.frames.count
+        ?? 0
 
     if obj.hasTurret {
         var base: Int
@@ -338,6 +343,17 @@ func renderGame(_ renderer: OpaquePointer?) {
             }
         }
 
+        // Warm the classic SHP cache before frame selection. pickStructureFrame
+        // needs the total frame count to choose damaged/rubble frames; without
+        // this, an as-yet-unloaded building reports 0 frames and always renders
+        // healthy on its first frame (and forever, if it's already damaged when
+        // first seen). Skipped when a remastered manifest supplies the count.
+        let structSprite = obj.typeName.uppercased()
+        if remasteredFrameCount(structSprite) == nil,
+           renderState.objectSHPCache[structSprite] == nil {
+            _ = getObjectTexture(renderer, typeName: structSprite, frame: 0, house: obj.house, theater: theater)
+        }
+
         // Determine frame for structures (mirrors Vanilla-Conquer building.cpp:560-634)
         let structFrame: Int = pickStructureFrame(obj)
 
@@ -381,8 +397,11 @@ func renderGame(_ renderer: OpaquePointer?) {
         // Interpolate between previous and current tick positions for smooth rendering
         let drawX = obj.prevWorldX + (obj.worldX - obj.prevWorldX) * interp
         let drawY = obj.prevWorldY + (obj.worldY - obj.prevWorldY) * interp
-        let screenX = Int32(drawX - Double(camX))
-        let screenY = Int32(drawY - Double(camY))
+        // Harvesters slide into/out of the refinery bay via a render offset
+        // while docked (the footprint is impassable, so it can't move there).
+        let dockOffset = obj.isHarvester ? obj.harvesterDockOffset() : (dx: 0.0, dy: 0.0)
+        let screenX = Int32(drawX + dockOffset.dx - Double(camX))
+        let screenY = Int32(drawY + dockOffset.dy - Double(camY))
 
         if obj.kind == .unit {
             let facingIdx = facing32[min(255, max(0, obj.facing))]

@@ -94,6 +94,15 @@ private func loadManifest(name: String, category: String, catPath: URL) -> Bool 
     return true
 }
 
+/// Total frame count for a sprite's remastered manifest, if one is loaded.
+/// Used by frame-selection logic (e.g. building damage frames) which needs the
+/// full frame count even when the classic SHP is never loaded because the
+/// remastered HD sprite is drawn instead.
+func remasteredFrameCount(_ typeName: String) -> Int? {
+    guard renderState.hasRemasteredSprites else { return nil }
+    return remasteredManifests[typeName.uppercased()]?.frameCount
+}
+
 // MARK: - Texture Loading
 
 /// Try to load a remastered sprite texture for the given type and frame.
