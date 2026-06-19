@@ -178,7 +178,13 @@ func findEnemyBase(world: GameWorld) -> (x: Double, y: Double)? {
 /// Rally idle enemy units toward the player's base
 func rallyEnemyUnits(world: GameWorld) {
     guard let playerBase = findPlayerBase(world: world) else { return }
+    guard let squad = decideRally(world: world) else { return }
+    applyRally(squad: squad, playerBase: playerBase)
+}
 
+/// PURE (B3-P3): gather a 3-5 unit rally squad of idle enemy combat units, or
+/// nil if there aren't enough. No RNG, no mutation.
+func decideRally(world: GameWorld) -> [GameObject]? {
     // Gather idle enemy combat units
     var idleUnits: [GameObject] = []
     for obj in world.objects {
@@ -193,32 +199,48 @@ func rallyEnemyUnits(world: GameWorld) {
 
     // Send groups of 3-5 idle units toward the player base
     let squadSize = min(5, max(3, idleUnits.count))
-    if idleUnits.count >= squadSize {
-        let squad = Array(idleUnits.prefix(squadSize))
-        for unit in squad {
-            // Add some randomness to the target so they don't all stack
-            let offsetX = rndDouble(-48...48)
-            let offsetY = rndDouble(-48...48)
-            unit.moveTargetX = max(12, min(64 * 24 - 12, playerBase.x + offsetX))
-            unit.moveTargetY = max(12, min(64 * 24 - 12, playerBase.y + offsetY))
-            unit.mission = .move
-            unit.movePath = []
-        }
+    guard idleUnits.count >= squadSize else { return nil }
+    return Array(idleUnits.prefix(squadSize))
+}
+
+/// EFFECTFUL (B3-P3): order a rally squad toward the player base, with a per-unit
+/// ±48px jitter draw so they don't stack. The only RNG in the rally path.
+func applyRally(squad: [GameObject], playerBase: (x: Double, y: Double)) {
+    for unit in squad {
+        // Add some randomness to the target so they don't all stack
+        let offsetX = rndDouble(-48...48)
+        let offsetY = rndDouble(-48...48)
+        unit.moveTargetX = max(12, min(64 * 24 - 12, playerBase.x + offsetX))
+        unit.moveTargetY = max(12, min(64 * 24 - 12, playerBase.y + offsetY))
+        unit.mission = .move
+        unit.movePath = []
     }
 }
 
-/// Escalate AI: send all idle enemy units to hunt mode
+/// Escalate AI: send all idle enemy units to hunt mode.
 func escalateAI(world: GameWorld) {
+    applyEscalation(units: decideEscalation(world: world))
+    print("AI: Escalation — all idle enemy units set to hunt")
+}
+
+/// PURE (B3-P3): gather all idle enemy combat units. No RNG, no mutation.
+func decideEscalation(world: GameWorld) -> [GameObject] {
+    var idleUnits: [GameObject] = []
     for obj in world.objects {
         if obj.house == world.playerHouse || obj.house == .neutral { continue }
         if obj.kind == .structure { continue }
         if obj.strength <= 0 { continue }
         if obj.isHarvester || obj.isMCV { continue }
         if obj.mission == .guard_ || obj.mission == .stop {
-            obj.mission = .hunt
+            idleUnits.append(obj)
         }
     }
-    print("AI: Escalation — all idle enemy units set to hunt")
+    return idleUnits
+}
+
+/// EFFECTFUL (B3-P3): set the escalation squad to hunt mode.
+func applyEscalation(units: [GameObject]) {
+    for obj in units { obj.mission = .hunt }
 }
 
 /// Try to create an autocreate team from available team types
@@ -935,92 +957,110 @@ func aiAttackThreshold() -> Int {
     }
 }
 
-/// Check for idle combat units and launch attack waves.
-func tickAIAttackWaves(world: GameWorld) {
-    let attackInterval = aiAttackInterval()
-    let threshold = aiAttackThreshold()
+/// A decided attack wave: which idle units to send at which target. Coarse plan
+/// (object refs) consumed synchronously by `applyAttackWave` in the same tick;
+/// the per-unit flank RNG lives in applyFlankingTactics (the apply phase).
+struct AttackWavePlan { let units: [GameObject]; let target: GameObject }
 
+/// Check for idle combat units and launch attack waves (B3-P3 decide/apply split).
+func tickAIAttackWaves(world: GameWorld) {
     for house in session.houseStates.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
         guard let state = session.houseStates[house] else { continue }
         if house == world.playerHouse || house == .neutral { continue }
         if !state.productionEnabled { continue }
 
-        // Enforce minimum interval between attacks
-        let ticksSinceLastAttack = session.aiTickCounter - state.aiLastAttackTick
-        guard ticksSinceLastAttack >= attackInterval else { continue }
-
-        // Gather idle combat units (on guard or stop), excluding those with tactical roles
-        var idleUnits: [GameObject] = []
-        for obj in world.objects {
-            guard obj.house == house && obj.strength > 0 else { continue }
-            guard obj.kind == .unit || obj.kind == .infantry else { continue }
-            if obj.isHarvester || obj.isMCV { continue }
-            guard obj.mission == .guard_ || obj.mission == .stop else { continue }
-            guard obj.isArmed else { continue }
-            guard obj.aiTacticalRole == .none else { continue }
-            idleUnits.append(obj)
+        if let plan = decideAttackWave(house: house, state: state, world: world) {
+            applyAttackWave(plan, house: house, state: state, world: world)
         }
-
-        guard idleUnits.count >= threshold else { continue }
-
-        // Find a target: use AI memory for weakest known cluster, else nearest player structure
-        var target: GameObject? = nil
-        var targetDist = Double.infinity
-
-        // Calculate AI base center for distance measurement
-        guard let aiBase = findHouseBase(house: house, world: world) else { continue }
-
-        // Try to use known enemy positions to find the weakest cluster
-        if !state.aiKnownEnemyPositions.isEmpty {
-            // Find the known position with the weakest nearby concentration
-            // (prefer isolated enemy positions for easier attacks)
-            var bestKnownTarget: GameObject? = nil
-            var bestKnownScore = Double.infinity
-            for known in state.aiKnownEnemyPositions {
-                // Find actual enemy near this known position
-                for obj in world.objects {
-                    guard obj.house != house && obj.house != .neutral && obj.strength > 0 else { continue }
-                    let dx = obj.worldX - known.x
-                    let dy = obj.worldY - known.y
-                    guard abs(dx) < 120 && abs(dy) < 120 else { continue }
-                    // Score: lower is better (fewer nearby defenders + closer to AI base)
-                    let distToBase = sqrt(pow(obj.worldX - aiBase.x, 2) + pow(obj.worldY - aiBase.y, 2))
-                    let score = distToBase
-                    if score < bestKnownScore {
-                        bestKnownScore = score
-                        bestKnownTarget = obj
-                    }
-                }
-            }
-            target = bestKnownTarget
-        }
-
-        // Fallback: nearest player structure or harvester
-        if target == nil {
-            for obj in world.objects {
-                guard obj.house == world.playerHouse && obj.strength > 0 else { continue }
-                guard obj.kind == .structure || obj.isHarvester else { continue }
-                let dx = obj.worldX - aiBase.x
-                let dy = obj.worldY - aiBase.y
-                let dist = sqrt(dx * dx + dy * dy)
-                if dist < targetDist {
-                    target = obj
-                    targetDist = dist
-                }
-            }
-        }
-
-        guard let attackTarget = target else { continue }
-
-        // Use flanking tactics for large waves (6+ units on Hard difficulty)
-        applyFlankingTactics(
-            units: idleUnits, target: attackTarget,
-            house: house, houseState: state, world: world
-        )
-
-        state.aiLastAttackTick = session.aiTickCounter
-        print("AI: \(house.rawValue) launched attack wave with \(idleUnits.count) units")
     }
+}
+
+/// PURE (B3-P3): decide whether `house` should launch an attack wave this tick,
+/// and if so which idle units to send at which target. No RNG, no mutation.
+func decideAttackWave(house: House, state: HouseState, world: GameWorld) -> AttackWavePlan? {
+    let attackInterval = aiAttackInterval()
+    let threshold = aiAttackThreshold()
+
+    // Enforce minimum interval between attacks
+    let ticksSinceLastAttack = session.aiTickCounter - state.aiLastAttackTick
+    guard ticksSinceLastAttack >= attackInterval else { return nil }
+
+    // Gather idle combat units (on guard or stop), excluding those with tactical roles
+    var idleUnits: [GameObject] = []
+    for obj in world.objects {
+        guard obj.house == house && obj.strength > 0 else { continue }
+        guard obj.kind == .unit || obj.kind == .infantry else { continue }
+        if obj.isHarvester || obj.isMCV { continue }
+        guard obj.mission == .guard_ || obj.mission == .stop else { continue }
+        guard obj.isArmed else { continue }
+        guard obj.aiTacticalRole == .none else { continue }
+        idleUnits.append(obj)
+    }
+
+    guard idleUnits.count >= threshold else { return nil }
+
+    // Find a target: use AI memory for weakest known cluster, else nearest player structure
+    var target: GameObject? = nil
+    var targetDist = Double.infinity
+
+    // Calculate AI base center for distance measurement
+    guard let aiBase = findHouseBase(house: house, world: world) else { return nil }
+
+    // Try to use known enemy positions to find the weakest cluster
+    if !state.aiKnownEnemyPositions.isEmpty {
+        // Find the known position with the weakest nearby concentration
+        // (prefer isolated enemy positions for easier attacks)
+        var bestKnownTarget: GameObject? = nil
+        var bestKnownScore = Double.infinity
+        for known in state.aiKnownEnemyPositions {
+            // Find actual enemy near this known position
+            for obj in world.objects {
+                guard obj.house != house && obj.house != .neutral && obj.strength > 0 else { continue }
+                let dx = obj.worldX - known.x
+                let dy = obj.worldY - known.y
+                guard abs(dx) < 120 && abs(dy) < 120 else { continue }
+                // Score: lower is better (fewer nearby defenders + closer to AI base)
+                let distToBase = sqrt(pow(obj.worldX - aiBase.x, 2) + pow(obj.worldY - aiBase.y, 2))
+                let score = distToBase
+                if score < bestKnownScore {
+                    bestKnownScore = score
+                    bestKnownTarget = obj
+                }
+            }
+        }
+        target = bestKnownTarget
+    }
+
+    // Fallback: nearest player structure or harvester
+    if target == nil {
+        for obj in world.objects {
+            guard obj.house == world.playerHouse && obj.strength > 0 else { continue }
+            guard obj.kind == .structure || obj.isHarvester else { continue }
+            let dx = obj.worldX - aiBase.x
+            let dy = obj.worldY - aiBase.y
+            let dist = sqrt(dx * dx + dy * dy)
+            if dist < targetDist {
+                target = obj
+                targetDist = dist
+            }
+        }
+    }
+
+    guard let attackTarget = target else { return nil }
+    return AttackWavePlan(units: idleUnits, target: attackTarget)
+}
+
+/// EFFECTFUL (B3-P3): execute a decided attack wave. Delegates to
+/// applyFlankingTactics (the only RNG here) and records the attack tick.
+func applyAttackWave(_ plan: AttackWavePlan, house: House, state: HouseState, world: GameWorld) {
+    // Use flanking tactics for large waves (6+ units on Hard difficulty)
+    applyFlankingTactics(
+        units: plan.units, target: plan.target,
+        house: house, houseState: state, world: world
+    )
+
+    state.aiLastAttackTick = session.aiTickCounter
+    print("AI: \(house.rawValue) launched attack wave with \(plan.units.count) units")
 }
 
 /// Retreat damaged AI units below 30% health to their base.

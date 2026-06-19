@@ -54,7 +54,18 @@ A suggested ordering is at the end.
 >   relocation is faithful; determinism PASS at 4000t (production-exercising):
 >   SCG01EA `0xAD2FA4BFC4723E0A`, SCB01EA `0xC6BACBDF0518D5B7`. (Open decision
 >   #1: gates accepted as proof; no separate manual draw-count audit performed.)
-> - Still to do: B3-P3..P5, B4-E0..E7 (see docs/B3_B4_PLAN.md), A3 stage 2 (F3).
+> - **B3-P3 done + verified:** attack/rally/escalation migrated to the
+>   decide/apply split (Seams 2 & 4). Pure `decideAttackWave` (interval gate +
+>   idle-unit gather + target pick → `AttackWavePlan`), `decideRally`,
+>   `decideEscalation`; effectful `applyAttackWave` (delegates to
+>   applyFlankingTactics — the per-unit flank RNG), `applyRally` (±48px jitter),
+>   `applyEscalation`. Live functions are shims. Coarse plan structs (units+
+>   target) used instead of fine-grained AIDecision lists, because the per-unit
+>   flank RNG order can't be reshaped without changing the digest — fine-grained
+>   mapping deferred to the P5 flag-flip. Digests byte-identical: 2500t
+>   `0x76C4D7D28B207A08`, 4000t SCG `0xAD2FA4BFC4723E0A`, SCB `0xC6BACBDF0518D5B7`.
+> - Still to do: B3-P4 (tactics), B3-P5 (flip flag + re-baseline), B4-E0..E7
+>   (see docs/B3_B4_PLAN.md), A3 stage 2 (F3).
 
 ### A1. Harvester docking animation (missing)  — ✅ implemented
 
