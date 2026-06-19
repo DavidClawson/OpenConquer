@@ -17,7 +17,7 @@ enum CrateType: CaseIterable {
 
     /// Weighted random selection matching original C&C distribution
     static func randomWeighted() -> CrateType {
-        let roll = Int.random(in: 0..<100)
+        let roll = rndInt(0..<100)
         switch roll {
         case 0..<30:  return .money       // 30%
         case 30..<50: return .heal        // 20%
@@ -82,13 +82,13 @@ func tickCrates() {
 
     // Initialize spawn timer on first tick
     if world.crateState.nextSpawnTick == 0 {
-        world.crateState.nextSpawnTick = tick + Int.random(in: world.crateState.minSpawnInterval...world.crateState.maxSpawnInterval)
+        world.crateState.nextSpawnTick = tick + rndInt(world.crateState.minSpawnInterval...world.crateState.maxSpawnInterval)
     }
 
     // Try to spawn a crate
     if tick >= world.crateState.nextSpawnTick {
         spawnCrateIfPossible()
-        world.crateState.nextSpawnTick = tick + Int.random(in: world.crateState.minSpawnInterval...world.crateState.maxSpawnInterval)
+        world.crateState.nextSpawnTick = tick + rndInt(world.crateState.minSpawnInterval...world.crateState.maxSpawnInterval)
     }
 
     // Check for unit pickups
@@ -112,8 +112,8 @@ private func spawnCrateIfPossible() {
 
     // Try up to 20 random cells to find a valid placement
     for _ in 0..<20 {
-        let cellX = Int.random(in: bounds.x..<(bounds.x + bounds.width))
-        let cellY = Int.random(in: bounds.y..<(bounds.y + bounds.height))
+        let cellX = rndInt(bounds.x..<(bounds.x + bounds.width))
+        let cellY = rndInt(bounds.y..<(bounds.y + bounds.height))
         let cell = cellY * 64 + cellX
 
         // Must be passable land
@@ -254,7 +254,7 @@ private func spawnFreeUnit(near crate: GameCrate, for collector: GameObject) {
 
     // Possible free unit types
     let unitTypes = ["E1", "E3", "JEEP", "MTNK", "APC"]
-    let typeName = unitTypes.randomElement()!
+    let typeName = unitTypes.rndElement()!
 
     // Find a passable cell adjacent to the crate
     let crateX = crate.cell % 64

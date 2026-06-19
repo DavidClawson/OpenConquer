@@ -316,8 +316,8 @@ func handleGameRightClick(_ x: Int32, _ y: Int32, shiftHeld: Bool = false) {
         let offsetX = (Double(col) - Double(cols - 1) / 2.0) * spacing
         let offsetY = (Double(row) - Double(max(0, (count - 1) / cols)) / 2.0) * spacing
         // Add small random jitter (±6px) so units don't converge to exact grid points
-        let jitterX = Double.random(in: -6.0...6.0)
-        let jitterY = Double.random(in: -6.0...6.0)
+        let jitterX = rndDouble(-6.0...6.0)
+        let jitterY = rndDouble(-6.0...6.0)
 
         var tgtX = worldPos.worldX + offsetX + jitterX
         var tgtY = worldPos.worldY + offsetY + jitterY

@@ -107,6 +107,50 @@ if let dumpIdx = CommandLine.arguments.firstIndex(of: "--dump-scenario"),
     exit(0)
 }
 
+// Headless simulation: --headless <SCEN> <ticks> [seed]
+// Runs the sim with no window/render/audio and prints a state digest.
+if let idx = CommandLine.arguments.firstIndex(of: "--headless"),
+   idx + 2 < CommandLine.arguments.count {
+    let scen = CommandLine.arguments[idx + 1]
+    let ticks = Int(CommandLine.arguments[idx + 2]) ?? 0
+    let seed = idx + 3 < CommandLine.arguments.count ? UInt64(CommandLine.arguments[idx + 3]) : nil
+    exit(headlessRunCommand(scenario: scen, ticks: ticks, seed: seed))
+}
+
+// World reset-hygiene test: --reset-check <SCEN> <ticks>
+// Runs two worlds in one process and verifies session state is fully reset.
+if let idx = CommandLine.arguments.firstIndex(of: "--reset-check"),
+   idx + 2 < CommandLine.arguments.count {
+    let scen = CommandLine.arguments[idx + 1]
+    let ticks = Int(CommandLine.arguments[idx + 2]) ?? 0
+    exit(headlessResetCheckCommand(scenario: scen, ticks: ticks))
+}
+
+// Determinism self-test: --determinism <SCEN> <ticks>
+// Runs the same scenario+seed twice and verifies identical digests.
+if let idx = CommandLine.arguments.firstIndex(of: "--determinism"),
+   idx + 2 < CommandLine.arguments.count {
+    let scen = CommandLine.arguments[idx + 1]
+    let ticks = Int(CommandLine.arguments[idx + 2]) ?? 0
+    exit(headlessDeterminismCommand(scenario: scen, ticks: ticks))
+}
+
+// B3 AI decide() purity check: --ai-parity <SCEN> <ticks>
+if let idx = CommandLine.arguments.firstIndex(of: "--ai-parity"),
+   idx + 2 < CommandLine.arguments.count {
+    let scen = CommandLine.arguments[idx + 1]
+    let ticks = Int(CommandLine.arguments[idx + 2]) ?? 0
+    exit(headlessAIParityCommand(scenario: scen, ticks: ticks))
+}
+
+// B3 AI decision-stream trace: --ai-trace <SCEN> <ticks>
+if let idx = CommandLine.arguments.firstIndex(of: "--ai-trace"),
+   idx + 2 < CommandLine.arguments.count {
+    let scen = CommandLine.arguments[idx + 1]
+    let ticks = Int(CommandLine.arguments[idx + 2]) ?? 0
+    exit(headlessAITraceCommand(scenario: scen, ticks: ticks))
+}
+
 // Diagnostic: --probe-tiberium  parses TI1.TEM/TI12.TEM and dumps headers
 if CommandLine.arguments.contains("--probe-tiberium") {
     for name in ["TI1.TEM", "TI6.TEM", "TI12.TEM"] {

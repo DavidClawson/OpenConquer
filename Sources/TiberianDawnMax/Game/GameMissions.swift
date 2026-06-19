@@ -87,8 +87,8 @@ extension GameObject {
                 }
             } else {
                 let patrolRadius = 5  // cells
-                let nx = homeCellX + Int.random(in: -patrolRadius...patrolRadius)
-                let ny = homeCellY + Int.random(in: -patrolRadius...patrolRadius)
+                let nx = homeCellX + rndInt(-patrolRadius...patrolRadius)
+                let ny = homeCellY + rndInt(-patrolRadius...patrolRadius)
                 let clampedX = max(0, min(63, nx))
                 let clampedY = max(0, min(63, ny))
                 if isCellPassable(cellX: clampedX, cellY: clampedY, speedType: cachedSpeedType) {

@@ -81,6 +81,37 @@ func initGameWorld(scenario: ScenarioData, scenarioName: String) {
     world.mapBounds = scenario.mapBounds
     world.map.scenarioData = scenario
 
+    // Seed the deterministic simulation RNG. A stable hash of the scenario name
+    // makes AI/behavior reproducible per scenario (replays, debugging, the
+    // headless harness). forcedGameSeed overrides for tests.
+    world.randomSeed = forcedGameSeed ?? stableSeed(scenarioName)
+    seedGameRandom(world.randomSeed)
+
+    // Reset persistent sub-container state that survives between worlds. These
+    // live on the long-lived `session` (not the per-world `GameWorld`), so
+    // without this a new mission inherits the previous one's in-flight
+    // projectiles, AI tick phase, pending reinforcements, and build queues —
+    // a real bug for campaign mission-to-mission transitions, and the source of
+    // the in-process determinism divergence the headless harness surfaced.
+    // (See docs/IMPROVEMENT_PLAN.md F1.) Callers set sidebarCredits afterward;
+    // we default it from the scenario so the headless path is correct too.
+    session.combat.activeProjectiles.removeAll()
+    session.combat.activeAnimations.removeAll()
+    session.combat.nextProjectileId = 1
+    session.scripting.aiTickCounter = 0
+    session.scripting.pendingReinforcements.removeAll()
+    session.production.unitBuildQueue = ProductionQueue()
+    session.production.structureBuildQueue = ProductionQueue()
+    session.production.isPlacingStructure = false
+    session.production.placementType = nil
+    session.production.isRepairMode = false
+    session.production.isSellMode = false
+    session.production.isAttackMoveMode = false
+    session.production.isPatrolMode = false
+    session.production.patrolModeWaypoints.removeAll()
+    session.sidebarCredits = scenario.credits
+    session.production.displayedCredits = scenario.credits
+
     // Clear stale texture caches (theater may differ between scenarios/viewer)
     renderState.objectFailedSHPs.removeAll()
     renderState.terrainFailedSHPs.removeAll()

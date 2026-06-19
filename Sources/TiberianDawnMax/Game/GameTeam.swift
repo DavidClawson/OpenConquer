@@ -460,8 +460,8 @@ extension ActiveTeam {
             if dist > teamStrayDistance {
                 allArrived = false
                 if obj.mission != .move || obj.moveTargetX == nil {
-                    obj.moveTargetX = targetX + Double.random(in: -24...24)
-                    obj.moveTargetY = targetY + Double.random(in: -24...24)
+                    obj.moveTargetX = targetX + rndDouble(-24...24)
+                    obj.moveTargetY = targetY + rndDouble(-24...24)
                     obj.mission = .move
                     obj.movePath = []
                 }
@@ -486,8 +486,8 @@ extension ActiveTeam {
 
             if dist > teamStrayDistance {
                 if obj.mission != .move || obj.moveTargetX == nil {
-                    obj.moveTargetX = centerX + Double.random(in: -12...12)
-                    obj.moveTargetY = centerY + Double.random(in: -12...12)
+                    obj.moveTargetX = centerX + rndDouble(-12...12)
+                    obj.moveTargetY = centerY + rndDouble(-12...12)
                     obj.mission = .move
                     obj.movePath = []
                 }

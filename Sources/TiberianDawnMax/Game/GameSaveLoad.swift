@@ -27,6 +27,9 @@ struct MissionSaveData: Codable {
 
     // World-level state
     let tickCount: Int
+    // Deterministic RNG (optional for backward compatibility with older saves).
+    var randomSeed: UInt64? = nil       // Seed the scenario was started with
+    var rngState: UInt64? = nil         // Current sim RNG stream position
     let playerHouse: String             // House.rawValue
     let theater: String                 // TheaterType.rawValue
     let mapBoundsX: Int
@@ -550,6 +553,8 @@ func saveMission(slot: Int, description: String? = nil) -> Bool {
         missionName: scenName,
         slotDescription: desc,
         tickCount: world.tickCount,
+        randomSeed: world.randomSeed,
+        rngState: gameRng.state,
         playerHouse: world.playerHouse.rawValue,
         theater: world.theater.rawValue,
         mapBoundsX: bounds.x,
@@ -669,6 +674,10 @@ func loadMission(slot: Int) -> Bool {
             width: save.mapBoundsW, height: save.mapBoundsH
         )
         world.tickCount = save.tickCount
+        // Restore the deterministic RNG so a reloaded game continues the exact
+        // same random sequence. Older saves lack these — fall back to reseeding.
+        world.randomSeed = save.randomSeed ?? stableSeed(save.missionName)
+        gameRng = GameRandom(seed: save.rngState ?? world.randomSeed)
         world.playerHouse = House.from(save.playerHouse)
         world.nextObjectId = save.nextObjectId
         world.controlGroups = save.controlGroups

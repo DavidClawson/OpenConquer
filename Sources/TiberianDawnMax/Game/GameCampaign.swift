@@ -325,6 +325,8 @@ struct SaveGameData: Codable {
 
     // World state
     let tickCount: Int
+    var randomSeed: UInt64? = nil       // Deterministic RNG seed (optional: older saves lack it)
+    var rngState: UInt64? = nil         // Deterministic RNG stream position
     let playerHouse: String
     let theater: String
     let mapBoundsX: Int
@@ -706,6 +708,8 @@ func saveGame(slot: Int, description: String = "") -> Bool {
         saveDate: Date(),
         scenarioName: session.currentScenarioName ?? session.campaignState.scenarioName,
         tickCount: world.tickCount,
+        randomSeed: world.randomSeed,
+        rngState: gameRng.state,
         playerHouse: world.playerHouse.rawValue,
         theater: world.theater.rawValue,
         mapBoundsX: bounds.x,
@@ -800,6 +804,9 @@ func loadGame(slot: Int) -> Bool {
             width: saveData.mapBoundsW, height: saveData.mapBoundsH
         )
         world.tickCount = saveData.tickCount
+        // Restore deterministic RNG (older saves lack it — reseed from name).
+        world.randomSeed = saveData.randomSeed ?? stableSeed(saveData.scenarioName)
+        gameRng = GameRandom(seed: saveData.rngState ?? world.randomSeed)
         world.playerHouse = House.from(saveData.playerHouse)
 
         // Restore objects

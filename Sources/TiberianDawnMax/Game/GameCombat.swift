@@ -393,8 +393,8 @@ extension GameObject {
             // Out of range — move closer (without touching mission)
             if kind != .structure {
                 // Add small random offset so multiple units don't all converge on exact same point
-                let jitterX = Double.random(in: -12.0...12.0)
-                let jitterY = Double.random(in: -12.0...12.0)
+                let jitterX = rndDouble(-12.0...12.0)
+                let jitterY = rndDouble(-12.0...12.0)
                 moveTargetX = target.worldX + jitterX
                 moveTargetY = target.worldY + jitterY
                 if movePath.isEmpty {
@@ -485,8 +485,8 @@ extension GameObject {
             if moveTargetX == nil {
                 // Scatter: move to a random nearby cell
                 let scatterDist = 3
-                let nx = cellX + Int.random(in: -scatterDist...scatterDist)
-                let ny = cellY + Int.random(in: -scatterDist...scatterDist)
+                let nx = cellX + rndInt(-scatterDist...scatterDist)
+                let ny = cellY + rndInt(-scatterDist...scatterDist)
                 let clampedX = max(0, min(63, nx))
                 let clampedY = max(0, min(63, ny))
                 if isCellPassable(cellX: clampedX, cellY: clampedY, speedType: cachedSpeedType) {
