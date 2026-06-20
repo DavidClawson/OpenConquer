@@ -240,6 +240,50 @@ func headlessAITraceCommand(scenario: String, ticks: Int) -> Int32 {
     return 0
 }
 
+/// `--test-flags <SCEN>` — verify the Tier-1 per-instance object flags work:
+/// an invulnerable object takes no damage, and killing a must-survive object
+/// loses the mission. Exit 0 = pass, 1 = fail.
+func headlessTestFlagsCommand(scenario: String) -> Int32 {
+    let seed: UInt64 = 0xD1CE_D1CE_D1CE_D1CE
+    print("test-flags: scenario=\(scenario)")
+    forcedGameSeed = seed
+    defer { forcedGameSeed = nil }
+    guard let data = loadScenario("\(scenario).INI", from: mixManager) else {
+        print("test-flags: could not load scenario '\(scenario)'"); return 1
+    }
+    initGameWorld(scenario: data, scenarioName: scenario)
+    guard let world = session.world else { return 1 }
+
+    // 1. Invulnerability: an invulnerable object takes no damage.
+    guard let victim = world.objects.first(where: { $0.strength > 0 }) else {
+        print("FAIL: no live object to test"); return 1
+    }
+    victim.isInvulnerable = true
+    let before = victim.strength
+    let killed = victim.applyDamage(amount: 99999)
+    if killed || victim.strength != before {
+        print("FAIL: invulnerable \(victim.typeName) took damage (\(before)->\(victim.strength), killed=\(killed))")
+        return 1
+    }
+    print("  invulnerable: \(victim.typeName) unchanged at \(before) hp under 99999 damage")
+
+    // 2. Must-survive: killing a must-survive object loses the mission.
+    guard let vip = world.objects.first(where: { $0.strength > 0 && $0.id != victim.id }) else {
+        print("FAIL: no second live object for must-survive test"); return 1
+    }
+    vip.mustSurvive = true
+    vip.strength = 0          // simulate death
+    gameTick()               // removal loop runs the must-survive check
+    if session.triggerWinState != .lost {
+        print("FAIL: must-survive \(vip.typeName) died but win state = \(session.triggerWinState)")
+        return 1
+    }
+    print("  must-survive: killing \(vip.typeName) set win state to .lost")
+
+    print("PASS: per-instance flags (invulnerable, must-survive) work")
+    return 0
+}
+
 /// Re-exec this binary as `--headless <scenario> <ticks> <seed>` and return its
 /// stdout. Returns nil on launch failure.
 private func runHeadlessSubprocess(scenario: String, ticks: Int, seed: UInt64) -> String? {

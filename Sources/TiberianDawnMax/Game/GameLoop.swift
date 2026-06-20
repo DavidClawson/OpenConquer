@@ -324,6 +324,10 @@ func gameTick() {
             if let trigName = obj.triggerName {
                 springTrigger(named: trigName, event: .destroyed)
             }
+            // Tier-1 mission flag: a "must-survive" object dying = mission lost.
+            if obj.mustSurvive && session.triggerWinState == .playing {
+                session.triggerWinState = .lost
+            }
             // Death effects are spawned by tickAttack when it kills;
             // also catch any other deaths (e.g., fire damage, triggers)
             if obj.lastDamagedTick == world.tickCount {

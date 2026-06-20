@@ -180,6 +180,11 @@ class GameObject {
     // Trigger
     var triggerName: String? = nil  // Attached trigger ID
 
+    // Per-instance mission flags (Tier-1 editor; [ObjectFlags] section).
+    // Default off so classic scenarios stay byte-identical.
+    var isInvulnerable: Bool = false  // Immune to all damage (cannot be killed)
+    var mustSurvive: Bool = false     // If this object dies, the mission is lost
+
     // Crate buff (temporary speed/firepower bonus from crate pickup)
     var crateBuff: CrateBuff = CrateBuff()
 

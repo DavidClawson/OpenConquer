@@ -116,6 +116,10 @@ extension GameObject {
         // Overkill prevention: don't apply damage to already-dead objects
         guard strength > 0 else { return false }
 
+        // Per-instance invulnerability (Tier-1 mission flag): immune to all
+        // damage, mirroring the original ObjectTypeClass::IsImmune behavior.
+        if isInvulnerable { return false }
+
         let finalDamage: Int
         if let wh = warhead {
             // Use authentic damage model: warhead modifier vs armor type

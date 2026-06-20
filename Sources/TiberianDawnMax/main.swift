@@ -143,6 +143,13 @@ if let idx = CommandLine.arguments.firstIndex(of: "--ai-parity"),
     exit(headlessAIParityCommand(scenario: scen, ticks: ticks))
 }
 
+// Tier-1 per-instance flag self-test: --test-flags <SCEN>
+if let idx = CommandLine.arguments.firstIndex(of: "--test-flags"),
+   idx + 1 < CommandLine.arguments.count {
+    let scen = CommandLine.arguments[idx + 1]
+    exit(headlessTestFlagsCommand(scenario: scen))
+}
+
 // B3 AI decision-stream trace: --ai-trace <SCEN> <ticks>
 if let idx = CommandLine.arguments.firstIndex(of: "--ai-trace"),
    idx + 2 < CommandLine.arguments.count {

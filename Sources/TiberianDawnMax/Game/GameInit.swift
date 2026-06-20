@@ -116,6 +116,24 @@ func initGameWorld(scenario: ScenarioData, scenarioName: String) {
     renderState.objectFailedSHPs.removeAll()
     renderState.terrainFailedSHPs.removeAll()
 
+    // Tier-1 mission flags: [ObjectFlags] section maps cell -> flag set.
+    // Classic scenarios have no such section, so this is empty and inert there.
+    // Format:  <cell> = Invulnerable[,MustSurvive]
+    var objectFlagsByCell: [Int: (invulnerable: Bool, mustSurvive: Bool)] = [:]
+    for entry in scenario.ini.entries("ObjectFlags") {
+        guard let cell = Int(entry.key.trimmingCharacters(in: .whitespaces)) else { continue }
+        let names = entry.value.lowercased().components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        objectFlagsByCell[cell] = (
+            invulnerable: names.contains("invulnerable"),
+            mustSurvive: names.contains("mustsurvive")
+        )
+    }
+    func applyObjectFlags(_ obj: GameObject, cell: Int) {
+        guard let flags = objectFlagsByCell[cell] else { return }
+        obj.isInvulnerable = flags.invulnerable
+        obj.mustSurvive = flags.mustSurvive
+    }
+
     // Spawn structures
     for structure in scenario.structures {
         let pos = cellToPixel(structure.cell)
@@ -139,6 +157,7 @@ func initGameWorld(scenario: ScenarioData, scenarioName: String) {
         if structure.trigger != "None" && !structure.trigger.isEmpty {
             obj.triggerName = structure.trigger
         }
+        applyObjectFlags(obj, cell: structure.cell)
         world.addObject(obj)
     }
 
@@ -163,6 +182,7 @@ func initGameWorld(scenario: ScenarioData, scenarioName: String) {
         if unit.trigger != "None" && !unit.trigger.isEmpty {
             obj.triggerName = unit.trigger
         }
+        applyObjectFlags(obj, cell: unit.cell)
 
         // VC special case: Gunboat always faces west, hunts toward west edge, is a loaner
         if obj.isGunboat {
@@ -205,6 +225,7 @@ func initGameWorld(scenario: ScenarioData, scenarioName: String) {
         if inf.trigger != "None" && !inf.trigger.isEmpty {
             obj.triggerName = inf.trigger
         }
+        applyObjectFlags(obj, cell: inf.cell)
         world.addObject(obj)
     }
 
