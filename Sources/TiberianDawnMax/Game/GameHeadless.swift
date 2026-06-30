@@ -357,6 +357,53 @@ func headlessEditorRoundtripCommand(scenario: String) -> Int32 {
     return 1
 }
 
+/// `--test-triggers-ex` — verify Tier-1 T2 (multiple actions per trigger):
+/// `[TriggersEx]` `Action2..N` parse into the trigger's action list and all
+/// actions run in order when it fires; a trigger with no `[TriggersEx]` row
+/// stays classic (one action). Exit 0 = pass.
+func headlessTestTriggersExCommand() -> Int32 {
+    print("test-triggers-ex: multiple actions per trigger")
+    let iniText = """
+    [Triggers]
+    TR1=Time,Allow Win,1,GoodGuy,None,2
+    TR2=Time,Win,1,GoodGuy,None,2
+
+    [TriggersEx]
+    TR1=Action2=Win
+    """
+    parseTriggers(from: INIFile(string: iniText))
+    guard session.gameTriggers.count == 2 else {
+        print("FAIL: expected 2 triggers, got \(session.gameTriggers.count)"); return 1
+    }
+    let tr1 = session.gameTriggers[0]
+    let tr2 = session.gameTriggers[1]
+
+    // 1. Parse: TR1 gains a 2nd action; classic TR2 keeps exactly one.
+    guard tr1.actions.count == 2 else {
+        print("FAIL: TR1 should have 2 actions, got \(tr1.actions.count)"); return 1
+    }
+    guard tr2.actions.count == 1 else {
+        print("FAIL: TR2 (no TriggersEx) should have 1 action, got \(tr2.actions.count)"); return 1
+    }
+    guard tr1.actions[0].action == .allowWin, tr1.actions[1].action == .win else {
+        print("FAIL: TR1 action order wrong: \(tr1.actions.map { $0.action })"); return 1
+    }
+    print("  parse: TR1=[allowWin, win]; TR2 (classic)=1 action")
+
+    // 2. Execution: firing TR1 must run BOTH actions, in order.
+    session.allowWinFlag = false
+    session.triggerWinState = .playing
+    fireTrigger(tr1)
+    guard session.allowWinFlag else { print("FAIL: action 1 (allowWin) did not run"); return 1 }
+    guard session.triggerWinState == .won else {
+        print("FAIL: action 2 (win) did not run, state=\(session.triggerWinState)"); return 1
+    }
+    print("  execute: firing TR1 set allowWinFlag AND won — both actions ran")
+
+    print("PASS: multiple actions per trigger (T2) works")
+    return 0
+}
+
 /// Re-exec this binary as `--headless <scenario> <ticks> <seed>` and return its
 /// stdout. Returns nil on launch failure.
 private func runHeadlessSubprocess(scenario: String, ticks: Int, seed: UInt64) -> String? {

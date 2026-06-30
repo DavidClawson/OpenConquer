@@ -157,6 +157,11 @@ if let idx = CommandLine.arguments.firstIndex(of: "--editor-roundtrip"),
     exit(headlessEditorRoundtripCommand(scenario: scen))
 }
 
+// Tier-1 T2 self-test: --test-triggers-ex
+if CommandLine.arguments.contains("--test-triggers-ex") {
+    exit(headlessTestTriggersExCommand())
+}
+
 // B3 AI decision-stream trace: --ai-trace <SCEN> <ticks>
 if let idx = CommandLine.arguments.firstIndex(of: "--ai-trace"),
    idx + 2 < CommandLine.arguments.count {

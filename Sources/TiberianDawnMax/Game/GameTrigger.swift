@@ -115,12 +115,23 @@ enum TriggerPersistence: Int {
     case persistent = 2       // Never auto-remove
 }
 
+// MARK: - Trigger Action Spec (Tier-1 T2: multiple actions per trigger)
+
+/// One action a trigger performs when it fires, with its optional team/argument.
+/// The classic model is one action per trigger; Tier-1 lets a trigger carry
+/// several (the first comes from the `[Triggers]` line, the rest from
+/// `[TriggersEx]` `Action2..N`). Team-based actions (Create Team / Reinforce. /
+/// Dstry Teams) use this spec's `teamName`, falling back to the trigger's.
+struct TriggerActionSpec {
+    let action: TriggerAction
+    let teamName: String?
+}
+
 // MARK: - Game Trigger
 
 class GameTrigger {
     let name: String
     let event: TriggerEvent
-    let action: TriggerAction
     let house: House
     let teamName: String?
     let persistence: TriggerPersistence
@@ -131,14 +142,22 @@ class GameTrigger {
     /// Tracks which houses have already fired this trigger (for semi-persistent per-side)
     var firedForHouses: Set<House> = []
 
+    /// The actions this trigger performs, in order. Classic triggers have
+    /// exactly one (index 0, from the `[Triggers]` line); Tier-1 `[TriggersEx]`
+    /// appends `Action2..N`.
+    var actions: [TriggerActionSpec]
+
+    /// The primary action (classic single-action accessor).
+    var action: TriggerAction { actions.first?.action ?? .none }
+
     init(name: String, event: TriggerEvent, action: TriggerAction,
          house: House, teamName: String?, persistence: TriggerPersistence, data: Int) {
         self.name = name
         self.event = event
-        self.action = action
         self.house = house
         self.teamName = teamName
         self.persistence = persistence
+        self.actions = [TriggerActionSpec(action: action, teamName: teamName)]
         // Time events store data in 1/10th minute intervals (6 sec each); convert to ticks
         if event == .time {
             self.data = data * 15 * 6
@@ -219,8 +238,53 @@ func parseTriggers(from ini: INIFile) {
         }
     }
 
+    // Tier-1 [TriggersEx]: extra actions (and, later, a second event) per
+    // trigger. Classic scenarios have no such section, so this is inert there.
+    parseTriggersEx(from: ini)
+
     print("GameTrigger: Loaded \(session.gameTriggers.count) triggers")
 
+}
+
+/// Parse the Tier-1 `[TriggersEx]` section, which extends named triggers with
+/// extra actions. A row is `TriggerName = key=val; key=val; ...` where keys are
+/// `Action2`,`Action3`,… (this phase). Each action value is `ActionName` or
+/// `ActionName:TeamArg`, using the same display names as `[Triggers]`. A trigger
+/// with no `[TriggersEx]` row stays exactly classic. (Event2/Control keys are
+/// reserved for T3 and ignored here.)
+func parseTriggersEx(from ini: INIFile) {
+    for entry in ini.entries("TriggersEx") {
+        let triggerName = entry.key.trimmingCharacters(in: .whitespaces)
+        guard let trigger = session.gameTriggers.first(where: {
+            $0.name.caseInsensitiveCompare(triggerName) == .orderedSame
+        }) else { continue }
+
+        // Collect Action<N> tokens, then append them in ascending N order so the
+        // execution order is deterministic regardless of how they're written.
+        var extras: [(index: Int, spec: TriggerActionSpec)] = []
+        for token in entry.value.components(separatedBy: ";") {
+            let t = token.trimmingCharacters(in: .whitespaces)
+            guard let eq = t.firstIndex(of: "=") else { continue }
+            let key = String(t[..<eq]).trimmingCharacters(in: .whitespaces)
+            let val = String(t[t.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
+
+            let keyLower = key.lowercased()
+            guard keyLower.hasPrefix("action"),
+                  let n = Int(keyLower.dropFirst("action".count)), n >= 2 else { continue }
+
+            // val = ActionName[:TeamArg]. Action display names never contain ':'.
+            let colonParts = val.components(separatedBy: ":")
+            let actionName = colonParts[0].trimmingCharacters(in: .whitespaces)
+            let team = colonParts.count > 1 ? colonParts[1].trimmingCharacters(in: .whitespaces) : nil
+            let action = TriggerAction.from(actionName)
+            extras.append((index: n, spec: TriggerActionSpec(action: action, teamName: team)))
+        }
+        extras.sort { $0.index < $1.index }
+        for e in extras { trigger.actions.append(e.spec) }
+        if !extras.isEmpty {
+            print("GameTrigger: '\(trigger.name)' +\(extras.count) extra action(s) from [TriggersEx]")
+        }
+    }
 }
 
 // MARK: - Trigger Evaluation
@@ -455,7 +519,7 @@ func springTriggerBuiltIt(structureType: String) {
 func fireTrigger(_ trigger: GameTrigger) {
     guard trigger.isActive else { return }
 
-    print("Trigger '\(trigger.name)' fired: action=\(trigger.action)")
+    print("Trigger '\(trigger.name)' fired: actions=\(trigger.actions.map { $0.action })")
 
     // Handle persistence modes
     switch trigger.persistence {
@@ -471,7 +535,17 @@ func fireTrigger(_ trigger: GameTrigger) {
         break
     }
 
-    switch trigger.action {
+    // Run every action in order (classic triggers have exactly one).
+    for spec in trigger.actions {
+        executeTriggerAction(spec, trigger: trigger)
+    }
+}
+
+/// Perform a single trigger action. Team-based actions use the spec's teamName
+/// (falling back to the trigger's own team field).
+func executeTriggerAction(_ spec: TriggerActionSpec, trigger: GameTrigger) {
+    let teamName = spec.teamName ?? trigger.teamName
+    switch spec.action {
     case .win:
         print(">>> MISSION WON <<<")
         session.triggerWinState = .won
@@ -503,17 +577,17 @@ func fireTrigger(_ trigger: GameTrigger) {
         }
 
     case .createTeam:
-        if let teamName = trigger.teamName {
+        if let teamName = teamName {
             triggerCreateTeam(named: teamName)
         }
 
     case .destroyTeam:
-        if let teamName = trigger.teamName {
+        if let teamName = teamName {
             triggerDestroyTeam(named: teamName)
         }
 
     case .reinforcements:
-        if let teamName = trigger.teamName {
+        if let teamName = teamName {
             spawnReinforcements(teamName: teamName)
         }
 

@@ -114,4 +114,15 @@ Then the **editor track** (depends on T1–T4 for the data model):
   **28/28 stock campaign missions pass.** Sim untouched (determinism + reset-check
   green). The per-section Tier-1 writers ([TriggersEx]/[Regions]) fold into T2–T4
   as each defines its data model; existing Tier-1 sections already pass through.
-- Next: T2 (multiple actions per trigger), then T3 (AND/OR events), T4 (regions).
+- **T2 done + verified:** multiple actions per trigger. `GameTrigger.action`
+  became `var actions: [TriggerActionSpec]` (`{action, teamName?}`); the classic
+  `[Triggers]` line seeds `actions[0]`, and `[TriggersEx]` `Action2..N` (parsed
+  by `parseTriggersEx`, called from `parseTriggers`) append more, sorted by N.
+  `fireTrigger` extracted its action switch into `executeTriggerAction(spec:)`
+  and loops over `actions`; team-based actions use the spec's `teamName` (falling
+  back to the trigger's). `action` kept as a computed accessor (`actions[0]`).
+  Self-test `--test-triggers-ex` (parse: TR1 gains a 2nd action, classic TR2
+  keeps one; execute: firing TR1 runs both allowWin+win). Classic scenarios have
+  no `[TriggersEx]` → one action, byte-identical: determinism baselines unchanged
+  (SCG01EA 2500t `0xD1596F2E7234204A`, SCB01EA 4000t `0xC6BACBDF0518D5B7`).
+- Next: T3 (two-event AND/OR/LINKED), then T4 (regions).
