@@ -111,6 +111,19 @@ Key files to know: `Game/GameState.swift` (object model + Mission enum),
   system RNG and must NOT use the seeded helpers.
 - Prefer guards over force-unwraps; several `queue.item!` / `.last!` sites exist
   and are crash risks (see plan).
+- **Split files when touched, not in a pass.** The codebase is well-organized by
+  folder/concern; don't do dedicated "reorganize everything" passes (they risk
+  the determinism contract for little gain). Instead, when you're already editing
+  a file that has crossed ~800 lines *or* visibly mixes two separable concerns,
+  split it along its natural seam as part of that work. Keep new behavior in the
+  topically-appropriate file rather than growing a catch-all. (Current largest
+  files worth splitting on contact: `UI/MenuScreen.swift`,
+  `Rendering/GameRenderer.swift`, `Rendering/MapRenderer.swift`,
+  `Game/GameCampaign.swift`, `Game/GameSaveLoad.swift`, `Game/GameAI.swift`.)
+  Note `gameTick()` in `GameLoop.swift` is the one exception where source order
+  is load-bearing (= RNG-consumption order) — extract phases there carefully and
+  re-verify `--determinism` after each step; never reorder or fuse the per-object
+  passes.
 
 ## Status & where to build next (2026-06)
 
