@@ -52,6 +52,8 @@ class ScriptingState {
     var scenarioWaypoints: [Int: Int] = [:]
     var aiTickCounter: Int = 0
     var pendingReinforcements: [PendingReinforcement] = []
+    /// Tier-1 T4: named region zones, keyed by uppercased name.
+    var scenarioRegions: [String: ScenarioRegion] = [:]
 }
 
 /// Super weapons, projectiles, animations.
@@ -189,6 +191,10 @@ class GameSession {
     var scenarioWaypoints: [Int: Int] {
         get { scripting.scenarioWaypoints }
         set { scripting.scenarioWaypoints = newValue }
+    }
+    var scenarioRegions: [String: ScenarioRegion] {
+        get { scripting.scenarioRegions }
+        set { scripting.scenarioRegions = newValue }
     }
     var aiTickCounter: Int {
         get { scripting.aiTickCounter }

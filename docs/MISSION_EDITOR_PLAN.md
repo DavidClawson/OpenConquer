@@ -141,4 +141,20 @@ Then the **editor track** (depends on T1–T4 for the data model):
   fire bit-for-bit identically: all three determinism baselines unchanged
   (SCG01EA 2500t `0xD1596F2E7234204A`, 4000t `0x9D62132321684A74`, SCB01EA 4000t
   `0xC6BACBDF0518D5B7`).
-- Next: T4 (region zones).
+- **T4 done + verified:** region (area) zones. New `ScenarioRegion`
+  (rect `x,y,w,h` or `wp,waypoint,radius`) parsed from `[Regions]` into
+  `session.scenarioRegions`; new `TriggerEvent` cases `.enteredRegion`/
+  `.leftRegion` ("Enter Region"/"Leave Region"); `GameTrigger.regionName` (from
+  `[TriggersEx]` `Region=`) + `regionOccupied` latch. `tickRegionTriggers` (run
+  each tick from `gameTick`, after `tickTriggers`) fires Enter/Leave on the
+  occupancy transition for units of the trigger's house, routing through
+  `registerEventSatisfied` (so region events compose with AND/OR too).
+  `parseRegions` primes occupancy at load so a unit that *starts* inside doesn't
+  spuriously fire Enter. Self-test `--test-regions` (outside=no fire, enter→win,
+  leave→lose). Inert without a `[Regions]` section, so classic missions are
+  unchanged: determinism baselines (SCG01EA 2500t `0xD1596F2E7234204A`, SCB01EA
+  4000t `0xC6BACBDF0518D5B7`) and reset-check green.
+- **Tier-1 engine (T1–T4) complete.** Remaining: T5 (owner-change/capture,
+  optional) and the editor UI track (E2–E6) + per-section Tier-1 writers in the
+  EditorScenario document (so the editor can author [TriggersEx]/[Regions], not
+  just pass them through).

@@ -23,6 +23,10 @@ enum TriggerEvent: Int {
     case noFactories = 14
     case civEvacuated = 15
     case builtIt = 16
+    // Tier-1 T4: region (area) events. Not in the classic engine — used by
+    // triggers that carry a Region= reference in [TriggersEx].
+    case enteredRegion = 17
+    case leftRegion = 18
 
     static func from(_ name: String) -> TriggerEvent {
         let eventNames: [(String, TriggerEvent)] = [
@@ -43,6 +47,8 @@ enum TriggerEvent: Int {
             ("No Factories", .noFactories),
             ("Civ. Evac.", .civEvacuated),
             ("Built It", .builtIt),
+            ("Enter Region", .enteredRegion),
+            ("Leave Region", .leftRegion),
         ]
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         for (str, evt) in eventNames {
@@ -135,6 +141,53 @@ enum EventControl {
     }
 }
 
+// MARK: - Region Zones (Tier-1 T4)
+
+/// A named area on the map. Triggers with an `Enter Region` / `Leave Region`
+/// event fire when a unit of the trigger's house enters or leaves this zone —
+/// the area-based generalization of a single-cell `[CellTriggers]` enter.
+/// Parsed from the `[Regions]` section (a classic engine ignores it).
+struct ScenarioRegion {
+    enum Shape {
+        case rect(x: Int, y: Int, w: Int, h: Int)      // top-left cell + size in cells
+        case waypointRadius(waypoint: Int, radius: Int) // cell radius around a waypoint
+    }
+    let name: String
+    let shape: Shape
+
+    /// Whether a cell lies inside this region.
+    func contains(cellX: Int, cellY: Int) -> Bool {
+        switch shape {
+        case let .rect(x, y, w, h):
+            return cellX >= x && cellX < x + w && cellY >= y && cellY < y + h
+        case let .waypointRadius(wp, radius):
+            guard let cell = session.scenarioWaypoints[wp] else { return false }
+            let wx = cell % 64, wy = cell / 64
+            let dx = cellX - wx, dy = cellY - wy
+            // Chebyshev radius (square) — cheap and matches a "within N cells" feel.
+            return abs(dx) <= radius && abs(dy) <= radius
+        }
+    }
+
+    /// Parse a `[Regions]` value: `rect,x,y,w,h` or `wp,waypoint,radius`.
+    static func parse(name: String, value: String) -> ScenarioRegion? {
+        let parts = value.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        guard let kind = parts.first?.lowercased() else { return nil }
+        switch kind {
+        case "rect":
+            guard parts.count >= 5,
+                  let x = Int(parts[1]), let y = Int(parts[2]),
+                  let w = Int(parts[3]), let h = Int(parts[4]) else { return nil }
+            return ScenarioRegion(name: name, shape: .rect(x: x, y: y, w: w, h: h))
+        case "wp":
+            guard parts.count >= 3, let wp = Int(parts[1]), let r = Int(parts[2]) else { return nil }
+            return ScenarioRegion(name: name, shape: .waypointRadius(waypoint: wp, radius: r))
+        default:
+            return nil
+        }
+    }
+}
+
 // MARK: - Trigger Action Spec (Tier-1 T2: multiple actions per trigger)
 
 /// One action a trigger performs when it fires, with its optional team/argument.
@@ -178,6 +231,12 @@ class GameTrigger {
     // Latches for AND/LINKED: whether each event has been satisfied at least once.
     var e1Satisfied: Bool = false
     var e2Satisfied: Bool = false
+
+    // Tier-1 T4: region this trigger watches (for Enter/Leave Region events),
+    // from [TriggersEx] Region=. `regionOccupied` tracks last-seen occupancy so
+    // enter/leave fire on the transition, not every tick.
+    var regionName: String? = nil
+    var regionOccupied: Bool = false
 
     init(name: String, event: TriggerEvent, action: TriggerAction,
          house: House, teamName: String?, persistence: TriggerPersistence, data: Int) {
@@ -267,12 +326,83 @@ func parseTriggers(from ini: INIFile) {
         }
     }
 
-    // Tier-1 [TriggersEx]: extra actions (and, later, a second event) per
-    // trigger. Classic scenarios have no such section, so this is inert there.
+    // Tier-1 [TriggersEx]: extra actions + optional second event + region ref
+    // per trigger. Classic scenarios have no such section, so this is inert.
     parseTriggersEx(from: ini)
+
+    // Tier-1 [Regions]: named zones for Enter/Leave Region events.
+    parseRegions(from: ini)
 
     print("GameTrigger: Loaded \(session.gameTriggers.count) triggers")
 
+}
+
+/// Parse the Tier-1 `[Regions]` section into `session.scenarioRegions` and prime
+/// each region-watching trigger's occupancy to the current state, so a unit that
+/// merely *starts* inside a region doesn't spuriously fire an Enter on tick 0.
+func parseRegions(from ini: INIFile) {
+    session.scenarioRegions.removeAll()
+    for entry in ini.entries("Regions") {
+        let name = entry.key.trimmingCharacters(in: .whitespaces)
+        if let region = ScenarioRegion.parse(name: name, value: entry.value) {
+            session.scenarioRegions[name.uppercased()] = region
+        }
+    }
+    if session.scenarioRegions.isEmpty { return }
+    print("GameTrigger: Loaded \(session.scenarioRegions.count) region(s)")
+
+    // Prime occupancy without firing.
+    guard let world = session.world else { return }
+    for trigger in session.gameTriggers {
+        guard let region = regionFor(trigger) else { continue }
+        trigger.regionOccupied = regionIsOccupied(region, by: trigger.house, world: world)
+    }
+}
+
+/// The region a trigger watches, if it has a region event + a valid Region= ref.
+private func regionFor(_ trigger: GameTrigger) -> ScenarioRegion? {
+    let watches = trigger.event == .enteredRegion || trigger.event == .leftRegion ||
+        (trigger.eventControl != .only &&
+         (trigger.event2 == .enteredRegion || trigger.event2 == .leftRegion))
+    guard watches, let name = trigger.regionName else { return nil }
+    return session.scenarioRegions[name.uppercased()]
+}
+
+/// Whether any live unit/infantry of `house` is currently inside `region`.
+private func regionIsOccupied(_ region: ScenarioRegion, by house: House, world: GameWorld) -> Bool {
+    world.objects.contains { obj in
+        obj.house == house && obj.strength > 0 && !obj.isInLimbo &&
+        (obj.kind == .unit || obj.kind == .infantry) &&
+        region.contains(cellX: obj.cellX, cellY: obj.cellY)
+    }
+}
+
+/// Per-tick region check: fire Enter/Leave Region events on the occupancy
+/// transition. Inert when the scenario has no regions, so classic missions are
+/// unaffected.
+func tickRegionTriggers() {
+    guard let world = session.world else { return }
+    guard session.triggerWinState == .playing else { return }
+    guard !session.scenarioRegions.isEmpty else { return }
+
+    for trigger in session.gameTriggers {
+        guard trigger.isActive else { continue }
+        guard let region = regionFor(trigger) else { continue }
+
+        let wantsEnter = trigger.event == .enteredRegion ||
+            (trigger.eventControl != .only && trigger.event2 == .enteredRegion)
+        let wantsLeave = trigger.event == .leftRegion ||
+            (trigger.eventControl != .only && trigger.event2 == .leftRegion)
+
+        let inside = regionIsOccupied(region, by: trigger.house, world: world)
+        let was = trigger.regionOccupied
+        if inside && !was && wantsEnter {
+            registerEventSatisfied(trigger, isEvent2: trigger.event != .enteredRegion)
+        } else if !inside && was && wantsLeave {
+            registerEventSatisfied(trigger, isEvent2: trigger.event != .leftRegion)
+        }
+        trigger.regionOccupied = inside
+    }
 }
 
 /// Parse the Tier-1 `[TriggersEx]` section, which extends named triggers with
@@ -283,6 +413,8 @@ func parseTriggers(from ini: INIFile) {
 ///   - `Event2 = EventName[:Data]` (T3) — a second event (display names as in
 ///     `[Triggers]`; time Data is in 1/10-minute units like event1).
 ///   - `Control = AND|OR|ONLY|LINKED` (T3) — how the two events combine.
+///   - `Region = name` (T4) — the `[Regions]` zone an Enter/Leave Region event
+///     watches.
 /// A trigger with no `[TriggersEx]` row stays exactly classic (one event, one
 /// action, `Control=ONLY`).
 func parseTriggersEx(from ini: INIFile) {
@@ -306,6 +438,11 @@ func parseTriggersEx(from ini: INIFile) {
             // Control=AND|OR|ONLY|LINKED (T3).
             if keyLower == "control" {
                 trigger.eventControl = EventControl.from(val)
+                continue
+            }
+            // Region=name (T4) — the zone an Enter/Leave Region event watches.
+            if keyLower == "region" {
+                trigger.regionName = val
                 continue
             }
             // Event2=EventName[:Data] (T3). Event display names never contain ':'.

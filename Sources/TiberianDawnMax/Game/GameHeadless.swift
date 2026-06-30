@@ -455,6 +455,59 @@ func headlessTestTwoEventCommand() -> Int32 {
     return 0
 }
 
+/// `--test-regions` — verify Tier-1 T4 (region zones): a unit moving into a
+/// `[Regions]` zone fires an Enter Region trigger, and moving out fires a Leave
+/// Region trigger; a unit outside fires neither. Exit 0 = pass.
+func headlessTestRegionsCommand() -> Int32 {
+    print("test-regions: enter/leave region events")
+    let world = GameWorld()
+    world.playerHouse = .goodGuy
+    let mover = GameObject(id: world.allocateId(), typeName: "E1", house: .goodGuy,
+                           kind: .infantry, worldX: 12, worldY: 12, facing: 0,
+                           strength: 100, mission: .guard_, speed: 0)
+    world.objects.append(mover)
+    session.world = world
+    session.triggerWinState = .playing
+
+    // A 2x2 rectangular region at cells (10,10)..(11,11).
+    session.scenarioRegions = ["RGN": ScenarioRegion(name: "RGN", shape: .rect(x: 10, y: 10, w: 2, h: 2))]
+
+    let tEnter = GameTrigger(name: "RENTER", event: .enteredRegion, action: .win,
+                             house: .goodGuy, teamName: nil, persistence: .persistent, data: 0)
+    tEnter.regionName = "RGN"
+    let tLeave = GameTrigger(name: "RLEAVE", event: .leftRegion, action: .lose,
+                             house: .goodGuy, teamName: nil, persistence: .persistent, data: 0)
+    tLeave.regionName = "RGN"
+    session.gameTriggers = [tEnter, tLeave]
+
+    // 1. Outside the region: nothing fires.
+    tickRegionTriggers()
+    guard session.triggerWinState == .playing, !tEnter.regionOccupied else {
+        print("FAIL: fired or primed-occupied while outside (state=\(session.triggerWinState))"); return 1
+    }
+    print("  outside: no fire")
+
+    // 2. Move into the region: Enter fires (win).
+    mover.worldX = Double(10 * 24) + 12; mover.worldY = Double(10 * 24) + 12
+    tickRegionTriggers()
+    guard session.triggerWinState == .won else {
+        print("FAIL: enter did not fire (state=\(session.triggerWinState))"); return 1
+    }
+    print("  enter: moving in fired win")
+
+    // 3. Move back out: Leave fires (lose).
+    session.triggerWinState = .playing
+    mover.worldX = 12; mover.worldY = 12
+    tickRegionTriggers()
+    guard session.triggerWinState == .lost else {
+        print("FAIL: leave did not fire (state=\(session.triggerWinState))"); return 1
+    }
+    print("  leave: moving out fired lose")
+
+    print("PASS: region enter/leave events (T4) work")
+    return 0
+}
+
 /// Re-exec this binary as `--headless <scenario> <ticks> <seed>` and return its
 /// stdout. Returns nil on launch failure.
 private func runHeadlessSubprocess(scenario: String, ticks: Int, seed: UInt64) -> String? {

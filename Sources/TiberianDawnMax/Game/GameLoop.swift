@@ -91,6 +91,8 @@ func gameTick() {
 
     // Tick triggers (win/lose conditions, timed events)
     tickTriggers()
+    // Tier-1: region enter/leave events (inert when the scenario has no regions)
+    tickRegionTriggers()
 
     // Tick tiberium growth and spread
     world.map.tickTiberiumGrowth()

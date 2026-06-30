@@ -167,6 +167,11 @@ if CommandLine.arguments.contains("--test-two-event") {
     exit(headlessTestTwoEventCommand())
 }
 
+// Tier-1 T4 self-test: --test-regions
+if CommandLine.arguments.contains("--test-regions") {
+    exit(headlessTestRegionsCommand())
+}
+
 // B3 AI decision-stream trace: --ai-trace <SCEN> <ticks>
 if let idx = CommandLine.arguments.firstIndex(of: "--ai-trace"),
    idx + 2 < CommandLine.arguments.count {
