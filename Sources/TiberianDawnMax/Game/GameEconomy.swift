@@ -28,11 +28,37 @@ let dockUnloading   = 1   // seated in the bay, depositing tiberium
 let dockBackingOut  = 2   // sliding back out of the bay before heading to the field
 
 /// Compute the cell a harvester should drive to for unloading.
-/// PROC's footprint center is structurally impassable, so we dock one cell
-/// south of the PROC center — that's where the visible bay door faces.
+/// PROC's 3x3 footprint center is structurally impassable, so we dock just
+/// outside it. The canonical bay faces south (one cell below the footprint),
+/// and the dock slide animation assumes that, so we prefer it. But on some
+/// maps that cell is blocked (water, a wall, another structure, the map edge);
+/// when it is, the harvester used to park wherever `findPath` rerouted it and
+/// idle forever without ever reaching the arrival radius — so it never docked,
+/// never animated, and never deposited credits. To make docking reliable we
+/// fall back to the nearest *statically passable* cell around the footprint
+/// perimeter so the harvester always has a reachable resting cell to dock at.
 /// Returns (cellX, cellY) of the dock point.
 func harvesterDockCell(refinery: GameObject) -> (cellX: Int, cellY: Int) {
-    return (cellX: refinery.cellX, cellY: refinery.cellY + 2)
+    let cx = refinery.cellX
+    let cy = refinery.cellY
+    // Canonical south bay — keep the north-slide dock animation aligned.
+    let canonical = (cellX: cx, cellY: cy + 2)
+    guard session.world != nil else { return canonical }
+    let pass = passabilityMap(for: .harvester)
+    func passable(_ x: Int, _ y: Int) -> Bool {
+        guard x >= 0, x < 64, y >= 0, y < 64 else { return false }
+        return pass[y * 64 + x]
+    }
+    if passable(canonical.cellX, canonical.cellY) { return canonical }
+    // South first (closest to the real bay), then east/west, then north.
+    let candidates: [(Int, Int)] = [
+        (cx, cy + 2), (cx - 1, cy + 2), (cx + 1, cy + 2),   // south row
+        (cx + 2, cy + 1), (cx + 2, cy), (cx + 2, cy - 1),   // east column
+        (cx - 2, cy + 1), (cx - 2, cy), (cx - 2, cy - 1),   // west column
+        (cx, cy - 2), (cx - 1, cy - 2), (cx + 1, cy - 2),   // north row
+    ]
+    for (x, y) in candidates where passable(x, y) { return (cellX: x, cellY: y) }
+    return canonical
 }
 
 /// Scan scenario overlays for tiberium
@@ -181,7 +207,7 @@ extension GameObject {
             // bay (e.g. the player redirected us mid-dock, or the refinery moved
             // because the nearest one changed), drop back to approaching so we
             // never deposit tiberium away from the refinery.
-            if (missionStatus == dockUnloading || missionStatus == dockBackingOut) && dist > 24.0 {
+            if (missionStatus == dockUnloading || missionStatus == dockBackingOut) && dist > 44.0 {
                 missionStatus = dockApproaching
                 isTethered = false
                 dockTimer = 0
@@ -239,6 +265,7 @@ extension GameObject {
                     // Drive to the dock cell, not the refinery's blocked center.
                     moveTargetX = dockWorldX
                     moveTargetY = dockWorldY
+                    var stuck = false
                     if movePath.isEmpty {
                         movePath = findPath(
                             fromX: cellX, fromY: cellY,
@@ -246,8 +273,27 @@ extension GameObject {
                             ignoring: self,
                             speedType: .harvester
                         )
+                        // An empty result here means findPath rerouted the dock
+                        // cell onto our own cell — we're already as close as the
+                        // map allows and can't get any nearer. On a normal
+                        // approach findPath returns a non-empty path, so this is
+                        // only true for a genuinely stuck harvester.
+                        stuck = movePath.isEmpty
                     }
-                    let _ = moveOneStep()
+                    // Safety net: if we can't path any closer (the dock cell is
+                    // blocked/occupied, or a tight footprint rerouted us a cell
+                    // short) but we're within docking reach of the bay, dock in
+                    // place rather than idling at the ramp forever.
+                    if stuck && dist < 30.0 {
+                        missionStatus = dockUnloading
+                        dockTimer = 0
+                        isTethered = true
+                        facing = 0
+                        moveTargetX = nil
+                        moveTargetY = nil
+                    } else {
+                        let _ = moveOneStep()
+                    }
                 }
             }
         } else if world.map.tiberiumCells.contains(cell) {

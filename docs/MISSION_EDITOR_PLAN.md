@@ -93,5 +93,8 @@ Then the **editor track** (depends on T1–T4 for the data model):
   removal loop (GameLoop.swift); `[ObjectFlags]` parse keyed by cell in
   `GameInit`. Self-test `--test-flags SCG01EA` PASS (invuln object ignores 99999
   damage; killing a must-survive object sets win state .lost). Determinism
-  unchanged (4000t `0xAD2FA4BFC4723E0A`), reset-check green.
+  unchanged at T1 time. (Baselines later moved by the 2026-06-30 LST walk-off
+  fix — current `--determinism` baselines: SCG01EA 2500t `0xD1596F2E7234204A`,
+  4000t `0x9D62132321684A74`, SCB01EA 4000t `0xC6BACBDF0518D5B7`. See
+  `docs/IMPROVEMENT_PLAN.md` Part A status.)
 - Next: T2 (multiple actions per trigger), then T3 (AND/OR events), T4 (regions).

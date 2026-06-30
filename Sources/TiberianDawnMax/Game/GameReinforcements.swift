@@ -126,10 +126,24 @@ extension GameObject {
         passenger.prevWorldX = passenger.worldX
         passenger.prevWorldY = passenger.worldY
         passenger.isInLimbo = false
-        passenger.mission = .guardArea
-        passenger.movePath = []
-        passenger.moveTargetX = nil
-        passenger.moveTargetY = nil
+
+        if typeName.uppercased() == "LST" {
+            // Hovercraft beach landing: instead of materializing the unit on the
+            // shoreline and standing it still, walk it a few cells inland (north,
+            // away from the water the LST sailed in from — the same south-water
+            // assumption the sail-back uses) so units visibly disembark onto the
+            // shore rather than popping into existence on the beach.
+            passenger.mission = .move
+            passenger.moveTargetX = passenger.worldX
+            passenger.moveTargetY = max(12.0, worldY - 3.0 * 24.0)
+            passenger.movePath = []
+        } else {
+            // APC / destroyed-transport unload: disembark in place and hold.
+            passenger.mission = .guardArea
+            passenger.movePath = []
+            passenger.moveTargetX = nil
+            passenger.moveTargetY = nil
+        }
 
         return passenger
     }

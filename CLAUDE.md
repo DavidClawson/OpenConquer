@@ -37,6 +37,13 @@ simulation shows up as a changed digest. (Other diagnostic flags: `--test-mix`,
   resets the persistent `session` sub-containers — see the F1 fix). `--reset-check`
   guards that reset hygiene; `--determinism` uses subprocesses for an independent
   check.
+- **Seed gotcha:** `--determinism` runs with a *forced* fixed seed; `--headless`
+  (no seed arg) uses `stableSeed(scenarioName)`. They are different seeds, so
+  their digests are **not comparable** — `--headless SCG01EA 4000` and
+  `--determinism SCG01EA 4000` print different digests for the same code. Compare
+  like-for-like. The documented regression baselines are the `--determinism`
+  values: SCG01EA 2500t `0xD1596F2E7234204A`, 4000t `0x9D62132321684A74`,
+  SCB01EA 4000t `0xC6BACBDF0518D5B7` (as of 2026-06-30).
 
 ## Reference sources (read-only, not part of the build)
 

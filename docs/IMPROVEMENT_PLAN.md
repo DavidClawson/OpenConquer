@@ -86,6 +86,32 @@ A suggested ordering is at the end.
 >   goal — is live and clean.
 > - Still to do: smarter AI (populate the goal-scoring seam — make `decide`
 >   real), B4-E0..E7 (see docs/B3_B4_PLAN.md), A3 stage 2 (F3).
+> - **Playtest fixes (2026-06-30):** two issues surfaced in live play.
+>   (1) **Harvester never docked / deposited on some maps.** `harvesterDockCell`
+>   blindly returned the cell two south of the PROC center; when that cell is
+>   blocked (water/wall/another structure/map edge) `findPath` reroutes the
+>   harvester to a nearby cell where it stops at `dist` ≫ 14, so it idled at the
+>   ramp forever and never entered `dockUnloading` — no slide animation, no
+>   credits. Fix (`GameEconomy.swift`): `harvesterDockCell` now prefers the
+>   canonical south bay but falls back to the nearest *statically passable*
+>   perimeter cell, plus a safety net that docks in place when `findPath` can't
+>   get any closer yet we're within 30px of the bay. Purely additive — only
+>   engages when the canonical cell is unreachable, so all working maps are
+>   byte-identical (SCG08EA `--headless` `0xFD9A0C6D115EEF15` unchanged) and the
+>   `--determinism` baselines are untouched (proven by disabling the LST change:
+>   SCG01EA returns to `0x76C4`/`0xAD2F`).
+>   (2) **Hovercraft (LST) units teleported in instead of disembarking.**
+>   `unloadOnePassenger` dropped LST passengers on the shoreline with
+>   `mission=.guardArea` and no move target. Now LST passengers get a `.move`
+>   order a few cells inland (north — the same south-water assumption the LST
+>   sail-back uses), so they visibly walk off the beach. APC/C17/destroyed-
+>   transport unloads are unchanged. This changes the SCG01EA baseline (it has
+>   player LST reinforcements at t≈312): **new `--determinism` baselines —
+>   SCG01EA 2500t `0xD1596F2E7234204A`, 4000t `0x9D62132321684A74`; SCB01EA 4000t
+>   `0xC6BACBDF0518D5B7` (unchanged, no LST there).** reset-check + T1 flags green.
+>   NOTE: `--determinism` (forced seed) and `--headless` (stableSeed) use
+>   *different* seeds → different digests; baselines above are the `--determinism`
+>   values and are the regression reference.
 
 ### A1. Harvester docking animation (missing)  — ✅ implemented
 
