@@ -213,6 +213,10 @@ extension GameObject {
                 dockTimer = 0
             }
 
+            if ProcessInfo.processInfo.environment["HARV_DEBUG"] != nil, world.tickCount % 45 == 0 {
+                print("HARV t=\(world.tickCount) id=\(id) house=\(house.rawValue) cell=(\(cellX),\(cellY)) load=\(tiberiumLoad) status=\(missionStatus) dock=(\(dock.cellX),\(dock.cellY)) dist=\(String(format: "%.1f", dist)) path=\(movePath.count)")
+            }
+
             switch missionStatus {
             case dockUnloading:
                 // Seated in the bay: stay put, face into the refinery (north),
@@ -281,10 +285,20 @@ extension GameObject {
                         stuck = movePath.isEmpty
                     }
                     // Safety net: if we can't path any closer (the dock cell is
-                    // blocked/occupied, or a tight footprint rerouted us a cell
-                    // short) but we're within docking reach of the bay, dock in
-                    // place rather than idling at the ramp forever.
-                    if stuck && dist < 30.0 {
+                    // blocked, or a refinery hemmed in by silos/walls rerouted us
+                    // several cells short) but we're clearly *at* the refinery,
+                    // dock in place rather than idling at the bay forever. We
+                    // gauge "at the refinery" by distance to the 3x3 footprint
+                    // center (~1.5 cells to its edge): a harvester within ~2.5
+                    // cells of the edge (≈ 4 cells / 96px from center) that can't
+                    // path closer is as docked as it's going to get.
+                    let rdx = refinery.worldX - worldX
+                    let rdy = refinery.worldY - worldY
+                    let distToRefinery = sqrt(rdx * rdx + rdy * rdy)
+                    if stuck && distToRefinery < 96.0 {
+                        if ProcessInfo.processInfo.environment["HARV_DEBUG"] != nil {
+                            print("HARV-DOCK(rescue) id=\(id) house=\(house.rawValue) cell=(\(cellX),\(cellY)) distToRefinery=\(String(format: "%.1f", distToRefinery)) dock=(\(dock.cellX),\(dock.cellY))")
+                        }
                         missionStatus = dockUnloading
                         dockTimer = 0
                         isTethered = true
@@ -355,12 +369,17 @@ extension GameObject {
         guard load > 0 else { return }
         var creditsGained = load * tiberiumValue
         let houseState = getHouseState(house)
+        let fullValue = creditsGained
         // Enforce silo capacity: only store up to the capacity limit.
         if houseState.capacity > 0 {
             let spaceLeft = max(0, houseState.capacity - houseState.tiberium)
             let creditsToStore = min(creditsGained, spaceLeft)
             houseState.tiberium += creditsToStore
             creditsGained = creditsToStore
+        }
+        if ProcessInfo.processInfo.environment["HARV_DEBUG"] != nil {
+            let clipped = creditsGained < fullValue ? "  *** CLIPPED by silo capacity (silos full) ***" : ""
+            print("DEPOSIT house=\(house.rawValue) load=\(load) gained=\(creditsGained)/\(fullValue) cap=\(houseState.capacity) tib=\(houseState.tiberium) credits=\(houseState.credits + creditsGained)\(clipped)")
         }
         houseState.addCredits(creditsGained)
         // Keep sidebar credits in sync for the player.
