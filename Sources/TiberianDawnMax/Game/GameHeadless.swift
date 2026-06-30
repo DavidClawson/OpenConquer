@@ -508,6 +508,56 @@ func headlessTestRegionsCommand() -> Int32 {
     return 0
 }
 
+/// `--test-harvester-economy` — verify the player's stored tiberium frees up as
+/// they spend, so harvesting resumes after silos fill (the "silos full forever"
+/// regression). Exit 0 = pass.
+func headlessTestHarvesterEconomyCommand() -> Int32 {
+    print("test-harvester-economy: spending frees silo capacity")
+    let world = GameWorld()
+    world.playerHouse = .goodGuy
+    session.world = world
+
+    // One refinery's worth of capacity (1000), storage full.
+    let hs = HouseState(type: .goodGuy, credits: 1000, isHuman: true)
+    hs.capacity = 1000
+    hs.tiberium = 1000           // silos full
+    session.houseStates[.goodGuy] = hs
+    session.sidebarCredits = 1000
+
+    let harv = GameObject(id: world.allocateId(), typeName: "HARV", house: .goodGuy,
+                          kind: .unit, worldX: 12, worldY: 12, facing: 0,
+                          strength: 200, mission: .harvest, speed: 0)
+    world.objects.append(harv)
+
+    // 1. Full storage: a deposit is wasted (no credit gain).
+    let c0 = session.sidebarCredits
+    harv.depositTiberium(load: 1)
+    if session.sidebarCredits != c0 {
+        print("FAIL: deposit credited while silos full (\(c0) -> \(session.sidebarCredits))"); return 1
+    }
+    print("  full: deposit wasted, credits stay \(c0)")
+
+    // 2. Player spends via the sidebar (does NOT touch tiberium directly).
+    session.sidebarCredits = 400
+    // 3. The per-tick sync must clamp stored tiberium down to actual credits.
+    syncPlayerCredits()
+    if hs.tiberium != 400 {
+        print("FAIL: tiberium not freed after spend (tib=\(hs.tiberium), credits=\(hs.credits))"); return 1
+    }
+    print("  spend: credits 1000->400, stored tiberium clamped 1000->\(hs.tiberium)")
+
+    // 4. Harvesting now credits again (capacity freed).
+    let c1 = session.sidebarCredits
+    harv.depositTiberium(load: 1)
+    if session.sidebarCredits <= c1 {
+        print("FAIL: harvest still wasted after spending down (\(c1) -> \(session.sidebarCredits))"); return 1
+    }
+    print("  replenish: deposit credited \(c1) -> \(session.sidebarCredits)")
+
+    print("PASS: harvester economy recovers after spending (silos no longer stuck)")
+    return 0
+}
+
 /// Re-exec this binary as `--headless <scenario> <ticks> <seed>` and return its
 /// stdout. Returns nil on launch failure.
 private func runHeadlessSubprocess(scenario: String, ticks: Int, seed: UInt64) -> String? {

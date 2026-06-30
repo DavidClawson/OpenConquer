@@ -172,6 +172,11 @@ if CommandLine.arguments.contains("--test-regions") {
     exit(headlessTestRegionsCommand())
 }
 
+// Harvester economy regression: --test-harvester-economy
+if CommandLine.arguments.contains("--test-harvester-economy") {
+    exit(headlessTestHarvesterEconomyCommand())
+}
+
 // B3 AI decision-stream trace: --ai-trace <SCEN> <ticks>
 if let idx = CommandLine.arguments.firstIndex(of: "--ai-trace"),
    idx + 2 < CommandLine.arguments.count {

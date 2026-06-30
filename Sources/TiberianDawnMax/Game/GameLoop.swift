@@ -361,9 +361,8 @@ func gameTick() {
         recalculateAllHousePower()
     }
 
-    // Sync sidebar credits with HouseState
-    let playerState = getHouseState(world.playerHouse)
-    playerState.credits = session.sidebarCredits
+    // Sync sidebar credits with HouseState (+ keep stored tiberium consistent).
+    syncPlayerCredits()
 
     // Flush all queued game events to subscribers
     eventBus.flush()

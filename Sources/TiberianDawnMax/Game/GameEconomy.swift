@@ -114,6 +114,24 @@ func initTiberiumCells() {
     print("GameEconomy: Found \(map.tiberiumCells.count) tiberium cells")
 }
 
+/// Reconcile the player's HouseState with the sidebar each tick.
+///
+/// The player spends through the sidebar (which only adjusts
+/// `session.sidebarCredits`), not `HouseState.spendCredits` (the AI path that
+/// also draws stored `tiberium` down). So `credits` is authoritatively the
+/// sidebar value, and stored `tiberium` — which can never exceed actual credits
+/// — must be clamped to it. Without the clamp the player's `tiberium` sticks at
+/// silo capacity once full and every later harvest is wasted forever, even
+/// after spending down (the "silos full forever" economy bug).
+func syncPlayerCredits() {
+    guard let world = session.world else { return }
+    let playerState = getHouseState(world.playerHouse)
+    playerState.credits = session.sidebarCredits
+    if playerState.tiberium > playerState.credits {
+        playerState.tiberium = playerState.credits
+    }
+}
+
 // MARK: - Harvester Extension
 
 extension GameObject {
@@ -370,16 +388,26 @@ extension GameObject {
         var creditsGained = load * tiberiumValue
         let houseState = getHouseState(house)
         let fullValue = creditsGained
-        // Enforce silo capacity: only store up to the capacity limit.
+        // Enforce silo capacity: only store up to the capacity limit (faithful
+        // to the original — a refinery holds 1000, each silo 1500; overflow is
+        // wasted). This is why a lone refinery stops yielding credits after ~2
+        // harvester loads until you build silos or spend down.
         if houseState.capacity > 0 {
             let spaceLeft = max(0, houseState.capacity - houseState.tiberium)
             let creditsToStore = min(creditsGained, spaceLeft)
             houseState.tiberium += creditsToStore
             creditsGained = creditsToStore
         }
+        let wasted = creditsGained < fullValue
+        // Warn the player their tiberium is being thrown away ("Silos needed"),
+        // mirroring the original EVA cue. Without this the harvester silently
+        // does nothing and looks broken. Rate-limited so it doesn't nag.
+        if wasted && house == session.world?.playerHouse {
+            session.speakEVA(.needMoCapacity, cooldownTicks: 450)
+        }
         if ProcessInfo.processInfo.environment["HARV_DEBUG"] != nil {
-            let clipped = creditsGained < fullValue ? "  *** CLIPPED by silo capacity (silos full) ***" : ""
-            print("DEPOSIT house=\(house.rawValue) load=\(load) gained=\(creditsGained)/\(fullValue) cap=\(houseState.capacity) tib=\(houseState.tiberium) credits=\(houseState.credits + creditsGained)\(clipped)")
+            let clip = wasted ? "  *** CLIPPED by silo capacity (silos full) ***" : ""
+            print("DEPOSIT house=\(house.rawValue) load=\(load) gained=\(creditsGained)/\(fullValue) cap=\(houseState.capacity) tib=\(houseState.tiberium) credits=\(houseState.credits + creditsGained)\(clip)")
         }
         houseState.addCredits(creditsGained)
         // Keep sidebar credits in sync for the player.
