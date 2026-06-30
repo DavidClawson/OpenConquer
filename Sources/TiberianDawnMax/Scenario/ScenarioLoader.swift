@@ -92,24 +92,24 @@ enum House: String, CaseIterable {
 
 // MARK: - Scenario Data Types
 
-struct MapBounds {
+struct MapBounds: Equatable {
     let x: Int
     let y: Int
     let width: Int
     let height: Int
 }
 
-struct ScenarioTerrain {
+struct ScenarioTerrain: Equatable {
     let cell: Int
     let typeName: String  // e.g. "T08", "TC01"
 }
 
-struct ScenarioOverlay {
+struct ScenarioOverlay: Equatable {
     let cell: Int
     let typeName: String  // e.g. "TI1", "SBAG"
 }
 
-struct ScenarioStructure {
+struct ScenarioStructure: Equatable {
     let house: House
     let typeName: String   // e.g. "FACT", "PYLE"
     let strength: Int
@@ -118,7 +118,7 @@ struct ScenarioStructure {
     let trigger: String
 }
 
-struct ScenarioUnit {
+struct ScenarioUnit: Equatable {
     let house: House
     let typeName: String   // e.g. "MTNK", "JEEP"
     let strength: Int
@@ -128,7 +128,7 @@ struct ScenarioUnit {
     let trigger: String
 }
 
-struct ScenarioInfantry {
+struct ScenarioInfantry: Equatable {
     let house: House
     let typeName: String   // e.g. "E1", "E3"
     let strength: Int
@@ -139,17 +139,17 @@ struct ScenarioInfantry {
     let trigger: String
 }
 
-struct ScenarioWaypoint {
+struct ScenarioWaypoint: Equatable {
     let id: Int
     let cell: Int
 }
 
-struct ScenarioCellTrigger {
+struct ScenarioCellTrigger: Equatable {
     let cell: Int
     let triggerName: String
 }
 
-struct ScenarioBaseBuilding {
+struct ScenarioBaseBuilding: Equatable {
     let typeName: String
     let cell: Int
 }
@@ -157,16 +157,18 @@ struct ScenarioBaseBuilding {
 // MARK: - Scenario Data
 
 struct ScenarioData {
+    // `var` on the entity lists so the editor (EditorScenario) can place, move,
+    // and delete objects. Readers (GameInit, renderers) are unaffected.
     let theater: TheaterType
     let mapBounds: MapBounds?
     let terrain: [ScenarioTerrain]
     let overlays: [ScenarioOverlay]
-    let structures: [ScenarioStructure]
-    let units: [ScenarioUnit]
-    let infantry: [ScenarioInfantry]
+    var structures: [ScenarioStructure]
+    var units: [ScenarioUnit]
+    var infantry: [ScenarioInfantry]
     let waypoints: [ScenarioWaypoint]
-    let cellTriggers: [ScenarioCellTrigger]
-    let baseBuildings: [ScenarioBaseBuilding]
+    var cellTriggers: [ScenarioCellTrigger]
+    var baseBuildings: [ScenarioBaseBuilding]
     let ini: INIFile  // Keep reference for trigger parsing
     let credits: Int      // Starting credits from [Basic] section
     let buildLevel: Int   // Tech level cap from [Basic] section (1-15)
@@ -217,9 +219,13 @@ func loadScenario(_ name: String, from mixManager: MIXFileManager) -> ScenarioDa
         print("ScenarioLoader: Could not find \(name)")
         return nil
     }
+    return parseScenarioData(INIFile(data: data), name: name)
+}
 
-    let ini = INIFile(data: data)
-
+/// Parse an already-loaded `INIFile` into a `ScenarioData`. Split out of
+/// `loadScenario` so the editor can re-parse serialized INI text (round-trip)
+/// without going through the MIX archive.
+func parseScenarioData(_ ini: INIFile, name: String) -> ScenarioData {
     // [Basic] section — build level
     let buildLevel = ini.int("Basic", "BuildLevel", default: 1)
 

@@ -284,6 +284,79 @@ func headlessTestFlagsCommand(scenario: String) -> Int32 {
     return 0
 }
 
+/// `--editor-roundtrip <SCEN>` — verify the editor's load → document → INI →
+/// re-parse cycle is faithful: the re-parsed typed model must equal the
+/// original, and serializing twice must be byte-identical (idempotent). This is
+/// the E1 foundation gate — it proves the section writers are exact inverses of
+/// the loader and that pass-through sections survive untouched. Exit 0 = pass.
+func headlessEditorRoundtripCommand(scenario: String) -> Int32 {
+    print("editor-roundtrip: scenario=\(scenario)")
+    guard let data1 = loadScenario("\(scenario).INI", from: mixManager) else {
+        print("editor-roundtrip: could not load scenario '\(scenario)'"); return 1
+    }
+
+    let editor1 = EditorScenario(name: scenario, data: data1)
+    let text1 = editor1.serialize()
+    let data2 = parseScenarioData(INIFile(string: text1), name: scenario)
+
+    // 1. Semantic round-trip: every typed entity list must match.
+    var failures: [String] = []
+    func check<T: Equatable>(_ label: String, _ a: [T], _ b: [T]) {
+        if a.count != b.count {
+            failures.append("\(label): count \(a.count) != \(b.count)")
+        } else if a != b {
+            let idx = (0..<a.count).first(where: { a[$0] != b[$0] }).map(String.init) ?? "?"
+            failures.append("\(label): differs at index \(idx)")
+        }
+    }
+    check("structures", data1.structures, data2.structures)
+    check("units",      data1.units,      data2.units)
+    check("infantry",   data1.infantry,   data2.infantry)
+    check("overlays",   data1.overlays,   data2.overlays)
+    check("terrain",    data1.terrain,    data2.terrain)
+    check("waypoints",  data1.waypoints,  data2.waypoints)
+    check("cellTriggers", data1.cellTriggers, data2.cellTriggers)
+    check("baseBuildings", data1.baseBuildings, data2.baseBuildings)
+    if data1.theater != data2.theater { failures.append("theater: \(data1.theater) != \(data2.theater)") }
+    if data1.mapBounds != data2.mapBounds { failures.append("mapBounds differs") }
+    if data1.credits != data2.credits { failures.append("credits: \(data1.credits) != \(data2.credits)") }
+    if data1.buildLevel != data2.buildLevel { failures.append("buildLevel: \(data1.buildLevel) != \(data2.buildLevel)") }
+
+    // 2. Idempotence: serializing the re-parsed document must reproduce text1.
+    let text2 = EditorScenario(name: scenario, data: data2).serialize()
+    if text1 != text2 { failures.append("not idempotent: serialize() changed on second pass") }
+
+    print("  structures=\(data1.structures.count) units=\(data1.units.count) infantry=\(data1.infantry.count) overlays=\(data1.overlays.count) terrain=\(data1.terrain.count) waypoints=\(data1.waypoints.count) cellTriggers=\(data1.cellTriggers.count) base=\(data1.baseBuildings.count)")
+
+    // 3. Edit → save → reload: a programmatic edit must survive the cycle, and
+    //    only the edited entity must change. Move the first unit (or infantry)
+    //    to a new cell and confirm it round-trips.
+    if let u0 = data1.units.first {
+        let editor = EditorScenario(name: scenario, data: data1)
+        let newCell = u0.cell + 1
+        editor.data.units[0] = ScenarioUnit(
+            house: u0.house, typeName: u0.typeName, strength: u0.strength,
+            cell: newCell, facing: u0.facing, mission: u0.mission, trigger: u0.trigger)
+        let edited = parseScenarioData(INIFile(string: editor.serialize()), name: scenario)
+        if edited.units.count != data1.units.count {
+            failures.append("edit: unit count changed (\(data1.units.count) -> \(edited.units.count))")
+        } else if edited.units[0].cell != newCell {
+            failures.append("edit: moved unit cell not persisted (want \(newCell), got \(edited.units[0].cell))")
+        } else if edited.structures != data1.structures || edited.infantry != data1.infantry {
+            failures.append("edit: a non-edited section changed")
+        } else {
+            print("  edit: moved unit[0] \(u0.typeName) cell \(u0.cell)->\(newCell), persisted; other sections intact")
+        }
+    }
+
+    if failures.isEmpty {
+        print("PASS: editor round-trip is faithful, idempotent, and edit-safe")
+        return 0
+    }
+    for f in failures { print("FAIL: \(f)") }
+    return 1
+}
+
 /// Re-exec this binary as `--headless <scenario> <ticks> <seed>` and return its
 /// stdout. Returns nil on launch failure.
 private func runHeadlessSubprocess(scenario: String, ticks: Int, seed: UInt64) -> String? {

@@ -150,6 +150,13 @@ if let idx = CommandLine.arguments.firstIndex(of: "--test-flags"),
     exit(headlessTestFlagsCommand(scenario: scen))
 }
 
+// Editor round-trip fidelity gate (E1): --editor-roundtrip <SCEN>
+if let idx = CommandLine.arguments.firstIndex(of: "--editor-roundtrip"),
+   idx + 1 < CommandLine.arguments.count {
+    let scen = CommandLine.arguments[idx + 1]
+    exit(headlessEditorRoundtripCommand(scenario: scen))
+}
+
 // B3 AI decision-stream trace: --ai-trace <SCEN> <ticks>
 if let idx = CommandLine.arguments.firstIndex(of: "--ai-trace"),
    idx + 2 < CommandLine.arguments.count {

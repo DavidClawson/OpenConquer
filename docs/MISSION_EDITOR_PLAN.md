@@ -97,4 +97,21 @@ Then the **editor track** (depends on T1–T4 for the data model):
   fix — current `--determinism` baselines: SCG01EA 2500t `0xD1596F2E7234204A`,
   4000t `0x9D62132321684A74`, SCB01EA 4000t `0xC6BACBDF0518D5B7`. See
   `docs/IMPROVEMENT_PLAN.md` Part A status.)
+- **E1 done + verified:** the editor data layer / round-trip foundation.
+  `INIFile` gained a serializer (`serialize()`), mutation API (`setEntries`/
+  `setValue`/`removeSection`), and original-header-casing preservation
+  (`Assets/INIFile.swift`). New `EditorScenario` document
+  (`Scenario/EditorScenario.swift`) regenerates the lossless entity sections
+  (STRUCTURES/UNITS/INFANTRY/OVERLAY/CellTriggers/Base) from the typed model with
+  exact classic comma layouts (inverse of the loader), and passes through every
+  other section verbatim from the source `INIFile` (TERRAIN/Waypoints — lossy in
+  the typed model — plus Triggers/TeamTypes/house blocks/Map/Briefing/Tier-1).
+  `loadScenario` was split so `parseScenarioData(ini:name:)` can re-parse
+  serialized text. `EditorScenario.save(toPath:)` writes a loose `.INI` (MIX is
+  read-only). Gate `--editor-roundtrip <SCEN>` proves load → document → INI →
+  re-parse equals the original typed model, serialize-twice is idempotent, and a
+  programmatic edit (move a unit) survives the cycle with other sections intact.
+  **28/28 stock campaign missions pass.** Sim untouched (determinism + reset-check
+  green). The per-section Tier-1 writers ([TriggersEx]/[Regions]) fold into T2–T4
+  as each defines its data model; existing Tier-1 sections already pass through.
 - Next: T2 (multiple actions per trigger), then T3 (AND/OR events), T4 (regions).
