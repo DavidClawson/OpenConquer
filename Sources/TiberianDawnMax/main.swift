@@ -162,6 +162,11 @@ if CommandLine.arguments.contains("--test-triggers-ex") {
     exit(headlessTestTriggersExCommand())
 }
 
+// Tier-1 T3 self-test: --test-two-event
+if CommandLine.arguments.contains("--test-two-event") {
+    exit(headlessTestTwoEventCommand())
+}
+
 // B3 AI decision-stream trace: --ai-trace <SCEN> <ticks>
 if let idx = CommandLine.arguments.firstIndex(of: "--ai-trace"),
    idx + 2 < CommandLine.arguments.count {

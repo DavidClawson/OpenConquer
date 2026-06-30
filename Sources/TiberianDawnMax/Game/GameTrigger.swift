@@ -115,6 +115,26 @@ enum TriggerPersistence: Int {
     case persistent = 2       // Never auto-remove
 }
 
+// MARK: - Two-event combining (Tier-1 T3)
+
+/// How a trigger's two events combine, mirroring RA1's event-control modes.
+/// `only` is the classic single-event behavior (event2 ignored).
+enum EventControl {
+    case only     // fire on event1 only (classic)
+    case or       // fire when EITHER event occurs
+    case and      // fire only after BOTH events have occurred
+    case linked   // treated like AND for Tier-1 (per-object linkage not modeled)
+
+    static func from(_ name: String) -> EventControl {
+        switch name.trimmingCharacters(in: .whitespaces).uppercased() {
+        case "OR":     return .or
+        case "AND":    return .and
+        case "LINKED": return .linked
+        default:        return .only
+        }
+    }
+}
+
 // MARK: - Trigger Action Spec (Tier-1 T2: multiple actions per trigger)
 
 /// One action a trigger performs when it fires, with its optional team/argument.
@@ -149,6 +169,15 @@ class GameTrigger {
 
     /// The primary action (classic single-action accessor).
     var action: TriggerAction { actions.first?.action ?? .none }
+
+    // Tier-1 T3: optional second event + combine mode (from [TriggersEx]).
+    var event2: TriggerEvent = .none
+    var data2: Int = 0          // event2 threshold / time (in game ticks)
+    var data2Copy: Int = 0
+    var eventControl: EventControl = .only
+    // Latches for AND/LINKED: whether each event has been satisfied at least once.
+    var e1Satisfied: Bool = false
+    var e2Satisfied: Bool = false
 
     init(name: String, event: TriggerEvent, action: TriggerAction,
          house: House, teamName: String?, persistence: TriggerPersistence, data: Int) {
@@ -247,11 +276,15 @@ func parseTriggers(from ini: INIFile) {
 }
 
 /// Parse the Tier-1 `[TriggersEx]` section, which extends named triggers with
-/// extra actions. A row is `TriggerName = key=val; key=val; ...` where keys are
-/// `Action2`,`Action3`,… (this phase). Each action value is `ActionName` or
-/// `ActionName:TeamArg`, using the same display names as `[Triggers]`. A trigger
-/// with no `[TriggersEx]` row stays exactly classic. (Event2/Control keys are
-/// reserved for T3 and ignored here.)
+/// extra actions and an optional second event. A row is
+/// `TriggerName = key=val; key=val; ...` with keys:
+///   - `Action2`,`Action3`,… `= ActionName[:TeamArg]` (T2) — extra actions,
+///     same display names as `[Triggers]`.
+///   - `Event2 = EventName[:Data]` (T3) — a second event (display names as in
+///     `[Triggers]`; time Data is in 1/10-minute units like event1).
+///   - `Control = AND|OR|ONLY|LINKED` (T3) — how the two events combine.
+/// A trigger with no `[TriggersEx]` row stays exactly classic (one event, one
+/// action, `Control=ONLY`).
 func parseTriggersEx(from ini: INIFile) {
     for entry in ini.entries("TriggersEx") {
         let triggerName = entry.key.trimmingCharacters(in: .whitespaces)
@@ -269,25 +302,142 @@ func parseTriggersEx(from ini: INIFile) {
             let val = String(t[t.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
 
             let keyLower = key.lowercased()
-            guard keyLower.hasPrefix("action"),
-                  let n = Int(keyLower.dropFirst("action".count)), n >= 2 else { continue }
 
-            // val = ActionName[:TeamArg]. Action display names never contain ':'.
-            let colonParts = val.components(separatedBy: ":")
-            let actionName = colonParts[0].trimmingCharacters(in: .whitespaces)
-            let team = colonParts.count > 1 ? colonParts[1].trimmingCharacters(in: .whitespaces) : nil
-            let action = TriggerAction.from(actionName)
-            extras.append((index: n, spec: TriggerActionSpec(action: action, teamName: team)))
+            // Control=AND|OR|ONLY|LINKED (T3).
+            if keyLower == "control" {
+                trigger.eventControl = EventControl.from(val)
+                continue
+            }
+            // Event2=EventName[:Data] (T3). Event display names never contain ':'.
+            if keyLower == "event2" {
+                let ep = val.components(separatedBy: ":")
+                let evName = ep[0].trimmingCharacters(in: .whitespaces)
+                let rawData = ep.count > 1 ? (Int(ep[1].trimmingCharacters(in: .whitespaces)) ?? 0) : 0
+                let ev = TriggerEvent.from(evName)
+                trigger.event2 = ev
+                // Match GameTrigger.init: time data is in 1/10-minute units → ticks.
+                trigger.data2 = (ev == .time) ? rawData * 15 * 6 : rawData
+                trigger.data2Copy = trigger.data2
+                continue
+            }
+            // Action<N>=ActionName[:TeamArg] (T2). Action names never contain ':'.
+            if keyLower.hasPrefix("action"),
+               let n = Int(keyLower.dropFirst("action".count)), n >= 2 {
+                let colonParts = val.components(separatedBy: ":")
+                let actionName = colonParts[0].trimmingCharacters(in: .whitespaces)
+                let team = colonParts.count > 1 ? colonParts[1].trimmingCharacters(in: .whitespaces) : nil
+                let action = TriggerAction.from(actionName)
+                extras.append((index: n, spec: TriggerActionSpec(action: action, teamName: team)))
+            }
         }
         extras.sort { $0.index < $1.index }
         for e in extras { trigger.actions.append(e.spec) }
-        if !extras.isEmpty {
-            print("GameTrigger: '\(trigger.name)' +\(extras.count) extra action(s) from [TriggersEx]")
+        if !extras.isEmpty || trigger.event2 != .none {
+            print("GameTrigger: '\(trigger.name)' extended: +\(extras.count) action(s), event2=\(trigger.event2), control=\(trigger.eventControl)")
         }
     }
 }
 
 // MARK: - Trigger Evaluation
+
+/// Apply a satisfied event to a trigger's combine logic, firing when the
+/// control condition is met.
+/// - `.only`  : classic — only event1 fires; event2 is ignored.
+/// - `.or`    : fire whenever either event is satisfied.
+/// - `.and`/`.linked`: latch each event; fire once both have been satisfied.
+/// For `.only` single-event triggers this is exactly `fireTrigger(trigger)`,
+/// preserving classic behavior bit-for-bit.
+func registerEventSatisfied(_ trigger: GameTrigger, isEvent2: Bool) {
+    switch trigger.eventControl {
+    case .only:
+        if !isEvent2 { fireTrigger(trigger) }
+    case .or:
+        fireTrigger(trigger)
+    case .and, .linked:
+        if isEvent2 { trigger.e2Satisfied = true } else { trigger.e1Satisfied = true }
+        if trigger.e1Satisfied && trigger.e2Satisfied {
+            fireTrigger(trigger)
+        }
+    }
+}
+
+/// Whether a *polled* event's condition is currently met. Excludes `.time`
+/// (a stateful countdown, handled inline in `evaluateTriggerEvent`) and the
+/// sprung events (they arrive via `springTrigger`, so they return false here).
+/// `threshold` is the event's data value (`trigger.data` or `trigger.data2`).
+func polledEventReady(_ event: TriggerEvent, threshold: Int, house: House, world: GameWorld) -> Bool {
+    switch event {
+    case .allDestroyed:
+        // Don't fire until the house has had time to exist (reinforcement grace).
+        let hasAnything = world.objects.contains { $0.house == house && $0.strength > 0 }
+        return !hasAnything && world.tickCount > 150
+    case .unitsDestroyed:
+        let hasUnits = world.objects.contains { $0.house == house && $0.strength > 0 &&
+            ($0.kind == .unit || $0.kind == .infantry) }
+        return !hasUnits && world.tickCount > 150
+    case .buildingsDestroyed:
+        let hasBuildings = world.objects.contains { $0.house == house && $0.strength > 0 && $0.kind == .structure }
+        return !hasBuildings && world.tickCount > 30
+    case .noFactories:
+        let hasFactory = world.objects.contains { $0.house == house && $0.strength > 0 &&
+            $0.kind == .structure && ["WEAP", "FACT", "AFLD", "HAND", "PYLE"].contains($0.typeName.uppercased()) }
+        return !hasFactory && world.tickCount > 30
+    case .credits:
+        let credits = (house == world.playerHouse) ? session.sidebarCredits : getHouseState(house).credits
+        return credits >= threshold
+    case .nBuildingsDestroyed:
+        return getHouseState(house).buildingsLost >= threshold && threshold > 0
+    case .nUnitsDestroyed:
+        return getHouseState(house).unitsLost >= threshold && threshold > 0
+    case .houseDiscovered:
+        guard world.tickCount % 15 == 0 else { return false }
+        return world.objects.contains { obj in
+            obj.house == house && obj.strength > 0 && !obj.isInLimbo && isCellVisible(obj.cell)
+        }
+    case .civEvacuated:
+        guard world.tickCount % 8 == 0 else { return false }
+        guard let evacPos = waypointWorldPos(25) else { return false }
+        return world.objects.contains { obj in
+            obj.house == .neutral && obj.kind == .infantry && obj.strength > 0 && !obj.isInLimbo &&
+            abs(obj.worldX - evacPos.x) < 24.0 && abs(obj.worldY - evacPos.y) < 24.0
+        }
+    default:
+        // Sprung events (.playerEntered/.attacked/.destroyed/.discovered/
+        // .builtIt/.any) and .none are not polled here.
+        return false
+    }
+}
+
+/// Evaluate one of a trigger's events during the per-tick poll. Handles the
+/// stateful `.time` countdown inline (per-event, using data/data2); other
+/// polled events go through `polledEventReady`. On satisfaction it routes
+/// through `registerEventSatisfied` so the combine logic decides whether to fire.
+func evaluateTriggerEvent(_ trigger: GameTrigger, event: TriggerEvent, isEvent2: Bool, world: GameWorld) {
+    if event == .time {
+        if isEvent2 {
+            if trigger.data2 > 0 {
+                trigger.data2 -= 1
+                if trigger.data2 <= 0 {
+                    registerEventSatisfied(trigger, isEvent2: true)
+                    if trigger.persistence == .persistent { trigger.data2 = trigger.data2Copy }
+                }
+            }
+        } else {
+            if trigger.data > 0 {
+                trigger.data -= 1
+                if trigger.data <= 0 {
+                    registerEventSatisfied(trigger, isEvent2: false)
+                    if trigger.persistence == .persistent { trigger.data = trigger.dataCopy }
+                }
+            }
+        }
+        return
+    }
+    let threshold = isEvent2 ? trigger.data2 : trigger.data
+    if polledEventReady(event, threshold: threshold, house: trigger.house, world: world) {
+        registerEventSatisfied(trigger, isEvent2: isEvent2)
+    }
+}
 
 /// Tick all house-based triggers each game tick
 func tickTriggers() {
@@ -296,136 +446,10 @@ func tickTriggers() {
 
     for trigger in session.gameTriggers {
         guard trigger.isActive else { continue }
-
-        switch trigger.event {
-        case .time:
-            // Countdown timer
-            if trigger.data > 0 {
-                trigger.data -= 1
-                if trigger.data <= 0 {
-                    fireTrigger(trigger)
-                    // Reset for persistent triggers
-                    if trigger.persistence == .persistent {
-                        trigger.data = trigger.dataCopy
-                    }
-                }
-            }
-
-        case .allDestroyed:
-            // All units and buildings of the specified house destroyed
-            // Don't fire until the house has actually existed (grace period for reinforcements)
-            let house = trigger.house
-            let hasAnything = world.objects.contains { $0.house == house && $0.strength > 0 }
-            if !hasAnything && world.tickCount > 30 {
-                // Verify the house ever had objects (check if any dead objects belonged to this house)
-                let everExisted = world.tickCount > 150  // ~10 seconds grace period
-                if everExisted {
-                    fireTrigger(trigger)
-                }
-            }
-
-        case .unitsDestroyed:
-            // All units of the specified house destroyed
-            // Don't fire in the first 10 seconds to allow reinforcements to arrive
-            let house = trigger.house
-            let hasUnits = world.objects.contains { $0.house == house && $0.strength > 0 &&
-                ($0.kind == .unit || $0.kind == .infantry) }
-            if !hasUnits && world.tickCount > 150 {
-                fireTrigger(trigger)
-            }
-
-        case .buildingsDestroyed:
-            // All buildings of the specified house destroyed
-            let house = trigger.house
-            let hasBuildings = world.objects.contains { $0.house == house && $0.strength > 0 && $0.kind == .structure }
-            if !hasBuildings && world.tickCount > 30 {
-                fireTrigger(trigger)
-            }
-
-        case .noFactories:
-            // No factories left for house (WEAP, FACT/Construction Yard, AFLD, HAND, PYLE)
-            let house = trigger.house
-            let hasFactory = world.objects.contains { $0.house == house && $0.strength > 0 &&
-                $0.kind == .structure && ["WEAP", "FACT", "AFLD", "HAND", "PYLE"].contains($0.typeName.uppercased()) }
-            if !hasFactory && world.tickCount > 30 {
-                fireTrigger(trigger)
-            }
-
-        case .credits:
-            // Credits threshold reached for the trigger's house
-            let creditsToCheck: Int
-            if trigger.house == world.playerHouse {
-                creditsToCheck = session.sidebarCredits
-            } else {
-                creditsToCheck = getHouseState(trigger.house).credits
-            }
-            if creditsToCheck >= trigger.data {
-                fireTrigger(trigger)
-            }
-
-        case .nBuildingsDestroyed:
-            // N buildings of the specified house have been destroyed
-            // data field holds the count threshold; we decrement it each time a building dies
-            // (decrement is done in springTrigger when .destroyed fires for buildings)
-            // Alternatively, check the house state's buildingsLost counter
-            let houseState = getHouseState(trigger.house)
-            if houseState.buildingsLost >= trigger.data && trigger.data > 0 {
-                fireTrigger(trigger)
-            }
-
-        case .nUnitsDestroyed:
-            // N units of the specified house have been destroyed
-            let houseState = getHouseState(trigger.house)
-            if houseState.unitsLost >= trigger.data && trigger.data > 0 {
-                fireTrigger(trigger)
-            }
-
-        case .houseDiscovered:
-            // Fire when any object of the trigger's house is discovered by the player
-            // (visible in the fog of war). Check every ~1 second for performance.
-            if world.tickCount % 15 == 0 {
-                let house = trigger.house
-                let playerDiscovered = world.objects.contains { obj in
-                    obj.house == house && obj.strength > 0 && !obj.isInLimbo &&
-                    isCellVisible(obj.cell)
-                }
-                if playerDiscovered {
-                    fireTrigger(trigger)
-                }
-            }
-
-        case .civEvacuated:
-            // Civilians evacuated: check if any civilian (neutral house) infantry
-            // has reached waypoint 25 (WAYPT_REINF, the standard evac waypoint).
-            // In original C&C, this fires when the civilian enters the evacuation point.
-            if world.tickCount % 8 == 0 {
-                if let evacPos = waypointWorldPos(25) {
-                    let evacuated = world.objects.contains { obj in
-                        obj.house == .neutral && obj.kind == .infantry &&
-                        obj.strength > 0 && !obj.isInLimbo &&
-                        abs(obj.worldX - evacPos.x) < 24.0 && abs(obj.worldY - evacPos.y) < 24.0
-                    }
-                    if evacuated {
-                        fireTrigger(trigger)
-                    }
-                }
-            }
-
-        case .builtIt:
-            // Handled externally by springTriggerBuiltIt() when a structure is placed
-            break
-
-        case .discovered:
-            // Object-level discovered: handled by springTrigger from fog checks
-            // (when an attached object becomes visible to the player)
-            break
-
-        case .playerEntered, .attacked, .destroyed, .any:
-            // These are object/cell events handled by springTrigger calls
-            break
-
-        case .none:
-            break
+        evaluateTriggerEvent(trigger, event: trigger.event, isEvent2: false, world: world)
+        // Only multi-event triggers have a second event to poll.
+        if trigger.eventControl != .only && trigger.event2 != .none {
+            evaluateTriggerEvent(trigger, event: trigger.event2, isEvent2: true, world: world)
         }
     }
 }
@@ -437,15 +461,20 @@ func springTrigger(named triggerName: String, event: TriggerEvent) {
     for trigger in session.gameTriggers {
         guard trigger.isActive else { continue }
         guard trigger.name.caseInsensitiveCompare(triggerName) == .orderedSame else { continue }
-        guard trigger.event == event || trigger.event == .any else { continue }
+
+        let matchesE1 = (trigger.event == event || trigger.event == .any)
+        let matchesE2 = trigger.eventControl != .only && trigger.event2 != .none &&
+                        (trigger.event2 == event || trigger.event2 == .any)
+        guard matchesE1 || matchesE2 else { continue }
+        let isEvent2 = !matchesE1   // matched only via the second event
 
         if trigger.persistence == .semiPersistent {
             trigger.attachCount -= 1
             if trigger.attachCount <= 0 {
-                fireTrigger(trigger)
+                registerEventSatisfied(trigger, isEvent2: isEvent2)
             }
         } else {
-            fireTrigger(trigger)
+            registerEventSatisfied(trigger, isEvent2: isEvent2)
         }
     }
 }
@@ -470,11 +499,11 @@ func checkCellTriggers(cell: Int, enteringObject: GameObject) {
                 if trigger.persistence == .semiPersistent {
                     trigger.attachCount -= 1
                     if trigger.attachCount <= 0 {
-                        fireTrigger(trigger)
+                        registerEventSatisfied(trigger, isEvent2: false)
                     }
                 } else if !isPlayer {
                     // Only fire for non-player if we didn't already fire via springTrigger above
-                    fireTrigger(trigger)
+                    registerEventSatisfied(trigger, isEvent2: false)
                 }
             }
         }
@@ -505,11 +534,13 @@ func springTriggerBuiltIt(structureType: String) {
 
     for trigger in session.gameTriggers {
         guard trigger.isActive else { continue }
-        guard trigger.event == .builtIt else { continue }
+        let isE1 = (trigger.event == .builtIt)
+        let isE2 = trigger.eventControl != .only && trigger.event2 == .builtIt
+        guard isE1 || isE2 else { continue }
         // In original C&C, "Built It" fires for the player's house when any structure is built.
         // The trigger is not attached to a specific type; it fires whenever any structure is placed.
         if let world = session.world, trigger.house == world.playerHouse {
-            fireTrigger(trigger)
+            registerEventSatisfied(trigger, isEvent2: !isE1)
         }
     }
 }

@@ -125,4 +125,20 @@ Then the **editor track** (depends on T1–T4 for the data model):
   keeps one; execute: firing TR1 runs both allowWin+win). Classic scenarios have
   no `[TriggersEx]` → one action, byte-identical: determinism baselines unchanged
   (SCG01EA 2500t `0xD1596F2E7234204A`, SCB01EA 4000t `0xC6BACBDF0518D5B7`).
-- Next: T3 (two-event AND/OR/LINKED), then T4 (regions).
+- **T3 done + verified:** two-event AND/OR/LINKED combining. `GameTrigger` gained
+  `event2`/`data2`/`eventControl` + per-event latches (`e1/e2Satisfied`);
+  `EventControl` is `.only`(classic)/`.or`/`.and`/`.linked` (linked ≈ and for
+  Tier-1). The per-tick poll was refactored: `polledEventReady` (pure condition
+  check for the non-time polled events) + `evaluateTriggerEvent` (handles the
+  `.time` countdown inline, per-event via data/data2) + `registerEventSatisfied`
+  (the combine gate: ONLY fires on event1 exactly as before, OR on either, AND/
+  LINKED once both latched). All fire sites (`tickTriggers`, `springTrigger`,
+  `checkCellTriggers`, `springTriggerBuiltIt`) route through
+  `registerEventSatisfied` and match event2. `[TriggersEx]` now parses
+  `Event2=Name[:Data]` and `Control=AND|OR|ONLY|LINKED`. Self-test
+  `--test-two-event` (AND fires only after both events; OR fires on either).
+  Classic single-event triggers (`Control=ONLY`, the only case in stock data)
+  fire bit-for-bit identically: all three determinism baselines unchanged
+  (SCG01EA 2500t `0xD1596F2E7234204A`, 4000t `0x9D62132321684A74`, SCB01EA 4000t
+  `0xC6BACBDF0518D5B7`).
+- Next: T4 (region zones).

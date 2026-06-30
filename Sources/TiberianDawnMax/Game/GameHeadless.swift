@@ -404,6 +404,57 @@ func headlessTestTriggersExCommand() -> Int32 {
     return 0
 }
 
+/// `--test-two-event` — verify Tier-1 T3 (two-event AND/OR combining):
+/// `[TriggersEx]` `Event2`/`Control` parse, an AND trigger fires only after
+/// BOTH events occur, and an OR trigger fires on either. Exit 0 = pass.
+func headlessTestTwoEventCommand() -> Int32 {
+    print("test-two-event: AND/OR event combining")
+    let ini = """
+    [Triggers]
+    TAND=Time,Win,1,GoodGuy,None,2
+    TOR=Time,Win,1,GoodGuy,None,2
+
+    [TriggersEx]
+    TAND=Event2=Destroyed; Control=AND
+    TOR=Event2=Destroyed; Control=OR
+    """
+    parseTriggers(from: INIFile(string: ini))
+    guard let tAnd = session.gameTriggers.first(where: { $0.name == "TAND" }),
+          let tOr  = session.gameTriggers.first(where: { $0.name == "TOR" }) else {
+        print("FAIL: triggers not parsed"); return 1
+    }
+
+    // 1. Parse: event2 + control landed.
+    guard tAnd.event2 == .destroyed, tAnd.eventControl == .and else {
+        print("FAIL: TAND event2/control = \(tAnd.event2)/\(tAnd.eventControl)"); return 1
+    }
+    guard tOr.eventControl == .or else { print("FAIL: TOR control = \(tOr.eventControl)"); return 1 }
+    print("  parse: TAND=[control=AND, event2=destroyed]; TOR=[control=OR]")
+
+    // 2. AND: one event alone must NOT fire; both must.
+    session.triggerWinState = .playing
+    registerEventSatisfied(tAnd, isEvent2: false)
+    if session.triggerWinState != .playing {
+        print("FAIL: AND fired on event1 alone"); return 1
+    }
+    registerEventSatisfied(tAnd, isEvent2: true)
+    if session.triggerWinState != .won {
+        print("FAIL: AND did not fire after both events (state=\(session.triggerWinState))"); return 1
+    }
+    print("  AND: event1 alone did not fire; both events did")
+
+    // 3. OR: a single event fires immediately.
+    session.triggerWinState = .playing
+    registerEventSatisfied(tOr, isEvent2: true)
+    if session.triggerWinState != .won {
+        print("FAIL: OR did not fire on a single event"); return 1
+    }
+    print("  OR: a single event fired the trigger")
+
+    print("PASS: two-event AND/OR combining (T3) works")
+    return 0
+}
+
 /// Re-exec this binary as `--headless <scenario> <ticks> <seed>` and return its
 /// stdout. Returns nil on launch failure.
 private func runHeadlessSubprocess(scenario: String, ticks: Int, seed: UInt64) -> String? {
