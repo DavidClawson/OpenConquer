@@ -463,9 +463,11 @@ class GameWorld {
         objects.filter { $0.kind == kind && $0.house == house && $0.strength > 0 }
     }
 
-    /// Count living objects by kind and house
+    /// Count living objects by kind and house.
+    /// (filter{}.count, not count(where:) — the latter is Swift 6 only and breaks
+    /// the Swift 5.10 CI runner; see .github/workflows/ci.yml.)
     func countObjects(ofKind kind: ObjectKind, house: House) -> Int {
-        objects.count { $0.kind == kind && $0.house == house && $0.strength > 0 }
+        objects.filter { $0.kind == kind && $0.house == house && $0.strength > 0 }.count
     }
 
     /// Total power output for a house
