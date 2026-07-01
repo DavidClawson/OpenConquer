@@ -127,8 +127,12 @@ class GameObject {
 
     // Veterancy system
     var killCount: Int = 0          // Total kills scored by this unit
-    /// Veteran level: 0=Regular, 1=Veteran (3 kills), 2=Elite (7 kills)
+    /// Veteran level: 0=Regular, 1=Veteran (3 kills), 2=Elite (7 kills).
+    /// Returns 0 when the active ruleset disables veterancy (the classic game had
+    /// no promotions), which removes every downstream bonus in one place. Kills
+    /// still accrue in `killCount` so toggling the rule mid-session is lossless.
     var veteranLevel: Int {
+        guard session.rules.veterancyEnabled else { return 0 }
         if killCount >= 7 { return 2 }
         if killCount >= 3 { return 1 }
         return 0

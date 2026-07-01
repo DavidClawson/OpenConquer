@@ -54,11 +54,17 @@ simulation shows up as a changed digest. (Other diagnostic flags: `--test-mix`,
   their digests are **not comparable** — `--headless SCG01EA 4000` and
   `--determinism SCG01EA 4000` print different digests for the same code. Compare
   like-for-like. The documented regression baselines are the `--determinism`
-  values: SCG01EA 2500t `0xD1596F2E7234204A`, 4000t `0x9D62132321684A74`,
-  SCB01EA 4000t `0xD46F9A67468411FF` (as of 2026-06-30; the SCB01EA digest
-  changed from `0xC6BACBDF0518D5B7` when crushers stopped retaliating against
-  crushable infantry while under an explicit move order — see GameCombat
-  `evaluateRetaliation`).
+  values (as of 2026-07-01, **default ruleset = `classic1995`, veterancy OFF**):
+  SCG01EA 2500t `0xF2FC92976A82C252`, 4000t `0xC645B24188C4D2CC`,
+  SCB01EA 4000t `0xD46F9A67468411FF`. The SCG01EA digests changed from
+  `0xD1596F2E7234204A` / `0x9D62132321684A74` when veterancy became a ruleset
+  toggle that is off in the canonical `classic1995` preset (see `GameRules.swift`
+  and `GameObject.veteranLevel`); SCB01EA is unchanged because no unit scores
+  3+ kills in that Nod mission within 4000 ticks, so veterancy never fired there.
+  (Earlier, SCB01EA changed from `0xC6BACBDF0518D5B7` when crushers stopped
+  retaliating against crushable infantry under an explicit move order.)
+  **Baselines are per-ruleset:** these are the `classic1995` values; a different
+  active ruleset (e.g. `.enhanced`) produces different, separately-pinned digests.
 
 ## Reference sources (read-only, not part of the build)
 

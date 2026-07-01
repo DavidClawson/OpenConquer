@@ -101,6 +101,13 @@ class GameSession {
     // omniscient and the determinism baselines are unaffected.
     var fogAwarePathfinding: Bool = false
 
+    // Active ruleset — the data-driven switchboard for tunable behavior (see
+    // Game/GameRules.swift). Defaults to the canonical, determinism-pinned
+    // Classic (1995) preset; interactive play / a future Options screen can swap
+    // it (e.g. to .enhanced for veterancy). The headless harness uses this
+    // default, so classic1995's digests are the pinned baselines in CLAUDE.md.
+    var rules: Ruleset = .classic1995
+
     // MARK: - Game Tick Timing
     var tickAccumulator: UInt32 = 0
     var lastTickTime: UInt32 = 0
