@@ -148,8 +148,9 @@ func getRemasteredTexture(_ renderer: OpaquePointer?, typeName: String, frame: I
     return (texture: texture, width: displayW, height: displayH)
 }
 
-/// Load a PNG file and create an SDL texture from it using CoreGraphics
-private func loadPNGTexture(_ renderer: OpaquePointer?, path: String) -> OpaquePointer? {
+/// Load a PNG file and create an SDL texture from it using CoreGraphics.
+/// Also used by the HD cursor loader (`GameCursorHD.swift`).
+func loadPNGTexture(_ renderer: OpaquePointer?, path: String) -> OpaquePointer? {
     let url = URL(fileURLWithPath: path)
     guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
           let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else {

@@ -21,6 +21,7 @@ let cursorAttackMove = CursorDef(startFrame: 60,  frameCount: 1,  hotX: 15, hotY
 let cursorEnter     = CursorDef(startFrame: 119, frameCount: 3,  hotX: 15, hotY: 12)
 let cursorAreaGuard = CursorDef(startFrame: 153, frameCount: 1,  hotX: 15, hotY: 12)
 let cursorRepair    = CursorDef(startFrame: 200, frameCount: 12, hotX: 15, hotY: 12)
+let cursorReturn    = CursorDef(startFrame: 250, frameCount: 1,  hotX: 15, hotY: 12)  // harvester → refinery (green marching chevrons)
 let cursorSell      = CursorDef(startFrame: 210, frameCount: 1,  hotX: 15, hotY: 12)
 let cursorNuke      = CursorDef(startFrame: 220, frameCount: 1,  hotX: 15, hotY: 12)
 
@@ -89,7 +90,28 @@ func renderGameCursor(_ renderer: OpaquePointer?, world: GameWorld) {
             }
         }
 
-        if !hoveringDamagedBuilding && !selected.isEmpty {
+        // Context-sensitive service cursors: hovering our own refinery with a
+        // harvester selected, or our own repair bay with a vehicle selected.
+        var serviceCursor: CursorDef? = nil
+        if !selected.isEmpty {
+            for obj in world.objects {
+                if obj.kind != .structure { continue }
+                if obj.house != world.playerHouse { continue }
+                if obj.strength <= 0 { continue }
+                if !isWorldPosOnBuilding(worldX: worldPos.worldX, worldY: worldPos.worldY, building: obj) { continue }
+                let bType = obj.typeName.uppercased()
+                if bType == "PROC" && selected.contains(where: { $0.isHarvester && $0.house == world.playerHouse }) {
+                    serviceCursor = cursorReturn
+                } else if bType == "FIX" && selected.contains(where: { $0.kind == .unit && $0.house == world.playerHouse && !$0.isAircraft }) {
+                    serviceCursor = cursorRepair
+                }
+                break
+            }
+        }
+
+        if let svc = serviceCursor {
+            cursor = svc
+        } else if !hoveringDamagedBuilding && !selected.isEmpty {
             // Check if hovering over a selected MCV -> deploy cursor
             var isHoveringMCV = false
             let hitRadius = 14.0 / renderState.gameZoomLevel
@@ -171,6 +193,12 @@ func drawProceduralCursor(_ renderer: OpaquePointer?, cursor: CursorDef) {
 
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
 
+    // Prefer the extracted remastered HD cursor art; fall back to the procedural
+    // shapes below when it isn't installed (see GameCursorHD.swift).
+    if drawHDCursor(renderer, cursor: cursor, mx: mx, my: my) {
+        return
+    }
+
     if cursor.startFrame == cursorCanAttack.startFrame {
         drawCursorAttack(renderer, mx: mx, my: my)
     } else if cursor.startFrame == cursorCanMove.startFrame {
@@ -185,6 +213,8 @@ func drawProceduralCursor(_ renderer: OpaquePointer?, cursor: CursorDef) {
         drawCursorSelect(renderer, mx: mx, my: my)
     } else if cursor.startFrame == cursorEnter.startFrame {
         drawCursorEnter(renderer, mx: mx, my: my)
+    } else if cursor.startFrame == cursorReturn.startFrame {
+        drawCursorReturn(renderer, mx: mx, my: my)
     } else if cursor.startFrame == cursorRepair.startFrame {
         drawCursorRepair(renderer, mx: mx, my: my)
     } else if cursor.startFrame == cursorSell.startFrame {
@@ -349,6 +379,31 @@ private func drawCursorEnter(_ renderer: OpaquePointer?, mx: Int32, my: Int32) {
     SDL_RenderDrawLine(renderer, mx + 2, my, mx - 2, my + 4)
     SDL_RenderDrawLine(renderer, mx + 2, my - 1, mx - 2, my - 5)
     SDL_RenderDrawLine(renderer, mx + 2, my - 1, mx - 2, my + 3)
+}
+
+/// Green chevrons marching downward — the "deliver to refinery" cue shown when
+/// a harvester is selected and hovering over a friendly refinery.
+private func drawCursorReturn(_ renderer: OpaquePointer?, mx: Int32, my: Int32) {
+    let w: Int32 = 6
+    let h: Int32 = 4
+    let spacing: Int32 = 6
+    // Three stacked chevrons that animate downward by cycling a vertical phase.
+    let phase = Int32(renderState.cursorAnimFrame % 6)
+    for i in Int32(0)..<3 {
+        let topY = my - 8 + i * spacing + phase
+        // Fade trailing chevrons slightly for a "marching" feel.
+        let alpha: UInt8 = i == 0 ? 255 : (i == 1 ? 210 : 160)
+        // Shadow
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 160)
+        SDL_RenderDrawLine(renderer, mx - w + 1, topY + 1, mx + 1, topY + h + 1)
+        SDL_RenderDrawLine(renderer, mx + 1, topY + h + 1, mx + w + 1, topY + 1)
+        // Green chevron (V pointing down)
+        SDL_SetRenderDrawColor(renderer, 0, 230, 0, alpha)
+        SDL_RenderDrawLine(renderer, mx - w, topY, mx, topY + h)
+        SDL_RenderDrawLine(renderer, mx, topY + h, mx + w, topY)
+        SDL_RenderDrawLine(renderer, mx - w, topY + 1, mx, topY + h + 1)
+        SDL_RenderDrawLine(renderer, mx, topY + h + 1, mx + w, topY + 1)
+    }
 }
 
 private func drawCursorRepair(_ renderer: OpaquePointer?, mx: Int32, my: Int32) {
