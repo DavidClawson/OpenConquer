@@ -64,6 +64,28 @@ func procDockAnimFrame(_ proc: GameObject) -> Int? {
     return nil
 }
 
+/// If a harvester is parked on tiberium actively scooping, return its HARV
+/// gather-animation frame (32..63 = 8 facings × 4 scoop frames); otherwise nil.
+/// Mirrors VC unit.cpp:2126-2129 (the IsHarvesting draw branch). Cosmetic: the
+/// scoop phase is derived from world.tickCount, so no simulation state is added
+/// and the determinism baselines are unaffected.
+func harvGatherAnimFrame(_ obj: GameObject) -> Int? {
+    guard obj.isHarvester, obj.mission == .harvest else { return nil }
+    // dockApproaching (==0) is the "out harvesting" sub-state (not unloading/backing out).
+    guard obj.missionStatus == dockApproaching, !obj.harvesterForceDock else { return nil }
+    guard obj.tiberiumLoad < maxTiberiumLoad else { return nil }
+    guard let world = session.world, world.map.tiberiumCells.contains(obj.cell) else { return nil }
+    // Only while stationary — the render analog of VC's !IsDriving; a harvester
+    // merely crossing a tiberium cell en route shouldn't flick into the scoop pose.
+    guard obj.worldX == obj.prevWorldX, obj.worldY == obj.prevWorldY else { return nil }
+
+    let bodyFrame = bodyShape[facing32[min(255, max(0, obj.facing))]]  // 0..31
+    let dir8 = ((bodyFrame + 2) / 4) & 7                               // 0..7 (wrap 30/31 → 0)
+    let hstage = [0, 1, 2, 3, 2, 1]                                    // ping-pong scoop
+    let stage = hstage[(world.tickCount / 2) % hstage.count]           // ~Set_Rate(2) cadence
+    return 32 + dir8 * 4 + stage                                       // 32..63
+}
+
 func pickStructureFrame(_ obj: GameObject) -> Int {
     if obj.buildUpFrame >= 0 { return obj.buildUpFrame }
 
@@ -498,6 +520,14 @@ func renderGame(_ renderer: OpaquePointer?) {
                 bodyFrameCount = 32
             }
 
+            // Harvester scooping tiberium: override the body frame with the
+            // gather animation (HARV frames 32-63). Pre-drawn per direction, so
+            // never mirrored.
+            if let hf = harvGatherAnimFrame(obj) {
+                frameIdx = hf
+                bodyFlip = SDL_FLIP_NONE
+            }
+
             // BOAT special case: the hull sprite only visually differs for east vs west.
             // Use the east-facing body frame and flip horizontally when traveling west.
             let upperType = obj.typeName.uppercased()
@@ -880,8 +910,14 @@ func renderGame(_ renderer: OpaquePointer?) {
     // === HUD ===
     let gameViewportCenter = (renderState.windowWidth - sidebarWidth) / 2
     let selectedCount = world.selectedObjects().count
-    let scenarioLabel = session.scenarioList[session.scenarioIndex]
-    drawText(renderer, "PLAYING - \(scenarioLabel)", centerX: gameViewportCenter, centerY: 15, color: .amber, scale: 2)
+    // Show the mission ACTUALLY being played (not the menu browser index, which
+    // stayed at SCG01EA). Derive the mission number + faction from the current
+    // scenario name so the friendly title can't drift out of sync.
+    let scenarioCode = (session.currentScenarioName ?? session.scenarioList[session.scenarioIndex]).uppercased()
+    let missionNum = Int(scenarioCode.dropFirst(3).prefix(2)) ?? 0
+    let nameTable = scenarioCode.hasPrefix("SCB") ? nodMissionNames : gdiMissionNames
+    let missionTitle = nameTable[missionNum] ?? scenarioCode
+    drawText(renderer, "PLAYING - \(missionTitle)", centerX: gameViewportCenter, centerY: 15, color: .amber, scale: 2)
 
     if selectedCount > 0 {
         drawText(renderer, "\(selectedCount) SELECTED", centerX: gameViewportCenter, centerY: 35, color: .green, scale: 1)
