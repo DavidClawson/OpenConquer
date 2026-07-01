@@ -6,6 +6,15 @@
 
 ---
 
+## Screenshots
+
+<!-- Add images to docs/screenshots/ with these names (see docs/screenshots/README.md). -->
+![In-game](docs/screenshots/gameplay.png)
+![Sidebar](docs/screenshots/sidebar.png)
+![Options — Classic vs Enhanced ruleset](docs/screenshots/options.png)
+
+---
+
 ## Why this exists
 
 There is no polished, native, *faithful* way to play the original Tiberian Dawn on a Mac:

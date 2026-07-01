@@ -38,6 +38,9 @@ Package.resolved
 __pycache__/
 *.pyc
 
+# Repo analytics snapshots (openconquer-pulse skill output — local only)
+docs/analytics/
+
 # Extracted assets (never commit — users extract from their own Remastered Collection)
 extracted/
 *.tga
