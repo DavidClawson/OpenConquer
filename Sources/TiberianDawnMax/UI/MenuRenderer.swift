@@ -64,10 +64,29 @@ func makeMainButtons() -> [Button] {
             loadMapViewerData(session.scenarioList[session.scenarioIndex])
             session.currentScreen = MapViewerScreen()
         },
-        Button(label: "Exit Game", x: cx, y: startY + 300, w: bw, h: bh) {
+        Button(label: "Options", x: cx, y: startY + 300, w: bw, h: bh) {
+            session.currentScreen = OptionsScreen()
+        },
+        Button(label: "Exit Game", x: cx, y: startY + 360, w: bw, h: bh) {
             session.running = false
         },
     ]
+}
+
+/// Ruleset presets (Classic 1995 vs Enhanced). Chosen on the Options screen —
+/// i.e. before a mission starts — so `session.rules` never changes mid-run
+/// (per-ruleset determinism baselines; default stays .classic1995).
+func makeRulesetButtons() -> [Button] {
+    let bw: Int32 = 300
+    let bh: Int32 = 44
+    let cx = renderState.windowWidth / 2 - bw / 2
+    let startY: Int32 = 220
+
+    return Ruleset.presets.enumerated().map { i, preset in
+        Button(label: preset.name, x: cx, y: startY + Int32(i) * 60, w: bw, h: bh) {
+            session.rules = preset
+        }
+    }
 }
 
 func makeDifficultyButtons() -> [Button] {

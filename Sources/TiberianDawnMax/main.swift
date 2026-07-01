@@ -337,10 +337,9 @@ guard SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_AUDIO) == 0 else {
     exit(1)
 }
 
-// Interactive play: the human player pathfinds against explored terrain only
-// (unexplored = assumed passable, reroute on discovery). Headless/test runs
-// exit above before reaching here, so this never perturbs determinism.
-session.fogAwarePathfinding = true
+// Fog-aware ("advanced") wayfinding is now selected via the ruleset — the
+// player picks Classic vs Enhanced on the Options screen. Default is Classic
+// (session.rules = .classic1995), which uses robust classic wayfinding.
 
 // Restore last window size if available, otherwise use the default.
 if let saved = WindowConfig.loadSaved() {

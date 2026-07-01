@@ -705,7 +705,7 @@ func headlessTestFogPathCommand(scenario: String) -> Int32 {
     }
     initGameWorld(scenario: data, scenarioName: scenario)
     guard let world = session.world else { return 1 }
-    session.fogAwarePathfinding = true
+    session.rules = .enhanced  // enable fog-aware ("advanced") wayfinding for this test
 
     // A vertical wall at column wx (rows cy-3..cy+3), inside the scenario map
     // bounds, so routing AROUND it is much longer than straight through.

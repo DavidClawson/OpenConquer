@@ -94,12 +94,8 @@ class GameSession {
     var world: GameWorld? = nil
     var scenarioBuildLevel: Int = 99  // Tech level cap (from scenario INI)
 
-    // When true, the HUMAN player's move pathfinding only trusts explored
-    // terrain: unexplored cells are assumed passable, so a unit ordered into the
-    // dark heads straight there and only reroutes once it discovers a real
-    // obstacle. Off by default (and never set in headless) so the AI stays
-    // omniscient and the determinism baselines are unaffected.
-    var fogAwarePathfinding: Bool = false
+    // Human-player fog-aware pathfinding is now a ruleset toggle
+    // (`session.rules.fogAwarePathfinding`, off in Classic) — see GameRules.swift.
 
     // Active ruleset — the data-driven switchboard for tunable behavior (see
     // Game/GameRules.swift). Defaults to the canonical, determinism-pinned

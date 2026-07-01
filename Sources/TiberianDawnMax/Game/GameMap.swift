@@ -15,6 +15,13 @@ class GameMap {
     /// Water passability: true = passable for naval units, false = impassable
     var waterPassability: [Bool] = Array(repeating: true, count: 4096)
 
+    /// Passable deck cells of bridges/fords (the `.clear` altIcons of BRIDGE*/
+    /// FORD* templates). A bridge deck is a diagonal staircase over water, so
+    /// pathfinding must let units step diagonally between deck cells even though
+    /// the flanking cardinal cells are water — see the corner-cut exemption in
+    /// findPath. Built alongside the land-type pass in buildPassabilityMap.
+    var deckCells: [Bool] = Array(repeating: false, count: 4096)
+
     /// Set of cell indices that contain tiberium overlays
     var tiberiumCells: Set<Int> = Set()
 
@@ -150,6 +157,9 @@ func buildPassabilityMap() {
         if land != .water {
             waterPassability[i] = false
         }
+        // Flag bridge/ford deck cells (the passable altIcon of a BRIDGE*/FORD*
+        // template) so findPath can allow diagonal deck-to-deck steps.
+        deckCells[i] = land == .clear && isBridgeOrFordTemplate(mapCells[i].templateType)
     }
 
     // Mark cells outside map bounds as impassable in BOTH maps
@@ -181,6 +191,21 @@ func cellLandType(templateType: UInt8, iconIndex: UInt8) -> LandType {
     guard let data = templateLandData[name] else { return .clear }
     if data.altIcons.contains(Int(iconIndex)) { return data.altLand }
     return data.land
+}
+
+/// True if the template is a bridge or ford (whose passable deck icons form a
+/// diagonal path over water). Used to flag deck cells for the pathfinder.
+func isBridgeOrFordTemplate(_ templateType: UInt8) -> Bool {
+    let tt = Int(templateType)
+    if tt == 0xFF || tt >= templateTable.count { return false }
+    let name = templateTable[tt].icnName.uppercased()
+    return name.hasPrefix("BRIDGE") || name.hasPrefix("FORD")
+}
+
+/// Bridge/ford deck cells — delegates to session.world.map.
+var deckCells: [Bool] {
+    get { session.world?.map.deckCells ?? Array(repeating: false, count: 4096) }
+    set { session.world?.map.deckCells = newValue }
 }
 
 /// Get the appropriate passability map for a given speed type
@@ -460,7 +485,7 @@ func fogAwarePassability(base: [Bool]) -> [Bool] {
 /// True when `mover` should pathfind against explored terrain only (the human
 /// player during interactive play).
 func usesFogPathfinding(_ mover: GameObject?) -> Bool {
-    guard session.fogAwarePathfinding, let mover = mover else { return false }
+    guard session.rules.fogAwarePathfinding, let mover = mover else { return false }
     return mover.house == session.world?.playerHouse
 }
 
@@ -478,6 +503,7 @@ func findPath(fromX: Int, fromY: Int, toX: Int, toY: Int,
     if usesFogPathfinding(ignoring) {
         passMap = fogAwarePassability(base: passMap)
     }
+    let deck = deckCells  // bridge/ford deck cells (corner-cut exemption below)
 
     // Reroute the destination if the requested cell can't actually be the
     // unit's resting place — either the static terrain forbids it (water,
@@ -582,9 +608,13 @@ func findPath(fromX: Int, fromY: Int, toX: Int, toY: Int,
             if !passMap[neighborCell] { continue }
 
             // For diagonal moves, ensure both adjacent cardinal cells are passable
-            // (prevents cutting through wall corners)
+            // (prevents cutting through wall corners) — EXCEPT when stepping along
+            // a bridge/ford deck, whose diagonal staircase is deliberately flanked
+            // by water. Without this exemption the deck's flanking-water cells make
+            // the corner rule sever the bridge so units refuse to cross it.
             if dir.dx != 0 && dir.dy != 0 {
-                if !passMap[cy * 64 + nx] || !passMap[ny * 64 + cx] { continue }
+                let alongDeck = deck[currentCell] && deck[neighborCell]
+                if !alongDeck && (!passMap[cy * 64 + nx] || !passMap[ny * 64 + cx]) { continue }
             }
 
             // Base movement cost + soft penalty for occupied cells

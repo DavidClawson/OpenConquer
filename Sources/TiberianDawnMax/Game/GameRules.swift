@@ -21,11 +21,24 @@ struct Ruleset {
     /// Human-readable preset name (shown in the UI).
     let name: String
 
+    /// One-line description shown under the preset on the Options screen.
+    let summary: String
+
     /// Whether units gain veteran/elite promotions from kills. Off in the classic
     /// game (veterancy did not exist in 1995); gated at `GameObject.veteranLevel`
     /// so disabling it removes every downstream bonus (damage resistance, faster
     /// fire, extended sight, elite self-heal, rank chevrons) in one place.
     var veterancyEnabled: Bool
+
+    /// Wayfinding mode for the human player:
+    ///   • false = "classic" — plan against true terrain everywhere (robust; the
+    ///     unit routes correctly around real obstacles even in unexplored areas).
+    ///   • true  = "advanced" — fog-of-war-aware: unexplored in-bounds cells are
+    ///     assumed passable, so a unit ordered into the dark heads straight there
+    ///     and reroutes on discovery. More immersive, at the cost of detours.
+    /// Read at the single branch point `usesFogPathfinding(_:)` in GameMap.swift.
+    /// Never enabled for the AI or headless runs, so determinism is unaffected.
+    var fogAwarePathfinding: Bool
 
     // Future tunables slot in here (crush behavior, build adjacency, economy
     // constants, …), each read at a single branch point in the simulation.
@@ -33,13 +46,17 @@ struct Ruleset {
     /// The authentic 1995 experience. Canonical, determinism-pinned baseline.
     static let classic1995 = Ruleset(
         name: "Classic (1995)",
-        veterancyEnabled: false
+        summary: "No veterancy - classic wayfinding",
+        veterancyEnabled: false,
+        fogAwarePathfinding: false
     )
 
     /// Classic plus modern gameplay enhancements.
     static let enhanced = Ruleset(
         name: "Enhanced",
-        veterancyEnabled: true
+        summary: "Veterancy - fog-of-war-aware wayfinding",
+        veterancyEnabled: true,
+        fogAwarePathfinding: true
     )
 
     /// All built-in presets, in display order.

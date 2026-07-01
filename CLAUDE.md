@@ -56,7 +56,10 @@ simulation shows up as a changed digest. (Other diagnostic flags: `--test-mix`,
   like-for-like. The documented regression baselines are the `--determinism`
   values (as of 2026-07-01, **default ruleset = `classic1995`, veterancy OFF**):
   SCG01EA 2500t `0xF2FC92976A82C252`, 4000t `0xC645B24188C4D2CC`,
-  SCB01EA 4000t `0xD46F9A67468411FF`. The SCG01EA digests changed from
+  SCB01EA 4000t `0xA3C944E7664939D2` (changed from `0xD46F9A67468411FF` when the
+  A* corner-cut rule was exempted for bridge/ford decks — units/AI now cross the
+  diagonal bridge deck in that Nod mission; see `findPath` + `deckCells`).
+  The SCG01EA digests changed from
   `0xD1596F2E7234204A` / `0x9D62132321684A74` when veterancy became a ruleset
   toggle that is off in the canonical `classic1995` preset (see `GameRules.swift`
   and `GameObject.veteranLevel`); SCB01EA is unchanged because no unit scores

@@ -101,6 +101,45 @@ class DifficultyScreen: MenuScreen {
     }
 }
 
+// MARK: - Options Screen
+
+/// Ruleset selection (Classic 1995 vs Enhanced). Reached from the main menu so
+/// the choice is made BEFORE a mission starts — `session.rules` never changes
+/// mid-run (per-ruleset determinism baselines; default stays .classic1995).
+class OptionsScreen: MenuScreen {
+    func render(_ renderer: OpaquePointer?) {
+        drawText(renderer, "Options", centerX: renderState.windowWidth / 2, centerY: 100, color: .amber, scale: 3)
+        drawText(renderer, "Ruleset", centerX: renderState.windowWidth / 2, centerY: 160, color: .green, scale: 2)
+
+        for btn in makeRulesetButtons() {
+            let selected = btn.label == session.rules.name
+            btn.draw(renderer, highlighted: selected || btn.contains(input.mouseX, input.mouseY))
+        }
+
+        // Describe the currently-selected preset.
+        let descY: Int32 = 220 + Int32(Ruleset.presets.count) * 60 + 10
+        drawText(renderer, session.rules.summary, centerX: renderState.windowWidth / 2, centerY: descY, color: .gray, scale: 1)
+
+        drawText(renderer, "Esc: Back", centerX: renderState.windowWidth / 2, centerY: renderState.windowHeight - 40, color: .gray, scale: 1)
+    }
+
+    func handleKeyDown(_ key: Int32) {
+        if key == Int32(SDLK_ESCAPE.rawValue) {
+            session.currentScreen = MainMenuScreen()
+        }
+    }
+
+    func handleMouseDown(_ x: Int32, _ y: Int32, button: UInt8) {
+        guard button == UInt8(SDL_BUTTON_LEFT) else { return }
+        for btn in makeRulesetButtons() {
+            if btn.contains(input.mouseX, input.mouseY) {
+                btn.action()
+                break
+            }
+        }
+    }
+}
+
 // MARK: - Faction Screen
 
 class FactionScreen: MenuScreen {
