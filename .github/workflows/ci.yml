@@ -7,8 +7,20 @@ on:
 
 jobs:
   build:
-    name: Build (macOS)
-    runs-on: macos-14
+    # Matrix over two macOS images that ship different Swift toolchains, so we
+    # catch version-specific breakage in BOTH directions (e.g. a Swift 6-only
+    # API that fails on 5.10, or something removed/changed in 6.x). The package
+    # is swift-tools 5.9 / language mode 5, so the Swift 6 compiler builds it
+    # WITHOUT strict-concurrency — this verifies compatibility, it does not opt
+    # into the Swift 6 language mode.
+    #   macos-14 → Swift 5.10 (Xcode 15.x)
+    #   macos-15 → Swift 6.x  (Xcode 16.x)
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15]
     steps:
       - uses: actions/checkout@v4
 

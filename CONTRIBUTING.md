@@ -17,8 +17,14 @@ swift build -c release
 swift run            # build + launch
 ```
 
-- Target: **macOS 13+**, swift-tools **5.9**.
+- Target: **macOS 13+**, swift-tools **5.9** (language mode 5).
 - SDL2 is wired via the `CSDL2` system-library target (pkg-config `sdl2`).
+- **Swift version range:** CI builds on a matrix of **Swift 5.10** (macos-14) and
+  **Swift 6.x** (macos-15), so keep code compatible with both — avoid Swift 6-only
+  stdlib APIs (e.g. `Sequence.count(where:)`; use `filter{}.count`). We do **not**
+  use the Swift 6 language mode (strict concurrency); this is a single-threaded,
+  deterministic sim built on global state, so strict concurrency is all cost and
+  no benefit here.
 
 ## The determinism contract (please read)
 
