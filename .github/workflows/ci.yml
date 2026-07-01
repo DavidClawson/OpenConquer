@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+jobs:
+  build:
+    name: Build (macOS)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SDL2
+        run: brew install sdl2 pkg-config
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Build (debug)
+        run: swift build -v
+
+      - name: Build (release)
+        run: swift build -c release
+
+      # NOTE: the --determinism / --test-* suites load game scenarios, which
+      # require assets extracted from a user's own Remastered Collection. Those
+      # assets are never committed, so the gameplay tests run locally rather than
+      # in CI (see CONTRIBUTING.md). A near-term roadmap item is a set of tiny
+      # asset-free synthetic fixtures so a subset of logic tests can run here too.

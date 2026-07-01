@@ -33,3 +33,17 @@ Package.resolved
 .vscode/
 *.swp
 *~
+
+# Python (asset extraction tooling)
+__pycache__/
+*.pyc
+
+# Extracted assets (never commit — users extract from their own Remastered Collection)
+extracted/
+*.tga
+*.dds
+*.png
+*.wav
+# …but allow project screenshots / docs imagery:
+!docs/screenshots/**
+!docs/**/*.png

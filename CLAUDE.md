@@ -1,5 +1,10 @@
 # TiberianDawnMax — Codebase Guide
 
+> **Public name: OpenConquer.** `TiberianDawnMax` is the internal codename / SwiftPM
+> target. The published project is branded **OpenConquer** to avoid the EA
+> trademarks (see `README.md`, `docs/VISION.md`). License: **GPLv3** (`LICENSE`).
+> Never commit game assets. Roadmap: `docs/ROADMAP.md`.
+
 A Swift + SDL2 reimplementation of **Command & Conquer: Tiberian Dawn** for macOS.
 The original Westwood C++ source and the open-source Vanilla-Conquer port live
 alongside this repo as reference (see "Reference sources" below).
@@ -26,6 +31,11 @@ watching the game. Run the built binary directly:
 ./.build/debug/TiberianDawnMax --ai-parity    <SCEN> <ticks>      # B3: assert the AI decide() phase is pure (no RNG/world mutation)
 ./.build/debug/TiberianDawnMax --ai-trace     <SCEN> <ticks>      # B3: print the per-house goal/decision stream each decide tick
 ./.build/debug/TiberianDawnMax --test-flags   <SCEN>             # Tier-1: per-instance invulnerable / must-survive flags
+./.build/debug/TiberianDawnMax --test-harvester-economy         # silo capacity frees up as credits are spent
+./.build/debug/TiberianDawnMax --test-repair  <SCEN>            # a player vehicle drives to a FIX and heals
+./.build/debug/TiberianDawnMax --test-crush   <SCEN>            # a tank squishes enemy infantry at a chokepoint
+./.build/debug/TiberianDawnMax --test-fogpath <SCEN>           # player plans through unexplored, reroutes on discovery
+./.build/debug/TiberianDawnMax --test-stacking <SCEN>          # units ordered to one point don't stack on a cell
 ./.build/debug/TiberianDawnMax --editor-roundtrip <SCEN>         # E1: scenario load→document→INI→reload is faithful, idempotent, edit-safe
 ```
 
@@ -45,7 +55,10 @@ simulation shows up as a changed digest. (Other diagnostic flags: `--test-mix`,
   `--determinism SCG01EA 4000` print different digests for the same code. Compare
   like-for-like. The documented regression baselines are the `--determinism`
   values: SCG01EA 2500t `0xD1596F2E7234204A`, 4000t `0x9D62132321684A74`,
-  SCB01EA 4000t `0xC6BACBDF0518D5B7` (as of 2026-06-30).
+  SCB01EA 4000t `0xD46F9A67468411FF` (as of 2026-06-30; the SCB01EA digest
+  changed from `0xC6BACBDF0518D5B7` when crushers stopped retaliating against
+  crushable infantry while under an explicit move order — see GameCombat
+  `evaluateRetaliation`).
 
 ## Reference sources (read-only, not part of the build)
 
@@ -132,6 +145,41 @@ AI/editor design.
 
 - **Fixed:** harvester refinery docking animation, building damage-state frames,
   and terrain (cliff/tree/water) pathfinding via a per-cell LandType model.
+- **Fixed (2026-06):** harvester docking now hides the unit and animates the
+  PROC.SHP dock/siphon/undock frames (12-29) like the original (the harvester is
+  limboed on attach); silos show their fill level (SILO frames 0-4/damaged 5-9,
+  from house tiberium/capacity — `pickStructureFrame`); harvesters idle at the
+  refinery instead of shuttling when storage is full; the repair-bay (FIX) order
+  reliably drives a vehicle onto the pad and heals it; and the **human player**
+  pathfinds against explored terrain only (unexplored = assumed passable, reroute
+  on discovery — gated by `session.fogAwarePathfinding`, set only in interactive
+  play so headless/AI stay omniscient and the determinism baselines are intact).
+- **Fixed (2026-06, cont.):** music aliasing/crackle (audio device now 44100 Hz to
+  match the remastered masters + fractional resample phase carried across ticks +
+  louder default music); out-of-bounds map area now masked SOLID black and small
+  maps are centred (was translucent, showing unreachable fog); scorch/crater
+  smudges render UNDER buildings/units (`renderSmudges`, its own early pass);
+  vehicles ordered to one point no longer stack (occupancy kept live within a
+  tick — `executeMovementStep` defer); tracked crushers under an explicit move
+  order drive through & squish crushable infantry instead of stopping to shoot
+  (`evaluateRetaliation`); GDI mission-select titles corrected to the real
+  briefing names (SCG08EA = "Repair GDI Equipment", not "Remove SAM Sites").
+- **Remastered HD UI art (2026-07):** `tools/extract_remastered_sprites.py --category ui`
+  decodes the remastered in-game UI from `TEXTURES_SRGB.MEG` (uncompressed 32-bit
+  `ICON_*.DDS` / `UI_*.DDS`) + cursor hotspots from `CONFIG.MEG` MOUSEPOINTERS.XML,
+  writing PNGs to `<extracted>/sprites_remastered/ui/`: `cursors/<FAMILY>/…png`
+  (57 families, 456 frames, 1× + `_X2` hi-DPI) with a `cursors.json` manifest
+  (POINTER_* → family + hotX/hotY), and `sidebar/…png` (power-meter segments,
+  in-progress/train/resource fill bars). The `read_dds()` helper handles only
+  uncompressed 32-bit surfaces (BGRA/RGBA by mask). NOT extractable (absent in the
+  remaster as bitmaps): the sidebar chrome/frame (vector/HTML), the build cameos
+  (never remastered — still classic SHPs), and the radial build-progress clock
+  (procedural shader). The **HD cursors are wired in** (`Rendering/GameCursorHD.swift`):
+  `drawProceduralCursor` calls `drawHDCursor` first (maps each `CursorDef` →
+  texture family + hotspot, blits the animated frame scaled to ~28px, lazily
+  loads the manifest, caches textures) and only falls back to the procedural
+  shapes if the `ui/cursors/` art isn't installed. The sidebar power/progress
+  meter art is extracted but not yet wired (separate follow-up).
 - **AI decision layer (B3):** complete at parity. All AI decisions (production,
   attack/rally/escalation, tactics) are split into pure `decideX` + effectful
   `applyX` (`GameAI.swift`, `GameAITactics.swift`). The top-level `decide()` /
