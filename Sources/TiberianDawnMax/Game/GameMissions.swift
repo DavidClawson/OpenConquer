@@ -764,6 +764,105 @@ extension GameObject {
     // MARK: - Building Repair
 
     /// Repair a building: spend credits to restore HP over time
+    /// Drive a player-ordered vehicle to its target repair bay (FIX) and, once
+    /// parked at the bay, heal it over time while draining credits — mirroring
+    /// the building self-repair cost model. Released back to Guard when full,
+    /// when the bay is gone, or when the house can no longer afford it.
+    func tickRepairAtFacility() {
+        guard let world = session.world else { return }
+        guard let fixID = repairBuildingID,
+              let fix = world.objects.first(where: {
+                  $0.id == fixID && $0.kind == .structure && $0.strength > 0 &&
+                  $0.house == house && $0.typeName.uppercased() == "FIX"
+              }) else {
+            repairBuildingID = nil
+            isTethered = false
+            mission = .guard_
+            return
+        }
+
+        // Already fully repaired — nothing to do.
+        if strength >= maxStrength {
+            repairBuildingID = nil
+            isTethered = false
+            moveTargetX = nil
+            moveTargetY = nil
+            movePath = []
+            mission = .guard_
+            return
+        }
+
+        // Distance to the FIX footprint center. A 3x3's center-to-edge is 36px,
+        // so a vehicle parked in a cell touching the building sits ~48-58px away.
+        let rdx = fix.worldX - worldX
+        let rdy = fix.worldY - worldY
+        let distToFix = sqrt(rdx * rdx + rdy * rdy)
+        let parkedDist = 62.0
+
+        if distToFix > parkedDist {
+            // Drive to the bay. We aim at the (impassable) footprint CENTER and
+            // let findPath reroute to the nearest reachable cell touching the
+            // building — so the vehicle pulls in from whichever side is open,
+            // robust even when the bay is hemmed in by other structures.
+            moveTargetX = fix.worldX
+            moveTargetY = fix.worldY
+            if movePath.isEmpty {
+                movePath = findPath(fromX: cellX, fromY: cellY,
+                                    toX: fix.cellX, toY: fix.cellY,
+                                    ignoring: self, speedType: cachedSpeedType)
+            }
+            if !movePath.isEmpty {
+                let _ = moveOneStep()
+                return
+            }
+            // Can't path any closer. If we're not even near the FIX, keep
+            // retrying (a transient blocker may clear); don't heal from afar.
+            if distToFix > 120.0 { return }
+        }
+
+        // Parked at the bay — sit still, tether (drives the on-pad render offset),
+        // and heal.
+        moveTargetX = nil
+        moveTargetY = nil
+        movePath = []
+        isTethered = true
+
+        guard world.tickCount % 4 == 0 else { return }
+        let repairStep = max(1, maxStrength / 50)  // ~50 steps to full
+        let repairCost = max(1, cost / 50)
+        let houseState = getHouseState(house)
+        if houseState.spendCredits(repairCost) {
+            strength = min(maxStrength, strength + repairStep)
+            if house == world.playerHouse {
+                session.sidebarCredits = houseState.credits
+            }
+        } else {
+            // Out of money — give up and resume guarding.
+            repairBuildingID = nil
+            isTethered = false
+            mission = .guard_
+        }
+    }
+
+    /// Render-space offset (pixels) that pulls a vehicle being repaired up onto
+    /// the FIX repair pad (the building centre) once it's parked at the bay, so
+    /// it visibly sits on the pad rather than beside it. Zero unless tethered on
+    /// a repair order and already adjacent to the bay.
+    func repairPadOffset() -> (dx: Double, dy: Double) {
+        guard mission == .enter, isTethered, let fixID = repairBuildingID,
+              let world = session.world,
+              let fix = world.objects.first(where: {
+                  $0.id == fixID && $0.kind == .structure && $0.strength > 0 &&
+                  $0.typeName.uppercased() == "FIX"
+              }) else { return (0, 0) }
+        let dx = fix.worldX - worldX
+        let dy = fix.worldY - worldY
+        let d = sqrt(dx * dx + dy * dy)
+        guard d > 1.0 && d < 108.0 else { return (0, 0) }
+        // Pull most of the way onto the pad centre.
+        return (dx * 0.85, dy * 0.85)
+    }
+
     func tickBuildingRepair() {
         guard kind == .structure else {
             mission = .guard_

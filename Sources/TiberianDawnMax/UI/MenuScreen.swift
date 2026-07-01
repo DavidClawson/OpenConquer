@@ -233,21 +233,25 @@ class LoadMissionFactionScreen: MenuScreen {
 // MARK: - Load Mission: Mission List
 
 // Mission names from the original C&C manual/campaign
+// Mission titles taken from the original briefing-video descriptions
+// (Vanilla-Conquer mixnamedb: gdi1..gdi15 / nod1..nod13). The number keys the
+// EA/primary variant of each mission; branch variants (…EB/…EC) are noted where
+// they differ (e.g. GDI 4b "Recapture the Convoy", GDI 8b "Protect Mobius").
 let gdiMissionNames: [Int: String] = [
-    1: "X16-Y42",
-    2: "Knock Out That Refinery",
-    3: "Air Supremacy",
-    4: "Reinforce Bialystok",
-    5: "Evacuate Nikoomba",
-    6: "Destroy the Airstrip",
-    7: "Infiltrate Nod Base",
-    8: "Remove SAM Sites",
-    9: "Locate the Prison",
-    10: "Rescue Mobius",
-    11: "Code Name Delphi",
-    12: "Saving Doctor Wong",
-    13: "Retrieve the Detonator",
-    14: "Destroy Nod Factory",
+    1: "Capture the Beachhead",
+    2: "Destroy the Nod Refinery",
+    3: "Destroy the SAM Sites",
+    4: "Capture the Village",
+    5: "Repair the GDI Base",
+    6: "Destroy the Nod Base",
+    7: "Finish the Nod Base",
+    8: "Repair GDI Equipment",
+    9: "Destroy the Bunkers",
+    10: "Orca Raid",
+    11: "Find Delphi",
+    12: "Rescue Mobius",
+    13: "Destroy the Bio Lab",
+    14: "Destroy the Nod Forces",
     15: "Temple Strike",
 ]
 
@@ -1299,10 +1303,24 @@ func clampGameCamera() {
     let maxCamX: Double
     let maxCamY: Double
     if let bounds = session.world?.mapBounds {
-        minCamX = Double(bounds.x * 24)
-        minCamY = Double(bounds.y * 24)
-        maxCamX = Double((bounds.x + bounds.width) * 24) - vpW
-        maxCamY = Double((bounds.y + bounds.height) * 24) - vpH
+        let mapPixW = Double(bounds.width * 24)
+        let mapPixH = Double(bounds.height * 24)
+        // If the map is smaller than the viewport on an axis, CENTER it (the
+        // out-of-bounds mask paints the surrounding area black) instead of
+        // pinning it to a corner. Otherwise clamp so the viewport stays inside.
+        if mapPixW <= vpW {
+            renderState.gameCameraX = Double(bounds.x * 24) - (vpW - mapPixW) / 2.0
+        } else {
+            renderState.gameCameraX = max(Double(bounds.x * 24),
+                min(Double((bounds.x + bounds.width) * 24) - vpW, renderState.gameCameraX))
+        }
+        if mapPixH <= vpH {
+            renderState.gameCameraY = Double(bounds.y * 24) - (vpH - mapPixH) / 2.0
+        } else {
+            renderState.gameCameraY = max(Double(bounds.y * 24),
+                min(Double((bounds.y + bounds.height) * 24) - vpH, renderState.gameCameraY))
+        }
+        return
     } else {
         minCamX = 0
         minCamY = 0

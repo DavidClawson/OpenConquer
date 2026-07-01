@@ -17,10 +17,15 @@ let tiberiumValue: Int = 25
 let harvesterUnloadRate: Int = 1
 
 /// Ticks the harvester takes to slide into / back out of the refinery bay.
-let harvesterDockSlideTicks: Int = 8
+/// Slow enough (~0.8s each way at 15 FPS) that the pull-in/pull-out reads as a
+/// deliberate docking maneuver rather than a brief twitch.
+let harvesterDockSlideTicks: Int = 12
 
 /// How far (pixels) the harvester sprite slides north into the bay when docked.
-let harvesterDockDepth: Double = 22.0
+/// The dock cell sits 2 cells (48px) south of the PROC center, so ~34px carries
+/// the harvester up under the building's lower edge where it gets occluded —
+/// looking like it drives inside the refinery to unload.
+let harvesterDockDepth: Double = 34.0
 
 // missionStatus values used by the harvester while returning to a refinery:
 let dockApproaching = 0   // driving to the dock cell (or out harvesting)
@@ -195,8 +200,9 @@ extension GameObject {
         }
 
         // State machine based on current conditions
-        if tiberiumLoad >= maxTiberiumLoad || isDocking {
-            // Full, or already docking — run the refinery docking sequence.
+        if tiberiumLoad >= maxTiberiumLoad || isDocking || harvesterForceDock {
+            // Full, already docking, or the player ordered us back to a refinery —
+            // run the refinery docking sequence.
             guard let refinery = findNearestRefinery() else {
                 // No refinery — abandon the dock and just sit.
                 missionStatus = dockApproaching
@@ -247,10 +253,22 @@ extension GameObject {
                 dockTimer += 1
                 // Wait for the slide-in to finish before depositing.
                 if dockTimer >= harvesterDockSlideTicks {
+                    let hs = getHouseState(house)
+                    let spaceLeft = hs.capacity > 0 ? max(0, hs.capacity - hs.tiberium) : Int.max
                     if tiberiumLoad > 0 {
-                        let chunk = min(harvesterUnloadRate, tiberiumLoad)
-                        depositTiberium(load: chunk)
-                        tiberiumLoad -= chunk
+                        if spaceLeft > 0 {
+                            let chunk = min(harvesterUnloadRate, tiberiumLoad, spaceLeft)
+                            depositTiberium(load: chunk)
+                            tiberiumLoad -= chunk
+                        } else {
+                            // Storage full ("silos needed"): hold the load and
+                            // stay docked at the refinery rather than shuttling
+                            // out to the field pointlessly. Unloading resumes the
+                            // moment room frees up (silos built / credits spent).
+                            if house == world.playerHouse {
+                                session.speakEVA(.needMoCapacity, cooldownTicks: 450)
+                            }
+                        }
                     }
                     if tiberiumLoad <= 0 {
                         // Empty — begin backing out of the bay.
@@ -270,6 +288,9 @@ extension GameObject {
                 if dockTimer >= harvesterDockSlideTicks {
                     missionStatus = dockApproaching
                     dockTimer = 0
+                    // A player-ordered docking trip is now complete; resume the
+                    // normal "harvest until full, then return to nearest" cycle.
+                    harvesterForceDock = false
                 }
 
             default:
@@ -419,6 +440,14 @@ extension GameObject {
         }
     }
 
+    /// True while this harvester is seated in (or backing out of) the refinery
+    /// bay. The renderer draws these behind the building so the slide reads as
+    /// the harvester pulling inside.
+    var isHarvesterDocked: Bool {
+        isHarvester && mission == .harvest &&
+        (missionStatus == dockUnloading || missionStatus == dockBackingOut)
+    }
+
     /// Render-space offset (pixels) that slides a docked harvester into and out
     /// of the refinery bay. Returns zero unless this is a harvester actively
     /// docking on a Harvest mission, so a redirected harvester never floats.
@@ -459,9 +488,18 @@ extension GameObject {
         return bestCell
     }
 
-    /// Find nearest refinery owned by this object's house
+    /// Find the refinery this harvester should dock at. Honors a player-set
+    /// preference (right-click "return to refinery") when that refinery still
+    /// exists and is alive; otherwise falls back to the nearest owned PROC.
     func findNearestRefinery() -> GameObject? {
         guard let world = session.world else { return nil }
+        if let pref = preferredRefineryID,
+           let refinery = world.objects.first(where: {
+               $0.id == pref && $0.kind == .structure && $0.strength > 0 &&
+               $0.house == house && $0.typeName.uppercased() == "PROC"
+           }) {
+            return refinery
+        }
         var nearest: GameObject? = nil
         var nearestDist = Double.infinity
 

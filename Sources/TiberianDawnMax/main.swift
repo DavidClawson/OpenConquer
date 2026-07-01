@@ -89,6 +89,9 @@ if let dumpIdx = CommandLine.arguments.firstIndex(of: "--dump-scenario"),
             print("Waypoint \(wp.id): cell=\(wp.cell) (\(cellX),\(cellY)) px=(\(cellX*24),\(cellY*24))")
         }
         print("Theater: \(data.theater)  Credits: \(data.credits)  BuildLevel: \(data.buildLevel)")
+        if let brief = session.campaign.briefingText(scenarioName: scen) {
+            print("BRIEFING: \(brief.prefix(400))")
+        }
         // Player object placements
         let playerHouse = scen.uppercased().hasPrefix("SCB") ? "BadGuy" : "GoodGuy"
         print("--- Player (\(playerHouse)) placements ---")
@@ -175,6 +178,26 @@ if CommandLine.arguments.contains("--test-regions") {
 // Harvester economy regression: --test-harvester-economy
 if CommandLine.arguments.contains("--test-harvester-economy") {
     exit(headlessTestHarvesterEconomyCommand())
+}
+
+if let idx = CommandLine.arguments.firstIndex(of: "--test-repair"),
+   idx + 1 < CommandLine.arguments.count {
+    exit(headlessTestRepairCommand(scenario: CommandLine.arguments[idx + 1]))
+}
+
+if let idx = CommandLine.arguments.firstIndex(of: "--test-crush"),
+   idx + 1 < CommandLine.arguments.count {
+    exit(headlessTestCrushCommand(scenario: CommandLine.arguments[idx + 1]))
+}
+
+if let idx = CommandLine.arguments.firstIndex(of: "--test-fogpath"),
+   idx + 1 < CommandLine.arguments.count {
+    exit(headlessTestFogPathCommand(scenario: CommandLine.arguments[idx + 1]))
+}
+
+if let idx = CommandLine.arguments.firstIndex(of: "--test-stacking"),
+   idx + 1 < CommandLine.arguments.count {
+    exit(headlessTestStackingCommand(scenario: CommandLine.arguments[idx + 1]))
 }
 
 // B3 AI decision-stream trace: --ai-trace <SCEN> <ticks>
@@ -313,6 +336,11 @@ guard SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_AUDIO) == 0 else {
     print("SDL_Init failed: \(String(cString: SDL_GetError()))")
     exit(1)
 }
+
+// Interactive play: the human player pathfinds against explored terrain only
+// (unexplored = assumed passable, reroute on discovery). Headless/test runs
+// exit above before reaching here, so this never perturbs determinism.
+session.fogAwarePathfinding = true
 
 // Restore last window size if available, otherwise use the default.
 if let saved = WindowConfig.loadSaved() {

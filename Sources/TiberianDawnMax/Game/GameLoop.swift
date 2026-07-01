@@ -178,8 +178,11 @@ func gameTick() {
         case .return_:
             obj.tickReturn()
         case .enter:
-            // Move toward nav target (transport/building)
-            if obj.moveTargetX != nil {
+            if obj.repairBuildingID != nil {
+                // Player sent this vehicle to a repair bay (FIX) — drive in and heal.
+                obj.tickRepairAtFacility()
+            } else if obj.moveTargetX != nil {
+                // Move toward nav target (transport/building)
                 obj.moveOneStep()
             } else {
                 obj.mission = .guard_
@@ -391,6 +394,23 @@ extension GameObject {
             return .noTarget
         }
 
+        // Keep the occupancy grid LIVE as this unit crosses cell boundaries this
+        // tick. Occupancy is otherwise only rebuilt once per tick, so two units
+        // arriving at the same destination cell in the same tick both saw it as
+        // empty and stacked. Updating it here makes the second arriver's
+        // destination check see the first, so it reroutes to a free cell.
+        let occStartCell = cell
+        defer {
+            let endCell = cell
+            if endCell != occStartCell, let world = session.world {
+                if var ids = world.occupancy[occStartCell] {
+                    ids.removeAll { $0 == id }
+                    world.occupancy[occStartCell] = ids.isEmpty ? nil : ids
+                }
+                world.occupancy[endCell, default: []].append(id)
+            }
+        }
+
         // If we have no path, compute one via A*
         if movePath.isEmpty {
             let fromCellX = cellX
@@ -421,8 +441,15 @@ extension GameObject {
             let nextCell = movePath[0]
             let nextCellIdx = nextCell.cellY * 64 + nextCell.cellX
 
-            // Revalidate: if next path cell became impassable (new structure, etc.), repath
-            let passMap = passabilityMap(for: cachedSpeedType)
+            // Revalidate: if next path cell became impassable (new structure, or
+            // — for a fog-pathing player unit — an obstacle just revealed by the
+            // advancing unit), drop the path and repath. Fog pathers only block
+            // on cells they've actually explored, so they keep driving into the
+            // dark until they discover the blocker rather than "knowing" it.
+            var passMap = passabilityMap(for: cachedSpeedType)
+            if usesFogPathfinding(self) {
+                passMap = fogAwarePassability(base: passMap)
+            }
             if nextCellIdx >= 0 && nextCellIdx < 4096 && !passMap[nextCellIdx] {
                 movePath = []  // Invalidate stale path, will repath next tick
                 return .blocked

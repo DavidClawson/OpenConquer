@@ -220,6 +220,11 @@ extension GameObject {
               let attacker = world.findObject(id: aid),
               attacker.strength > 0,
               isEnemy(self, attacker) else { return }
+        // A tracked crusher under an explicit MOVE order doesn't stop to trade
+        // fire with squishable infantry — it keeps driving and runs them over
+        // (the crush happens in executeMovementStep). This is what stops a tank
+        // from "refusing" to cross a chokepoint occupied by enemy infantry.
+        if isCrusher && mission == .move && attacker.isCrushable { return }
         // Don't chase attackers we can't reach — if our weapon range is
         // shorter than the distance, going prone is the safer reaction.
         let range = resolveWeapon()?.range ?? 96.0

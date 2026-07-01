@@ -137,6 +137,11 @@ class GameObject {
     // Harvesting (units only)
     var tiberiumLoad: Int = 0
     var dockTimer: Int = 0          // Transient counter driving the refinery dock slide-in/out animation
+    var preferredRefineryID: Int? = nil  // Player-directed dock target; harvester docks here instead of the nearest PROC
+    var harvesterForceDock: Bool = false // Player ordered "return to refinery" — go dock now even if not full
+
+    // Repair facility (FIX) — vehicle the player sent to a repair bay to be healed
+    var repairBuildingID: Int? = nil
 
     // Animation state (infantry walk cycle, fire animation)
     var animFrame: Int = 0          // Current animation frame offset (0 = stand, 1+ = walk cycle)

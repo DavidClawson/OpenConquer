@@ -436,6 +436,34 @@ private struct PathHeap {
 /// Find a path from (fromX, fromY) to (toX, toY) using A* on the 64x64 grid.
 /// Uses a binary heap for O(log n) priority queue operations.
 /// Returns array of (cellX, cellY) waypoints, or empty if no path found.
+/// Passability map for the human player's fog-aware pathfinding: identical to
+/// `base` except that unexplored, in-bounds cells are treated as passable — so a
+/// unit ordered into the dark heads straight there and only reroutes once it
+/// discovers a real obstacle. Explored cells keep their true passability and
+/// out-of-bounds cells stay blocked.
+func fogAwarePassability(base: [Bool]) -> [Bool] {
+    guard let map = session.world?.map else { return base }
+    let bounds = scenarioData?.mapBounds
+    var out = base
+    for i in 0..<4096 {
+        if out[i] { continue }
+        if map.fogState[i] != .unexplored { continue }  // known terrain: trust it
+        if let b = bounds {
+            let x = i % 64, y = i / 64
+            if x < b.x || x >= b.x + b.width || y < b.y || y >= b.y + b.height { continue }
+        }
+        out[i] = true
+    }
+    return out
+}
+
+/// True when `mover` should pathfind against explored terrain only (the human
+/// player during interactive play).
+func usesFogPathfinding(_ mover: GameObject?) -> Bool {
+    guard session.fogAwarePathfinding, let mover = mover else { return false }
+    return mover.house == session.world?.playerHouse
+}
+
 func findPath(fromX: Int, fromY: Int, toX: Int, toY: Int,
               ignoring: GameObject? = nil, maxSteps: Int = 1200,
               speedType: SpeedType = .foot) -> [(cellX: Int, cellY: Int)] {
@@ -446,7 +474,10 @@ func findPath(fromX: Int, fromY: Int, toX: Int, toY: Int,
         return []
     }
 
-    let passMap = passabilityMap(for: speedType)
+    var passMap = passabilityMap(for: speedType)
+    if usesFogPathfinding(ignoring) {
+        passMap = fogAwarePassability(base: passMap)
+    }
 
     // Reroute the destination if the requested cell can't actually be the
     // unit's resting place — either the static terrain forbids it (water,

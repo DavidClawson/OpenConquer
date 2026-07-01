@@ -470,7 +470,7 @@ class AudioManager {
     var isInitialized = false
     var masterVolume: Float = 0.8
     var sfxVolume: Float = 1.0
-    var musicVolume: Float = 0.3
+    var musicVolume: Float = 0.6  // was 0.3 — with master 0.8 that was only ~0.24 (far too quiet for the remastered masters)
 
     // Sound library (set after AssetManager is initialized)
     var soundLibrary: SoundLibrary?
@@ -484,6 +484,7 @@ class AudioManager {
     var musicSamples: [Int16] = []
     var musicSampleRate: Int = 22050
     var musicOffset: Int = 0
+    var musicOffsetFrac: Double = 0  // sub-sample resample phase carried across ticks
     var isMusicPlaying: Bool = false
     var isMusicLooping: Bool = false  // Don't loop single tracks; advance playlist
     var musicEnabled: Bool = true
@@ -501,7 +502,11 @@ class AudioManager {
     // Active sound mixing
     var activeSounds: [ActiveSound] = []
     let maxActiveSounds = 24
-    let outputSampleRate = 22050
+    // 44100 matches the remastered music masters (44100 Hz mono), so they play
+    // with NO downsampling — the old 22050 device force-decimated 44100 music
+    // 2:1 with no anti-alias filter, which aliased into audible fizz/crackle on
+    // bright tracks. SFX (22050) now UPSAMPLE to 44100, which is clean.
+    let outputSampleRate = 44100
 
     // EVA speech queue
     var speechQueue: [VoxType] = []
@@ -513,6 +518,7 @@ class AudioManager {
         var volume: Float
         var pan: Float  // -1.0 left, 0.0 center, 1.0 right
         var sourceSampleRate: Int
+        var offsetFrac: Float = 0  // sub-sample resample phase carried across ticks
     }
 
     func initialize() {
@@ -678,6 +684,7 @@ class AudioManager {
             musicSamples = samples
             musicSampleRate = soundSampleRates[name] ?? outputSampleRate
             musicOffset = 0
+            musicOffsetFrac = 0
             musicLoading = false
             isMusicPlaying = true
             print("AudioManager: Playing theme '\(theme.title)' (cached)")
@@ -729,6 +736,7 @@ class AudioManager {
         currentTheme = .none
         musicSamples = []
         musicOffset = 0
+        musicOffsetFrac = 0
     }
 
     /// Track how many consecutive tracks failed to load (prevent infinite skip loop)
@@ -819,6 +827,7 @@ class AudioManager {
                 musicSamples = r.samples
                 musicSampleRate = r.sampleRate
                 musicOffset = 0
+                musicOffsetFrac = 0
                 musicLoading = false
                 isMusicPlaying = true
                 consecutiveTrackFailures = 0
@@ -889,7 +898,11 @@ class AudioManager {
         if isMusicPlaying && !musicSamples.isEmpty {
             let musicVol = musicVolume * masterVolume
             let ratio = Double(musicSampleRate) / Double(outputSampleRate)
-            var srcPos = Double(musicOffset)
+            // Carry the fractional source position across ticks. Truncating it
+            // (the old `Int(srcPos)`) dropped up to ~1 sample of phase every
+            // 100ms tick, clicking on any non-integer ratio (e.g. 22050 source
+            // upsampled to a 44100 device).
+            var srcPos = Double(musicOffset) + musicOffsetFrac
 
             for i in 0..<frameCount {
                 let srcIdx = Int(srcPos)
@@ -912,6 +925,7 @@ class AudioManager {
                 }
             }
             musicOffset = Int(srcPos)
+            musicOffsetFrac = srcPos - Double(musicOffset)
         }
 
         // Convert to Int16 interleaved stereo and queue
@@ -1048,9 +1062,11 @@ class AudioManager {
             return
         }
 
-        // Resampling path: use Double for precision
+        // Resampling path: use Double for precision, carrying the sub-sample
+        // phase across ticks so upsampling (e.g. 22050 SFX → 44100 device) has
+        // no periodic click from truncating the fractional position.
         let ratio = Double(sound.sourceSampleRate) / Double(outputSampleRate)
-        var srcPos = Double(sound.offset)
+        var srcPos = Double(sound.offset) + Double(sound.offsetFrac)
 
         for i in 0..<frameCount {
             let srcIdx = Int(srcPos)
@@ -1071,6 +1087,7 @@ class AudioManager {
         }
 
         sound.offset = Int(srcPos)
+        sound.offsetFrac = Float(srcPos - Double(sound.offset))
     }
 }
 

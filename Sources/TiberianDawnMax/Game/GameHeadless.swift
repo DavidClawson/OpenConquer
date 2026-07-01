@@ -465,7 +465,7 @@ func headlessTestRegionsCommand() -> Int32 {
     let mover = GameObject(id: world.allocateId(), typeName: "E1", house: .goodGuy,
                            kind: .infantry, worldX: 12, worldY: 12, facing: 0,
                            strength: 100, mission: .guard_, speed: 0)
-    world.objects.append(mover)
+    world.addObject(mover)
     session.world = world
     session.triggerWinState = .playing
 
@@ -527,7 +527,7 @@ func headlessTestHarvesterEconomyCommand() -> Int32 {
     let harv = GameObject(id: world.allocateId(), typeName: "HARV", house: .goodGuy,
                           kind: .unit, worldX: 12, worldY: 12, facing: 0,
                           strength: 200, mission: .harvest, speed: 0)
-    world.objects.append(harv)
+    world.addObject(harv)
 
     // 1. Full storage: a deposit is wasted (no credit gain).
     let c0 = session.sidebarCredits
@@ -555,6 +555,240 @@ func headlessTestHarvesterEconomyCommand() -> Int32 {
     print("  replenish: deposit credited \(c1) -> \(session.sidebarCredits)")
 
     print("PASS: harvester economy recovers after spending (silos no longer stuck)")
+    return 0
+}
+
+/// `--test-repair <SCEN>` — verify a player-ordered vehicle actually drives to a
+/// repair bay (FIX) and heals. Reproduces the "tank never went onto the pad"
+/// report. Exit 0 = pass.
+func headlessTestRepairCommand(scenario: String) -> Int32 {
+    let seed: UInt64 = 0xD1CE_D1CE_D1CE_D1CE
+    print("test-repair: scenario=\(scenario)")
+    forcedGameSeed = seed
+    defer { forcedGameSeed = nil }
+    guard let data = loadScenario("\(scenario).INI", from: mixManager) else {
+        print("test-repair: could not load scenario '\(scenario)'"); return 1
+    }
+    initGameWorld(scenario: data, scenarioName: scenario)
+    guard let world = session.world else { return 1 }
+
+    // Find an open spot: a 3x3 FIX footprint centered at (cx,cy), a passable
+    // dock cell 2 south, and a tank spawn 4 south — all land-passable.
+    func open(_ x: Int, _ y: Int) -> Bool {
+        x >= 0 && x < 64 && y >= 0 && y < 64 && landPassability[y * 64 + x]
+    }
+    var site: (cx: Int, cy: Int)? = nil
+    searchLoop: for cy in 1..<60 {
+        for cx in 1..<62 {
+            var ok = true
+            for dy in -1...1 { for dx in -1...1 where !open(cx + dx, cy + dy) { ok = false } }
+            if ok && open(cx, cy + 2) && open(cx, cy + 4) { site = (cx, cy); break searchLoop }
+        }
+    }
+    guard let s = site else { print("FAIL: no open site for FIX"); return 1 }
+
+    // Mark the FIX footprint impassable (as a real placed building would).
+    for dy in -1...1 { for dx in -1...1 { landPassability[(s.cy + dy) * 64 + (s.cx + dx)] = false } }
+
+    let fix = GameObject(id: world.allocateId(), typeName: "FIX", house: world.playerHouse,
+                         kind: .structure, worldX: Double(s.cx * 24 + 12), worldY: Double(s.cy * 24 + 12),
+                         facing: 0, strength: 400, mission: .guard_, speed: 0)
+    world.addObject(fix)
+
+    let tank = GameObject(id: world.allocateId(), typeName: "MTNK", house: world.playerHouse,
+                          kind: .unit, worldX: Double(s.cx * 24 + 12), worldY: Double((s.cy + 4) * 24 + 12),
+                          facing: 0, strength: 100, mission: .guard_,
+                          speed: resolveSpeed(typeName: "MTNK", kind: .unit))
+    world.addObject(tank)
+    // Isolate the repair mechanic: this scenario has live Nod units that would
+    // otherwise shoot the tank while it sits at the bay. We only care that it
+    // drives in and heals.
+    tank.isInvulnerable = true
+    let maxStr = tank.maxStrength
+    tank.strength = min(100, maxStr / 2)
+
+    // Give the house plenty of credits so repair is affordable.
+    let hs = getHouseState(world.playerHouse)
+    hs.credits = 5000
+    session.sidebarCredits = 5000
+
+    // Issue the repair order (mirrors GameInput's FIX branch).
+    tank.repairBuildingID = fix.id
+    tank.mission = .enter
+    tank.moveTargetX = nil; tank.moveTargetY = nil; tank.movePath = []
+
+    let startY = tank.worldY
+    let startStr = tank.strength
+    var minDistToFix = Double.infinity
+    for t in 0..<300 {
+        gameTick()
+        let d = abs(fix.worldY - tank.worldY) + abs(fix.worldX - tank.worldX)
+        minDistToFix = min(minDistToFix, d)
+        if t == 60 || t == 150 || t == 299 {
+            print("  t=\(t): tank cell=(\(tank.cellX),\(tank.cellY)) str=\(tank.strength)/\(maxStr) mission=\(tank.mission) distToFix=\(String(format: "%.0f", d))")
+        }
+    }
+
+    let moved = tank.worldY < startY - 12   // moved north toward the FIX
+    let healed = tank.strength > startStr
+    if !moved { print("FAIL: tank did not move toward the FIX (startY=\(startY), endY=\(tank.worldY), minDist=\(minDistToFix))"); return 1 }
+    if !healed { print("FAIL: tank never healed (str stayed \(startStr))"); return 1 }
+    print("PASS: tank drove to the repair bay and healed \(startStr) -> \(tank.strength)")
+    return 0
+}
+
+/// `--test-crush <SCEN>` — verify a tracked crusher (tank) will path through and
+/// squish an enemy infantryman blocking a 1-wide chokepoint (the "tank refused
+/// to cross the bridge" report). Exit 0 = pass.
+func headlessTestCrushCommand(scenario: String) -> Int32 {
+    let seed: UInt64 = 0xD1CE_D1CE_D1CE_D1CE
+    print("test-crush: scenario=\(scenario)")
+    forcedGameSeed = seed
+    defer { forcedGameSeed = nil }
+    guard let data = loadScenario("\(scenario).INI", from: mixManager) else {
+        print("test-crush: could not load scenario '\(scenario)'"); return 1
+    }
+    initGameWorld(scenario: data, scenarioName: scenario)
+    guard let world = session.world else { return 1 }
+
+    // Carve a 1-wide E-W corridor (a stand-in for a bridge deck): a 5-cell run
+    // is passable, everything immediately above/below it is walled off, so the
+    // ONLY route from the west end to the east end is straight through the
+    // middle cell — where we park an enemy infantryman.
+    let cy = 30, x0 = 20
+    for x in 0..<64 { for dy in -1...1 { landPassability[(cy + dy) * 64 + x] = false } }
+    for x in x0...(x0 + 4) { landPassability[cy * 64 + x] = true }
+
+    let tank = GameObject(id: world.allocateId(), typeName: "MTNK", house: world.playerHouse,
+                          kind: .unit, worldX: Double(x0 * 24 + 12), worldY: Double(cy * 24 + 12),
+                          facing: 64, strength: 400, mission: .guard_,
+                          speed: resolveSpeed(typeName: "MTNK", kind: .unit))
+    world.addObject(tank)
+
+    let enemyHouse: House = world.playerHouse == .goodGuy ? .badGuy : .goodGuy
+    let inf = GameObject(id: world.allocateId(), typeName: "E1", house: enemyHouse,
+                         kind: .infantry, worldX: Double((x0 + 2) * 24 + 12), worldY: Double(cy * 24 + 12),
+                         facing: 0, strength: 50, mission: .guard_,
+                         speed: resolveSpeed(typeName: "E1", kind: .infantry))
+    world.addObject(inf)
+    let infId = inf.id
+
+    // Order the tank to the east end (one cell past the infantry).
+    tank.moveTargetX = Double((x0 + 4) * 24 + 12)
+    tank.moveTargetY = Double(cy * 24 + 12)
+    tank.mission = .move
+    tank.movePath = []
+
+    var crushed = false
+    for _ in 0..<120 {
+        gameTick()
+        if world.findObject(id: infId) == nil || world.findObject(id: infId)!.strength <= 0 { crushed = true }
+        if crushed && tank.cellX >= x0 + 4 { break }
+    }
+
+    if !crushed { print("FAIL: enemy infantry was NOT crushed — tank treated the chokepoint as blocked"); return 1 }
+    if tank.cellX < x0 + 3 { print("FAIL: tank crushed but did not cross the chokepoint (cellX=\(tank.cellX))"); return 1 }
+    print("PASS: tank crushed the enemy infantry and crossed the chokepoint")
+    return 0
+}
+
+/// `--test-fogpath <SCEN>` — verify the human player's fog-aware pathfinding:
+/// a unit plans straight through an UNEXPLORED obstacle (assumed passable) but
+/// routes AROUND the same obstacle once it's explored. Exit 0 = pass.
+func headlessTestFogPathCommand(scenario: String) -> Int32 {
+    let seed: UInt64 = 0xD1CE_D1CE_D1CE_D1CE
+    print("test-fogpath: scenario=\(scenario)")
+    forcedGameSeed = seed
+    defer { forcedGameSeed = nil }
+    guard let data = loadScenario("\(scenario).INI", from: mixManager) else {
+        print("test-fogpath: could not load scenario '\(scenario)'"); return 1
+    }
+    initGameWorld(scenario: data, scenarioName: scenario)
+    guard let world = session.world else { return 1 }
+    session.fogAwarePathfinding = true
+
+    // A vertical wall at column wx (rows cy-3..cy+3), inside the scenario map
+    // bounds, so routing AROUND it is much longer than straight through.
+    let cy = 48, wx = 48, fromX = 45, toX = 51
+    for i in 0..<4096 { landPassability[i] = true }          // clear the board
+    for dy in -3...3 { landPassability[(cy + dy) * 64 + wx] = false }
+
+    let mover = GameObject(id: world.allocateId(), typeName: "MTNK", house: world.playerHouse,
+                           kind: .unit, worldX: Double(fromX * 24 + 12), worldY: Double(cy * 24 + 12),
+                           facing: 0, strength: 400, mission: .guard_,
+                           speed: resolveSpeed(typeName: "MTNK", kind: .unit))
+    world.addObject(mover)
+
+    // 1. Wall UNEXPLORED → fog-aware path assumes it passable → straight across.
+    fogState = Array(repeating: .unexplored, count: 4096)
+    let hidden = findPath(fromX: fromX, fromY: cy, toX: toX, toY: cy, ignoring: mover, speedType: .track)
+    let hiddenCrossesWall = hidden.contains { $0.cellX == wx && abs($0.cellY - cy) <= 3 }
+    print("  unexplored wall: path len=\(hidden.count), crosses wall cell=\(hiddenCrossesWall)")
+
+    // 2. Wall EXPLORED → real passability → must detour around it.
+    fogState = Array(repeating: .explored, count: 4096)
+    let known = findPath(fromX: fromX, fromY: cy, toX: toX, toY: cy, ignoring: mover, speedType: .track)
+    let knownCrossesWall = known.contains { $0.cellX == wx && abs($0.cellY - cy) <= 3 }
+    print("  explored wall:   path len=\(known.count), crosses wall cell=\(knownCrossesWall)")
+
+    if hidden.isEmpty { print("FAIL: no path found through unexplored wall"); return 1 }
+    if !hiddenCrossesWall { print("FAIL: fog path detoured around an UNEXPLORED wall (should assume passable)"); return 1 }
+    if known.isEmpty { print("FAIL: no path found around explored wall"); return 1 }
+    if knownCrossesWall { print("FAIL: path crossed a KNOWN impassable wall"); return 1 }
+    if known.count <= hidden.count { print("FAIL: detour (\(known.count)) not longer than straight path (\(hidden.count))"); return 1 }
+    print("PASS: player plans through unexplored terrain and reroutes once it's discovered")
+    return 0
+}
+
+/// `--test-stacking <SCEN>` — verify two vehicles ordered to the SAME cell do
+/// not end up stacked on one tile (the "humvees occupy the same tile" report).
+/// Exit 0 = pass.
+func headlessTestStackingCommand(scenario: String) -> Int32 {
+    let seed: UInt64 = 0xD1CE_D1CE_D1CE_D1CE
+    print("test-stacking: scenario=\(scenario)")
+    forcedGameSeed = seed
+    defer { forcedGameSeed = nil }
+    guard let data = loadScenario("\(scenario).INI", from: mixManager) else {
+        print("test-stacking: could not load scenario '\(scenario)'"); return 1
+    }
+    initGameWorld(scenario: data, scenarioName: scenario)
+    guard let world = session.world else { return 1 }
+
+    // Find an open 6x6 patch inside bounds.
+    func open(_ x: Int, _ y: Int) -> Bool { x >= 0 && x < 64 && y >= 0 && y < 64 && landPassability[y * 64 + x] }
+    var base: (x: Int, y: Int)? = nil
+    outer: for cy in 2..<58 { for cx in 2..<58 {
+        var ok = true
+        for dy in 0..<6 { for dx in 0..<6 where !open(cx + dx, cy + dy) { ok = false } }
+        if ok { base = (cx, cy); break outer }
+    } }
+    guard let b = base else { print("FAIL: no open patch"); return 1 }
+
+    // Three jeeps, spread out, all ordered to the SAME single cell.
+    let sp = resolveSpeed(typeName: "JEEP", kind: .unit)
+    var jeeps: [GameObject] = []
+    let starts = [(b.x, b.y), (b.x + 5, b.y), (b.x, b.y + 5)]
+    for (i, s) in starts.enumerated() {
+        let j = GameObject(id: world.allocateId(), typeName: "JEEP", house: world.playerHouse,
+                           kind: .unit, worldX: Double(s.0 * 24 + 12), worldY: Double(s.1 * 24 + 12),
+                           facing: 0, strength: 100, mission: .move, speed: sp)
+        _ = i
+        world.addObject(j); jeeps.append(j)
+    }
+    let tx = b.x + 3, ty = b.y + 3
+    for j in jeeps {
+        j.moveTargetX = Double(tx * 24 + 12); j.moveTargetY = Double(ty * 24 + 12); j.movePath = []
+    }
+
+    for _ in 0..<200 { gameTick() }
+
+    // Report resting cells; a cell shared by 2+ jeeps is a stack.
+    var cellCount: [Int: Int] = [:]
+    for j in jeeps { cellCount[j.cell, default: 0] += 1 }
+    for j in jeeps { print("  jeep id=\(j.id) cell=(\(j.cellX),\(j.cellY))") }
+    let stacked = cellCount.values.contains { $0 > 1 }
+    if stacked { print("FAIL: two jeeps ended on the same cell"); return 1 }
+    print("PASS: jeeps ordered to one point settled on distinct cells")
     return 0
 }
 

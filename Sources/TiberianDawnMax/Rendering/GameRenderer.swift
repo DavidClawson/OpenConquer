@@ -29,6 +29,41 @@ func drawDottedLine(_ renderer: OpaquePointer?, x1: Int32, y1: Int32, x2: Int32,
 // graphics in trailing SHP frames: simple buildings put the damaged version at
 // frameCount-2 and rubble at frameCount-1; turreted buildings (GUN, SAM)
 // shift the entire body+turret set by 64 to reach the damaged variants.
+/// If a harvester is currently docked at this refinery, return the PROC.SHP
+/// animation frame to play; otherwise nil. The whole unload sequence lives in
+/// the building sprite (frames 6-29): the harvester itself is hidden while
+/// docked. Mirrors the original's building-driven dock animation.
+///   6-11  flashing "busy" lights (approach / holding)
+///   12-18 docking, 19-23 siphoning (loops), 24-29 undocking
+func procDockAnimFrame(_ proc: GameObject) -> Int? {
+    guard proc.typeName.uppercased() == "PROC" else { return nil }
+    guard let world = session.world else { return nil }
+    let bayX = proc.cellX
+    let bayY = proc.cellY + 2   // harvester bay is one cell south of the footprint
+    for h in world.objects where h.isHarvesterDocked && h.house == proc.house {
+        guard h.cellX == bayX && abs(h.cellY - bayY) <= 1 else { continue }
+        let slide = Double(max(1, harvesterDockSlideTicks))
+        switch h.missionStatus {
+        case dockUnloading:
+            if h.dockTimer < harvesterDockSlideTicks {
+                // Sliding in: play the docking frames 12..18.
+                let frac = Double(h.dockTimer) / slide
+                return min(18, 12 + Int(frac * 6.0))
+            }
+            // Seated & siphoning: loop the 19..23 frames (dockTimer ticks up
+            // every sim frame while unloading, so this animates on its own).
+            return 19 + ((h.dockTimer - harvesterDockSlideTicks) / 2) % 5
+        case dockBackingOut:
+            // Undocking: play the 24..29 frames as it backs out.
+            let frac = min(1.0, Double(h.dockTimer) / slide)
+            return min(29, 24 + Int(frac * 5.0))
+        default:
+            break
+        }
+    }
+    return nil
+}
+
 func pickStructureFrame(_ obj: GameObject) -> Int {
     if obj.buildUpFrame >= 0 { return obj.buildUpFrame }
 
@@ -44,6 +79,26 @@ func pickStructureFrame(_ obj: GameObject) -> Int {
     let frameCount = remasteredFrameCount(upper)
         ?? renderState.objectSHPCache[upper]?.frames.count
         ?? 0
+
+    // Tiberium silo: the sprite has 5 healthy fill stages (0=empty … 4=full)
+    // chosen from the OWNING HOUSE's stored tiberium vs total capacity, plus a
+    // parallel set of 5 damaged variants at +5. Mirrors VC building.cpp:594-605
+    // (Draw_It's STRUCT_STORAGE special case). Fill is house-wide, not per-silo.
+    if upper == "SILO" {
+        let hs = getHouseState(obj.house)
+        var level = 0
+        if hs.capacity > 0 {
+            level = (hs.tiberium * 5) / hs.capacity
+        }
+        level = min(4, max(0, level))
+        return isDamaged ? level + 5 : level
+    }
+
+    // Refinery playing its harvester dock/unload animation (healthy only — the
+    // 12-29 frames are the intact building's animation set).
+    if upper == "PROC", !isDamaged, !isCritical, let f = procDockAnimFrame(obj) {
+        return f
+    }
 
     if obj.hasTurret {
         var base: Int
@@ -259,6 +314,9 @@ func renderGame(_ renderer: OpaquePointer?) {
     // === Pass 3.75: Crates ===
     renderCrates(renderer, camX: camX, camY: camY, vw: vw, vh: vh)
 
+    // === Pass 3.9: Smudges (scorch/craters) — ground decals, under objects ===
+    renderSmudges(renderer, camX: camX, camY: camY, vw: vw, vh: vh)
+
     // === Pass 4: Game objects sorted by Y (structures first, then units/infantry by Y) ===
     // Separate structures from mobile units for proper draw order
     var structures: [GameObject] = []
@@ -307,6 +365,13 @@ func renderGame(_ renderer: OpaquePointer?) {
             }
         }
     }
+
+    // A docked harvester is HIDDEN entirely (see the skip in the mobile pass
+    // below) and the refinery plays its own dock/siphon/undock animation via
+    // pickStructureFrame — mirroring the original, where the harvester is
+    // limboed on attach and the PROC.SHP carries the whole unload animation
+    // (UNIT.CPP Per_Cell_Process RADIO_ATTACH → Limbo; BUILDING.CPP
+    // Mission_Harvest BSTATE_ACTIVE/AUX1/AUX2). No separate harvester draw.
 
     // Pass 2: Render building sprites on top of bibs
     for obj in structures {
@@ -393,13 +458,24 @@ func renderGame(_ renderer: OpaquePointer?) {
     for obj in mobileObjects {
         // Skip enemy objects on non-visible cells (fog of war)
         if obj.house != world.playerHouse && !isCellVisible(obj.cell) { continue }
+        // A docked harvester is hidden entirely; the refinery plays its own
+        // dock/unload animation (see procDockAnimFrame).
+        if obj.isHarvesterDocked { continue }
 
         // Interpolate between previous and current tick positions for smooth rendering
         let drawX = obj.prevWorldX + (obj.worldX - obj.prevWorldX) * interp
         let drawY = obj.prevWorldY + (obj.worldY - obj.prevWorldY) * interp
-        // Harvesters slide into/out of the refinery bay via a render offset
-        // while docked (the footprint is impassable, so it can't move there).
-        let dockOffset = obj.isHarvester ? obj.harvesterDockOffset() : (dx: 0.0, dy: 0.0)
+        // Render offsets: harvesters can't drive onto the impassable refinery
+        // footprint, and vehicles being repaired sit on the FIX pad (the
+        // building centre) — both are drawn via a positional offset.
+        let dockOffset: (dx: Double, dy: Double)
+        if obj.isHarvester {
+            dockOffset = obj.harvesterDockOffset()
+        } else if obj.repairBuildingID != nil {
+            dockOffset = obj.repairPadOffset()
+        } else {
+            dockOffset = (0.0, 0.0)
+        }
         let screenX = Int32(drawX + dockOffset.dx - Double(camX))
         let screenY = Int32(drawY + dockOffset.dy - Double(camY))
 
@@ -748,15 +824,18 @@ func renderGame(_ renderer: OpaquePointer?) {
         SDL_RenderDrawRect(renderer, &fillRect)
     }
 
-    // === Pass 7: Shroud ===
+    // === Pass 7: Out-of-bounds mask ===
+    // Everything outside the playable map bounds is masked with SOLID black, so
+    // small/bounded maps read as "the map, on a black field" instead of showing
+    // unreachable terrain + fog you can't actually enter.
     if let bounds = world.mapBounds {
         let bx = Int32(bounds.x * tileSize - camX)
         let by = Int32(bounds.y * tileSize - camY)
         let bw = Int32(bounds.width * tileSize)
         let bh = Int32(bounds.height * tileSize)
 
-        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 160)
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE)
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255)
 
         if by > 0 {
             var r = SDL_Rect(x: 0, y: 0, w: vw, h: by)
@@ -1034,7 +1113,13 @@ func renderAnimations(_ renderer: OpaquePointer?, camX: Int, camY: Int, vw: Int3
         }
     }
 
-    // Render smudges (scorch marks, craters)
+}
+
+/// Render smudges (scorch marks and craters). These are ground decals, so they
+/// must be drawn BEFORE buildings and units — otherwise a crater created before
+/// a building/vehicle moved onto the cell paints over it. Called from an early
+/// pass, right after terrain.
+func renderSmudges(_ renderer: OpaquePointer?, camX: Int, camY: Int, vw: Int32, vh: Int32) {
     for smudge in (session.world?.map.smudges ?? []) {
         let cellX = smudge.cell % 64
         let cellY = smudge.cell / 64
@@ -1050,6 +1135,7 @@ func renderAnimations(_ renderer: OpaquePointer?, camX: Int, camY: Int, vw: Int3
             SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
         } else {
             // Procedural fallback: dark circle for craters, dark oval for scorch
+            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
             SDL_SetRenderDrawColor(renderer, 20, 15, 10,
                                    smudge.type.isCrater ? 140 : 80)
             let size: Int32 = smudge.type.isCrater ? 16 : 20

@@ -288,6 +288,57 @@ func handleGameRightClick(_ x: Int32, _ y: Int32, shiftHeld: Bool = false) {
         return
     }
 
+    // Right-clicking one of our own special-service buildings issues a
+    // service order rather than a move:
+    //   • refinery (PROC) + harvester(s) → go dock & unload there
+    //   • repair bay (FIX) + vehicle(s)  → drive in and get repaired
+    // Mirrors the original's context-sensitive deliver / repair cursors.
+    if let building = world.objects.first(where: {
+        $0.kind == .structure && $0.house == world.playerHouse && $0.strength > 0 &&
+        isWorldPosOnBuilding(worldX: worldPos.worldX, worldY: worldPos.worldY, building: $0)
+    }) {
+        let bType = building.typeName.uppercased()
+        if bType == "PROC" {
+            var ordered = false
+            for obj in selected where obj.isHarvester && obj.house == world.playerHouse {
+                obj.preferredRefineryID = building.id
+                obj.harvesterForceDock = true
+                obj.mission = .harvest
+                obj.missionStatus = dockApproaching
+                obj.isTethered = false
+                obj.dockTimer = 0
+                obj.attackTarget = nil
+                obj.isAttackMoving = false
+                obj.moveWaypoints = []
+                obj.movePath = []
+                obj.moveTargetX = nil
+                obj.moveTargetY = nil
+                ordered = true
+            }
+            if ordered {
+                audioManager.play(audioManager.unitAcknowledgeSound())
+                return
+            }
+        } else if bType == "FIX" {
+            var ordered = false
+            for obj in selected where obj.kind == .unit && obj.house == world.playerHouse && !obj.isAircraft {
+                obj.repairBuildingID = building.id
+                obj.mission = .enter
+                obj.attackTarget = nil
+                obj.isAttackMoving = false
+                obj.moveWaypoints = []
+                obj.movePath = []
+                obj.moveTargetX = nil
+                obj.moveTargetY = nil
+                ordered = true
+            }
+            if ordered {
+                audioManager.play(audioManager.unitAcknowledgeSound())
+                return
+            }
+        }
+    }
+
     // Formation spread: arrange targets in a grid so units don't pile up
     let movable = selected.filter { $0.kind != .structure }
     let count = movable.count
