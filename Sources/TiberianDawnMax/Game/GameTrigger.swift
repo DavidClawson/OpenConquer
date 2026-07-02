@@ -793,31 +793,45 @@ func fireTrigger(_ trigger: GameTrigger, firingEvent: TriggerEvent = .any) {
 
     print("Trigger '\(trigger.name)' fired: actions=\(trigger.actions.map { $0.action })")
 
-    // Handle persistence modes
-    switch trigger.persistence {
-    case .volatile:
-        // Fire once, then deactivate
-        trigger.isActive = false
-    case .semiPersistent:
-        // Already handled by attachCount decrement in springTrigger;
-        // deactivate after firing
-        trigger.isActive = false
-    case .persistent:
-        // Never auto-remove; stays active for re-firing
-        break
+    // Run every action in order (classic triggers have exactly one). An action
+    // can report failure — e.g. ACTION_WINLOSE sprung by an event it can't
+    // resolve sets success=false (TRIGGER.CPP:440-442).
+    var success = false
+    for spec in trigger.actions {
+        if executeTriggerAction(spec, trigger: trigger, firingEvent: firingEvent) {
+            success = true
+        }
     }
 
-    // Run every action in order (classic triggers have exactly one).
-    for spec in trigger.actions {
-        executeTriggerAction(spec, trigger: trigger, firingEvent: firingEvent)
+    // A failed time trigger retries on the next check — classic sets Data=1
+    // (one 1/10-min check away, TRIGGER.CPP:527); our per-tick countdown
+    // equivalent is 90 ticks.
+    if !success && trigger.event == .time {
+        trigger.data = 90
+    }
+
+    // Consume the trigger ONLY on success (TRIGGER.CPP:532: `success &&
+    // IsPersistant == VOLATILE`) — a Cap=Win/Des=Lose trigger sprung by
+    // Discovered/Attacked must survive to resolve the real win/lose later
+    // (SCB12EA's sole win trigger was being eaten by the first scout).
+    switch trigger.persistence {
+    case .volatile, .semiPersistent:
+        // semiPersistent attachCount draining is handled in springTrigger;
+        // by the time we're here it fires like a volatile.
+        if success { trigger.isActive = false }
+    case .persistent:
+        break
     }
 }
 
 /// Perform a single trigger action. Team-based actions use the spec's teamName
 /// (falling back to the trigger's own team field). `firingEvent` is the event
-/// that sprang the trigger (used by `WinLose`).
+/// that sprang the trigger (used by `WinLose`). Returns the classic `success`
+/// flag (TRIGGER.CPP:411): false means the action could not apply, so the
+/// caller must NOT consume the trigger.
+@discardableResult
 func executeTriggerAction(_ spec: TriggerActionSpec, trigger: GameTrigger,
-                          firingEvent: TriggerEvent = .any) {
+                          firingEvent: TriggerEvent = .any) -> Bool {
     let teamName = spec.teamName ?? trigger.teamName
     switch spec.action {
     case .win:
@@ -832,7 +846,7 @@ func executeTriggerAction(_ spec: TriggerActionSpec, trigger: GameTrigger,
 
     case .allHunt:
         // Send all enemy units to hunt mode
-        guard let world = session.world else { return }
+        guard let world = session.world else { return true }
         for obj in world.objects {
             if obj.house != world.playerHouse && obj.house != .neutral && obj.strength > 0 {
                 if obj.kind != .structure {
@@ -918,7 +932,10 @@ func executeTriggerAction(_ spec: TriggerActionSpec, trigger: GameTrigger,
         case .playerEntered:
             if session.triggerWinState != .lost { flagToWin() }
         default:
-            break   // any other event can't resolve a Cap=Win/Des=Lose trigger
+            // Any other event can't resolve a Cap=Win/Des=Lose trigger —
+            // classic sets success=false so the trigger is NOT consumed
+            // (TRIGGER.CPP:440-442).
+            return false
         }
 
     case .allowWin:
@@ -942,6 +959,7 @@ func executeTriggerAction(_ spec: TriggerActionSpec, trigger: GameTrigger,
     case .none:
         break
     }
+    return true
 }
 
 /// Deactivate a trigger by name
