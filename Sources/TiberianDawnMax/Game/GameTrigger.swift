@@ -580,22 +580,23 @@ func polledEventReady(_ event: TriggerEvent, threshold: Int, house: House, world
 /// polled events go through `polledEventReady`. On satisfaction it routes
 /// through `registerEventSatisfied` so the combine logic decides whether to fire.
 func evaluateTriggerEvent(_ trigger: GameTrigger, event: TriggerEvent, isEvent2: Bool, world: GameWorld) {
+    // Classic decrements BEFORE the zero test (TRIGGER.CPP:374-380), so a
+    // Data=0 time trigger fires on its FIRST check, and the reset to DataCopy
+    // is unconditional. Classic checks time triggers every TICKS_PER_MINUTE/10
+    // = 90 ticks (HOUSE.CPP:1061); we decrement per tick with data pre-scaled
+    // x90, so 90 ticks is the equivalent minimum refire period for Data=0.
     if event == .time {
         if isEvent2 {
-            if trigger.data2 > 0 {
-                trigger.data2 -= 1
-                if trigger.data2 <= 0 {
-                    registerEventSatisfied(trigger, isEvent2: true)
-                    if trigger.persistence == .persistent { trigger.data2 = trigger.data2Copy }
-                }
+            trigger.data2 -= 1
+            if trigger.data2 <= 0 {
+                trigger.data2 = max(trigger.data2Copy, 90)
+                registerEventSatisfied(trigger, isEvent2: true)
             }
         } else {
-            if trigger.data > 0 {
-                trigger.data -= 1
-                if trigger.data <= 0 {
-                    registerEventSatisfied(trigger, isEvent2: false)
-                    if trigger.persistence == .persistent { trigger.data = trigger.dataCopy }
-                }
+            trigger.data -= 1
+            if trigger.data <= 0 {
+                trigger.data = max(trigger.dataCopy, 90)
+                registerEventSatisfied(trigger, isEvent2: false)
             }
         }
         return

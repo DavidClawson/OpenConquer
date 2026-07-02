@@ -4,6 +4,15 @@ This is the north-star sequence, not a rigid schedule. It's ordered so the proje
 
 The phases map to three overlapping goals: **(A)** play it & build new missions, **(B)** open-source it, **(C)** parity + configurable classic/modified rules.
 
+## Milestones (current sequencing)
+
+The phases below are the taxonomy; these milestones are the *order of attack* as of July 2026:
+
+- **M1 — Full campaign fidelity** *(in progress)* — close out Phase 2: land `IsPrebuilt` production gating (#6C), replace the linear `advanceMission` with real campaign branching (map-selection variants + the GDI sabotage skip), and a verification sweep over every campaign mission INI to flush remaining trigger/parse gaps.
+- **M2 — Contributor onramp** — close out Phase 0 + start the parity doc: issue templates, `good first issue` labels, a `PARITY.md` verified-vs-approximated checklist, README screenshots.
+- **M3 — Linux port** — Phase 5: image-loading abstraction, data-dir abstraction, Linux CI leg.
+- **M4 — Polish & packaging** — Phase 4: HD sidebar meters, unsigned `.app` bundle.
+
 ---
 
 ## Phase 0 — Open-source foundation  *(mostly done)*  → Goal B

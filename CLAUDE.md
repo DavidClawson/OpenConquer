@@ -62,8 +62,13 @@ simulation shows up as a changed digest. (Other diagnostic flags: `--test-mix`,
   `--determinism SCG01EA 4000` print different digests for the same code. Compare
   like-for-like. The documented regression baselines are the `--determinism`
   values (as of 2026-07-01, **default ruleset = `classic1995`, veterancy OFF**):
-  SCG01EA 2500t `0xF2FC92976A82C252`, 4000t `0xF8D1E05941A069C1`,
+  SCG01EA 2500t `0x8C9680DCE673649D`, 4000t `0xEAC76D413AB769D6`,
   SCB01EA 4000t `0xA3C944E7664939D2`.
+  The SCG01EA digests changed from `0xF2FC92976A82C252` / `0xF8D1E05941A069C1`
+  when Data=0 time triggers were fixed to fire on their first check (classic
+  decrement-before-test, TRIGGER.CPP:374-380): SCG01EA's `ATK2` (Time,Create
+  Team,0) now actually spawns its Nod attack team. 13 campaign variants were
+  affected by that bug, incl. SCG07EA/SCG15EA auto-losing at tick ~151.
   SCG01EA 4000t changed from `0xC645B24188C4D2CC` when the AI team-creation model
   (Gap #6) replaced the old flat every-675-tick autocreate pick with the faithful
   Suggested_New_Team former: once the GDI-vs-Nod AI's production enables mid-mission
