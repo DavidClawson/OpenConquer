@@ -219,6 +219,11 @@ if CommandLine.arguments.contains("--test-team-former") {
     exit(headlessTestTeamFormerCommand())
 }
 
+// IsPrebuilt team-demand production self-test (#6C): --test-prebuilt
+if CommandLine.arguments.contains("--test-prebuilt") {
+    exit(headlessTestPrebuiltCommand())
+}
+
 // Tier-1 T4 self-test: --test-regions
 if CommandLine.arguments.contains("--test-regions") {
     exit(headlessTestRegionsCommand())

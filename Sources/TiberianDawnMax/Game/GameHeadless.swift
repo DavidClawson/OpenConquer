@@ -594,6 +594,133 @@ func headlessTestTeamFormerCommand() -> Int32 {
     return 0
 }
 
+/// `--test-prebuilt` — verify #6C IsPrebuilt production gating: the AI's build
+/// deciders follow team-template demand (Suggest_New_Object, HOUSE.CPP:3166-
+/// 3383) ahead of the personality pool. Asset-free; all assertions on the PURE
+/// functions (no RNG draw), plus the satisfaction/exclusion/clamp rules.
+func headlessTestPrebuiltCommand() -> Int32 {
+    print("test-prebuilt: IsPrebuilt team-demand production gating (#6C)")
+    let world = GameWorld()
+    world.playerHouse = .goodGuy      // BadGuy is the AI house under test
+    session.world = world
+    session.activeTeams.removeAll()
+
+    let state = getHouseState(.badGuy)
+    state.credits = 5000
+
+    // Factories so canBuild prerequisites pass and decideUnitBuild's WEAP gate holds.
+    for (t, cell) in [("WEAP", 200), ("HAND", 202), ("PROC", 204)] {
+        let o = GameObject(id: world.allocateId(), typeName: t, house: .badGuy, kind: .structure,
+                           worldX: Double((cell % 64) * 24 + 12), worldY: Double((cell / 64) * 24 + 12),
+                           facing: 0, strength: 400, mission: .guard_, speed: 0)
+        world.addObject(o)
+    }
+    // A harvester so decideUnitBuild's harvester priority doesn't preempt demand.
+    let harv = GameObject(id: world.allocateId(), typeName: "HARV", house: .badGuy, kind: .unit,
+                          worldX: 300, worldY: 300, facing: 0, strength: 600,
+                          mission: .harvest, speed: 1)
+    world.addObject(harv)   // typeName HARV → isHarvester (cached)
+
+    // Prebuilt (non-autocreate) template: 2x LTNK + 1x E3.
+    let pre = TeamType(name: "PRE", house: .badGuy)
+    pre.isPrebuilt = true
+    pre.isAutocreate = false
+    pre.classSlots = [TeamClassSlot(kind: .unit, typeName: "LTNK", desiredCount: 2),
+                      TeamClassSlot(kind: .infantry, typeName: "E3", desiredCount: 1)]
+    session.teamTypes = [pre]
+
+    let owned = state.ownedBuildingTypes()
+
+    func unitCandidates() -> [String] {
+        if case .weighted(let cs) = decideUnitBuild(house: .badGuy, houseState: state,
+                                                    owned: owned, costMultiplier: 1.0) {
+            return cs.map { $0.name }
+        }
+        return []
+    }
+    func infantryCandidates() -> [String] {
+        if case .weighted(let cs) = decideInfantryBuild(house: .badGuy, houseState: state,
+                                                        owned: owned, costMultiplier: 1.0) {
+            return cs.map { $0.name }
+        }
+        return []
+    }
+
+    // 1. Demand: the template drives the choice — exactly LTNK / exactly E3
+    //    (the faction pools would offer several types).
+    guard computeTeamBuildDemand(house: .badGuy, kind: .unit, world: world, alerted: false)["LTNK"] == 2 else {
+        print("FAIL: expected unit demand LTNK=2 from the prebuilt template"); return 1
+    }
+    guard unitCandidates() == ["LTNK"] else {
+        print("FAIL: expected decideUnitBuild to offer exactly [LTNK], got \(unitCandidates())"); return 1
+    }
+    guard infantryCandidates() == ["E3"] else {
+        print("FAIL: expected decideInfantryBuild to offer exactly [E3], got \(infantryCandidates())"); return 1
+    }
+    print("  demand: prebuilt LTNKx2/E3 template → build LTNK / E3")
+
+    // 2. Satisfaction: two free guard-mission LTNKs zero the demand → the AI
+    //    builds NOTHING (classic Suggest_New_Object returns NULL when demand
+    //    exists but nets to zero; the pool only stands in when the scenario
+    //    defines no team demand at all). A .hunt LTNK doesn't count (3250).
+    var ltnks: [GameObject] = []
+    for i in 0..<2 {
+        let u = GameObject(id: world.allocateId(), typeName: "LTNK", house: .badGuy, kind: .unit,
+                           worldX: Double(400 + i * 30), worldY: 400, facing: 0, strength: 300,
+                           mission: .guard_, speed: 1)
+        world.addObject(u); ltnks.append(u)
+    }
+    guard unitCandidates().isEmpty else {
+        print("FAIL: satisfied demand should build nothing (classic NULL), got \(unitCandidates())"); return 1
+    }
+    ltnks[0].mission = .hunt      // busy → no longer satisfies demand
+    guard unitCandidates() == ["LTNK"] else {
+        print("FAIL: a hunting LTNK must not satisfy demand (HOUSE.CPP:3250)"); return 1
+    }
+    print("  satisfaction: free LTNKs satisfy (build nothing); hunting LTNK excluded")
+    ltnks[0].mission = .guard_
+
+    // 3. Autocreate gate: an autocreate template contributes demand only when
+    //    the house is alerted (HOUSE.CPP:3233). With the template gated out the
+    //    demand map is EMPTY → pool fallback (multiple candidates).
+    pre.isAutocreate = true
+    guard unitCandidates().count > 1 else {
+        print("FAIL: unalerted autocreate template should leave the pool in charge"); return 1
+    }
+    ltnks[0].mission = .hunt                    // make demand unsatisfied again
+    state.isAlerted = true
+    guard unitCandidates() == ["LTNK"] else {
+        print("FAIL: alerted house should demand from autocreate template"); return 1
+    }
+    state.isAlerted = false
+    pre.isAutocreate = false
+    ltnks[0].mission = .guard_
+    print("  autocreate: unalerted → pool; alerted → template demand")
+
+    // 4. Infantry clamp: desired 9 clamps to 5 (HOUSE.CPP:3334).
+    pre.classSlots = [TeamClassSlot(kind: .infantry, typeName: "E1", desiredCount: 9)]
+    guard computeTeamBuildDemand(house: .badGuy, kind: .infantry, world: world, alerted: false)["E1"] == 5 else {
+        print("FAIL: infantry demand should clamp at 5"); return 1
+    }
+    print("  clamp: E1 desired 9 → demand 5")
+
+    // 5. End-to-end: the production path actually starts an LTNK build.
+    pre.classSlots = [TeamClassSlot(kind: .unit, typeName: "LTNK", desiredCount: 2)]
+    ltnks.forEach { $0.strength = 0 }           // back to unsatisfied
+    if let choice = applyBuildPlan(decideUnitBuild(house: .badGuy, houseState: state,
+                                                   owned: owned, costMultiplier: 1.0)) {
+        guard choice.typeName == "LTNK" else {
+            print("FAIL: end-to-end build pick was \(choice.typeName), expected LTNK"); return 1
+        }
+    } else {
+        print("FAIL: end-to-end build pick returned nothing"); return 1
+    }
+    print("  end-to-end: applyBuildPlan starts LTNK")
+
+    print("PASS: IsPrebuilt production gating (#6C) works")
+    return 0
+}
+
 /// `--test-eventparity` — verify Gap #9 trigger event-detection fidelity:
 /// (1) Built It fires only for the SPECIFIC target structure, (2) NoFactories
 /// ignores the Construction Yard, (3) the all/units-destroyed scan excludes

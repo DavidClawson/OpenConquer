@@ -374,7 +374,19 @@ func decideUnitBuild(
         }
     }
 
-    // Priority 2: Build combat vehicles
+    // Priority 2: team/prebuilt demand (Suggest_New_Object, HOUSE.CPP:3209-3277).
+    // When the scenario defines team templates for this house, the classic AI
+    // builds toward them; the personality pool below only stands in when there
+    // is no team demand at all (it approximates the multiplayer counter=16
+    // seeding, HOUSE.CPP:3195-3204 — campaign GAME_NORMAL seeds zero).
+    let demand = computeTeamBuildDemand(house: house, kind: .unit, world: world,
+                                        alerted: houseState.isAlerted)
+    if let plan = resolveTeamDemand(demand, kind: .unit, houseState: houseState,
+                                    costMultiplier: costMultiplier) {
+        return plan
+    }
+
+    // Priority 3: Build combat vehicles from the faction pool
     let isNod = (houseToHousesType(house) == .bad)
 
     // Build pool based on faction
@@ -436,6 +448,17 @@ func decideInfantryBuild(
     owned: Set<String>,
     costMultiplier: Double
 ) -> AIBuildPlan {
+    // Priority 1: team/prebuilt demand (Suggest_New_Object infantry branch,
+    // HOUSE.CPP:3285-3379) — same model as decideUnitBuild.
+    if let world = session.world {
+        let demand = computeTeamBuildDemand(house: house, kind: .infantry, world: world,
+                                            alerted: houseState.isAlerted)
+        if let plan = resolveTeamDemand(demand, kind: .infantry, houseState: houseState,
+                                        costMultiplier: costMultiplier) {
+            return plan
+        }
+    }
+
     let isNod = (houseToHousesType(house) == .bad)
 
     var pool: [(name: String, weight: Int)] = []
