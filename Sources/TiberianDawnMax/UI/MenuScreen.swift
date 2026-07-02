@@ -767,7 +767,9 @@ class PlayingScreen: MenuScreen {
                     if session.campaignState.isComplete {
                         session.currentScreen = MainMenuScreen()
                     } else {
-                        session.currentScreen = BriefingScreen()
+                        // Map selection between win and briefing — shown even
+                        // for a single choice, like the original (MAPSEL.CPP:268).
+                        session.currentScreen = MapSelectionScreen(choices: session.campaign.pendingChoices)
                     }
                 case "replay", "retry":
                     session.campaign.restart()
@@ -1425,7 +1427,7 @@ class ScoreScreen: MenuScreen {
         if key == Int32(SDLK_n.rawValue) && won && session.campaignState.isActive {
             session.campaign.handleWin()
             if !session.campaignState.isComplete {
-                session.currentScreen = BriefingScreen()
+                session.currentScreen = MapSelectionScreen(choices: session.campaign.pendingChoices)
             } else {
                 session.currentScreen = MainMenuScreen()
             }

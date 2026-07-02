@@ -57,6 +57,9 @@ struct MissionSaveData: Codable {
     let campaignDifficulty: Int
     let carryOverCredits: Int
     let campaignIsActive: Bool
+    // Optional-with-default (like randomSeed/rngState) so pre-branching
+    // save files still decode.
+    var campaignSabotagedType: String? = nil
 
     // Score tracking
     let scoreGDIKills: Int
@@ -576,6 +579,7 @@ func saveMission(slot: Int, description: String? = nil) -> Bool {
         campaignDifficulty: session.campaignState.difficulty,
         carryOverCredits: session.campaignState.carryOverCredits,
         campaignIsActive: session.campaignState.isActive,
+        campaignSabotagedType: session.campaignState.sabotagedBuildingType,
         scoreGDIKills: session.missionScore.gdiUnitsKilled,
         scoreNodKills: session.missionScore.nodUnitsKilled,
         scoreCivKills: session.missionScore.civUnitsKilled,
@@ -839,6 +843,7 @@ func loadMission(slot: Int) -> Bool {
         session.campaignState.difficulty = save.campaignDifficulty
         session.campaignState.carryOverCredits = save.carryOverCredits
         session.campaignState.isActive = save.campaignIsActive
+        session.campaignState.sabotagedBuildingType = save.campaignSabotagedType
 
         // --- Score ---
         session.missionScore.gdiUnitsKilled = save.scoreGDIKills

@@ -14,6 +14,11 @@ class CampaignState {
     var carryOverPercent: Int = 50       // Percentage of credits to carry (VC default 50%)
     var completedMissions: Set<String> = []
     var isActive: Bool = false
+    /// Building type C4'd by a commando in the CURRENT mission (mirrors the
+    /// SabotagedType global, GLOBALS.CPP:214-218). Drives the GDI mission-6
+    /// airstrip skip and the mission-7 destroyed-at-start rule; cleared
+    /// unconditionally when the next mission starts (SCENARIO.CPP:522).
+    var sabotagedBuildingType: String? = nil
 
     /// Get the scenario INI name for the current mission
     var scenarioName: String {
@@ -27,19 +32,41 @@ class CampaignState {
         return currentFaction == "GDI" ? 15 : 13
     }
 
-    /// Advance to the next mission
-    func advanceMission() {
+    /// The direction letter of the current variant ('E' or 'W').
+    var dir: Character { currentVariant.first ?? "E" }
+
+    /// Complete the current mission and return the map-selection choices for
+    /// the next one. Mirrors Do_Win's sequence (SCENARIO.CPP:468-478): apply
+    /// the GDI airstrip-sabotage skip FIRST (472-474), consult the campaign
+    /// graph at the post-skip row (Map_Selection indexes the just-won number,
+    /// MAPSEL.CPP:258), then the caller picks a territory via `advance`.
+    func completeMission() -> [CampaignChoice] {
         completedMissions.insert(scenarioName)
         carryOverCredits = min(carryOverCredits, 5000)  // Cap carry-over
 
-        currentMission += 1
-
-        // Pick a variant — try EA first, then EB, EC
-        currentVariant = "EA"
-        if currentMission > maxMission {
-            // Campaign complete
-            isActive = false
+        let skipped = (currentFaction == "GDI" && currentMission == 6 &&
+                       sabotagedBuildingType?.uppercased() == "AFLD")
+        let next = CampaignGraph.nextMissionNumber(faction: currentFaction,
+                                                   wonMission: currentMission,
+                                                   sabotagedAirstrip: skipped)
+        if skipped {
+            // The skipped mission's sabotage bonus is spent on the skip
+            // itself; nothing carries into mission 8's start.
+            sabotagedBuildingType = nil
+            print("Campaign: airstrip sabotaged in mission 6 — skipping mission 7")
         }
+        let wonRow = next - 1     // post-skip row, exactly like the original
+        currentMission = next
+        if currentMission > maxMission {
+            isActive = false
+            return []
+        }
+        return CampaignGraph.choices(faction: currentFaction, wonMission: wonRow, dir: dir)
+    }
+
+    /// Commit a map-selection choice (MAPSEL.CPP:717-718 ScenVar/ScenDir).
+    func advance(choosing choice: CampaignChoice) {
+        currentVariant = choice.suffix
     }
 
     /// Check if campaign is complete
@@ -114,6 +141,10 @@ class CampaignManager {
     var state = CampaignState()
     var score = MissionScore()
     var currentScenarioName: String? = nil
+    /// Map-selection choices produced by the last win, consumed by the
+    /// MapSelectionScreen between the score screen and the briefing. Not
+    /// persisted: saves only happen in-mission, never mid-selection.
+    var pendingChoices: [CampaignChoice] = []
 
     /// Track a kill for scoring purposes
     func trackKill(victimHouse: House, victimKind: ObjectKind) {
@@ -148,13 +179,15 @@ class CampaignManager {
         // Record score
         score.elapsedTicks = session.world?.tickCount ?? 0
 
-        // Advance campaign
-        state.advanceMission()
+        // Advance campaign: compute the next mission (incl. the GDI sabotage
+        // skip) and stash the map-selection choices for the UI. The variant
+        // is committed by state.advance(choosing:) when the player picks.
+        pendingChoices = state.completeMission()
 
         if state.isComplete {
             print("Campaign: \(state.currentFaction) campaign COMPLETE!")
         } else {
-            print("Campaign: Next mission is \(state.scenarioName)")
+            print("Campaign: mission \(state.currentMission) next — \(pendingChoices.count) territory choice(s)")
         }
     }
 
@@ -210,6 +243,26 @@ class CampaignManager {
 
         scenarioData = scenario
         initGameWorld(scenario: scenario, scenarioName: scenName)
+
+        // GDI mission 7: the building type sabotaged in mission 6 (if it
+        // wasn't the airstrip — that skips mission 7 entirely) starts the
+        // mission destroyed. Classic removes the FIRST matching non-limbo
+        // enemy building of that TYPE — deliberately type-based, not
+        // instance-based (SCENARIO.CPP:496-522).
+        if state.currentFaction == "GDI", state.currentMission == 7,
+           let sabotaged = state.sabotagedBuildingType?.uppercased(),
+           let world = session.world {
+            if let victim = world.objects.first(where: {
+                $0.kind == .structure && $0.strength > 0 && !$0.isInLimbo &&
+                $0.house != world.playerHouse && $0.house != .neutral &&
+                $0.typeName.uppercased() == sabotaged
+            }) {
+                victim.strength = 0
+                print("Campaign: \(sabotaged) sabotaged last mission — starts destroyed")
+            }
+        }
+        // Reset unconditionally at mission start (SCENARIO.CPP:522).
+        state.sabotagedBuildingType = nil
 
         // Set credits from scenario INI (+ carry-over from previous mission)
         session.sidebarCredits = scenario.credits + state.carryOverCredits

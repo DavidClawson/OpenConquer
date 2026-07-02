@@ -512,6 +512,15 @@ extension GameObject {
             target.lastDamagedTick = world.tickCount
             target.lastWhoHurtMe = house
 
+            // Record the sabotage for the campaign layer — classic sets the
+            // SabotagedType global at C4 detonation (BUILDING.CPP:1184-1189);
+            // it drives the GDI mission-6 airstrip skip and the mission-7
+            // destroyed-at-start rule. Campaign metadata only: not hashed by
+            // the world digest, derived deterministically from sim events.
+            if house == world.playerHouse {
+                session.campaign.state.sabotagedBuildingType = target.typeName.uppercased()
+            }
+
             // Spawn large explosion
             spawnAnimation(.fball1, worldX: target.worldX, worldY: target.worldY)
             spawnAnimation(.fball1, worldX: target.worldX - 12, worldY: target.worldY - 12)

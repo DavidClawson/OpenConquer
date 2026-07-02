@@ -224,6 +224,11 @@ if CommandLine.arguments.contains("--test-prebuilt") {
     exit(headlessTestPrebuiltCommand())
 }
 
+// Campaign branching graph self-test: --test-campaign-graph
+if CommandLine.arguments.contains("--test-campaign-graph") {
+    exit(headlessTestCampaignGraphCommand())
+}
+
 // Tier-1 T4 self-test: --test-regions
 if CommandLine.arguments.contains("--test-regions") {
     exit(headlessTestRegionsCommand())
