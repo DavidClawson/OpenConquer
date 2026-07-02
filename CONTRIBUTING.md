@@ -60,6 +60,8 @@ The simulation is **deterministic given a seed** — identical across separate p
 ./.build/debug/TiberianDawnMax --test-enemy-superweapon
 ./.build/debug/TiberianDawnMax --test-eventparity
 ./.build/debug/TiberianDawnMax --test-team-former
+./.build/debug/TiberianDawnMax --test-prebuilt
+./.build/debug/TiberianDawnMax --test-campaign-graph
 ```
 
 Rules of thumb:
