@@ -471,21 +471,25 @@ extension GameObject {
     /// Find nearest tiberium cell to this harvester
     func findNearestTiberium() -> (cellX: Int, cellY: Int)? {
         guard let map = session.world?.map else { return nil }
-        var bestCell: (cellX: Int, cellY: Int)? = nil
+        var bestCell: Int? = nil
         var bestDist = Double.infinity
 
+        // tiberiumCells is a Set — its iteration order is per-process (hash
+        // seed), so ties MUST be broken by a total order (lowest cell index)
+        // or equidistant candidates diverge the sim across processes.
         for cell in map.tiberiumCells {
             let cx = cell % 64
             let cy = cell / 64
             let dx = Double(cx) - Double(cellX)
             let dy = Double(cy) - Double(cellY)
             let dist = sqrt(dx * dx + dy * dy)
-            if dist < bestDist {
+            if dist < bestDist || (dist == bestDist && cell < (bestCell ?? Int.max)) {
                 bestDist = dist
-                bestCell = (cellX: cx, cellY: cy)
+                bestCell = cell
             }
         }
-        return bestCell
+        guard let best = bestCell else { return nil }
+        return (cellX: best % 64, cellY: best / 64)
     }
 
     /// Find the refinery this harvester should dock at. Honors a player-set
