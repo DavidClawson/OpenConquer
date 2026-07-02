@@ -33,6 +33,7 @@ watching the game. Run the built binary directly:
 ./.build/debug/TiberianDawnMax --test-winlose                    # ASSET-FREE: Cap=Win/Des=Lose event branching (Gap #2) — runs in CI
 ./.build/debug/TiberianDawnMax --test-initteams                  # ASSET-FREE: InitNum-at-start ruleset-gated (Gap #7) — runs in CI
 ./.build/debug/TiberianDawnMax --test-enemy-superweapon          # ASSET-FREE: enemy trigger-granted Nuke/Ion fires at player (Gap #5) — runs in CI
+./.build/debug/TiberianDawnMax --test-eventparity                # ASSET-FREE: Built It / NoFactories / destroyed-scan fidelity (Gap #9) — runs in CI
 ./.build/debug/TiberianDawnMax --ai-parity    <SCEN> <ticks>      # B3: assert the AI decide() phase is pure (no RNG/world mutation)
 ./.build/debug/TiberianDawnMax --ai-trace     <SCEN> <ticks>      # B3: print the per-house goal/decision stream each decide tick
 ./.build/debug/TiberianDawnMax --test-flags   <SCEN>             # Tier-1: per-instance invulnerable / must-survive flags

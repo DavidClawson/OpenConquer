@@ -209,6 +209,11 @@ if CommandLine.arguments.contains("--test-enemy-superweapon") {
     exit(headlessTestEnemySuperWeaponCommand())
 }
 
+// Trigger event-detection parity self-test: --test-eventparity
+if CommandLine.arguments.contains("--test-eventparity") {
+    exit(headlessTestEventParityCommand())
+}
+
 // Tier-1 T4 self-test: --test-regions
 if CommandLine.arguments.contains("--test-regions") {
     exit(headlessTestRegionsCommand())

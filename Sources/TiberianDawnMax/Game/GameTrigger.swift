@@ -511,6 +511,15 @@ func registerEventSatisfied(_ trigger: GameTrigger, isEvent2: Bool,
     }
 }
 
+/// Types the classic UScan/AScan EXCLUDE from the win-lose "destroyed" scan:
+/// the gunboat (UNITF_GUNBOAT) and the transport/cargo/A-10 aircraft
+/// (AIRCRAFTF_*). Mirrors HOUSE.CPP:1301 (units) & :1310 (all). Infantry (IScan)
+/// and buildings (ActiveBScan) are never excluded; Apache/Orca still count.
+private let destroyedScanExcludedTypes: Set<String> = ["BOAT", "TRAN", "C17", "A10"]
+private func countsForDestroyedScan(_ obj: GameObject) -> Bool {
+    !destroyedScanExcludedTypes.contains(obj.typeName.uppercased())
+}
+
 /// Whether a *polled* event's condition is currently met. Excludes `.time`
 /// (a stateful countdown, handled inline in `evaluateTriggerEvent`) and the
 /// sprung events (they arrive via `springTrigger`, so they return false here).
@@ -519,18 +528,26 @@ func polledEventReady(_ event: TriggerEvent, threshold: Int, house: House, world
     switch event {
     case .allDestroyed:
         // Don't fire until the house has had time to exist (reinforcement grace).
-        let hasAnything = world.objects.contains { $0.house == house && $0.strength > 0 }
+        // Excludes gunboat/transport/cargo/A-10 (HOUSE.CPP:1310) so a lingering
+        // gunboat can't stall a "destroy everything" objective forever.
+        let hasAnything = world.objects.contains { $0.house == house && $0.strength > 0 &&
+            countsForDestroyedScan($0) }
         return !hasAnything && world.tickCount > 150
     case .unitsDestroyed:
+        // Same exclusion mask as all-destroyed (HOUSE.CPP:1301).
         let hasUnits = world.objects.contains { $0.house == house && $0.strength > 0 &&
-            ($0.kind == .unit || $0.kind == .infantry) }
+            ($0.kind == .unit || $0.kind == .infantry) && countsForDestroyedScan($0) }
         return !hasUnits && world.tickCount > 150
     case .buildingsDestroyed:
         let hasBuildings = world.objects.contains { $0.house == house && $0.strength > 0 && $0.kind == .structure }
         return !hasBuildings && world.tickCount > 30
     case .noFactories:
+        // Classic mask = AIRSTRIP|HAND|WEAP|BARRACKS (HOUSE.CPP:1334). The
+        // Construction Yard (FACT) is deliberately NOT a factory here — including
+        // it wrongly prevented the event from firing while a con yard survived.
+        // PYLE = GDI barracks, HAND = Nod hand of Nod.
         let hasFactory = world.objects.contains { $0.house == house && $0.strength > 0 &&
-            $0.kind == .structure && ["WEAP", "FACT", "AFLD", "HAND", "PYLE"].contains($0.typeName.uppercased()) }
+            $0.kind == .structure && ["WEAP", "AFLD", "HAND", "PYLE"].contains($0.typeName.uppercased()) }
         return !hasFactory && world.tickCount > 30
     case .credits:
         let credits = (house == world.playerHouse) ? session.sidebarCredits : getHouseState(house).credits
@@ -678,20 +695,30 @@ func checkDiscoveredTriggers() {
 }
 
 /// Called when the player builds/places a structure type.
-/// Fires any "Built It" triggers attached to that structure type.
+/// Fires "Built It" triggers whose target structure type MATCHES what was built.
 func springTriggerBuiltIt(structureType: String) {
     guard session.triggerWinState == .playing else { return }
+    guard let world = session.world else { return }
+
+    // Classic stores the target as a StructType ordinal in the trigger's Data
+    // (TRIGGER.CPP:1138), sets House->JustBuilt = Class->Type on the build
+    // (BUILDING.CPP:4355), and fires only when they MATCH (TRIGGER.CPP:771) —
+    // there is no "any structure" value. Our StructType raw values equal the
+    // classic STRUCT_* ordinals, so the trigger's data IS the target ordinal.
+    // (Previously this fired on ANY player structure, so e.g. a "build the
+    // Temple" objective wrongly completed on the first power plant.)
+    guard let builtType = StructType.from(iniName: structureType) else { return }
+    let builtOrdinal = builtType.rawValue
 
     for trigger in session.gameTriggers {
         guard trigger.isActive else { continue }
         let isE1 = (trigger.event == .builtIt)
         let isE2 = trigger.eventControl != .only && trigger.event2 == .builtIt
         guard isE1 || isE2 else { continue }
-        // In original C&C, "Built It" fires for the player's house when any structure is built.
-        // The trigger is not attached to a specific type; it fires whenever any structure is placed.
-        if let world = session.world, trigger.house == world.playerHouse {
-            registerEventSatisfied(trigger, isEvent2: !isE1)
-        }
+        guard trigger.house == world.playerHouse else { continue }
+        let target = isE1 ? trigger.data : trigger.data2   // data2 for a builtIt second event
+        guard target == builtOrdinal else { continue }
+        registerEventSatisfied(trigger, isEvent2: !isE1)
     }
 }
 

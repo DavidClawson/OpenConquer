@@ -541,6 +541,76 @@ func headlessTestWinGateCommand() -> Int32 {
     return 0
 }
 
+/// `--test-eventparity` — verify Gap #9 trigger event-detection fidelity:
+/// (1) Built It fires only for the SPECIFIC target structure, (2) NoFactories
+/// ignores the Construction Yard, (3) the all/units-destroyed scan excludes
+/// gunboat/transport/cargo/A-10. Asset-free. Exit 0 = pass.
+func headlessTestEventParityCommand() -> Int32 {
+    print("test-eventparity: Built It / NoFactories / destroyed-scan fidelity (Gap #9)")
+    let world = GameWorld()
+    world.playerHouse = .goodGuy
+    world.tickCount = 200          // past the reinforcement-grace thresholds
+    session.world = world
+
+    func makeStruct(_ type: String, _ house: House, cell: Int) -> GameObject {
+        let o = GameObject(id: world.allocateId(), typeName: type, house: house, kind: .structure,
+                           worldX: Double((cell % 64) * 24 + 12), worldY: Double((cell / 64) * 24 + 12),
+                           facing: 0, strength: 200, mission: .guard_, speed: 0)
+        world.addObject(o); return o
+    }
+
+    // (1) Built It specific-structure. Target = barracks (PYLE); building a
+    // Weapons Factory (different ordinal) must NOT fire it.
+    let pyleOrd = StructType.from(iniName: "PYLE")!.rawValue
+    let ini = """
+    [Triggers]
+    TB=Built It,Win,\(pyleOrd),GoodGuy,None,0
+    """
+    parseTriggers(from: INIFile(string: ini))
+    springTriggerBuiltIt(structureType: "WEAP")   // wrong type
+    guard session.triggerWinState == .playing else {
+        print("FAIL: Built It fired on the wrong structure (WEAP)"); return 1
+    }
+    springTriggerBuiltIt(structureType: "PYLE")   // target type
+    guard session.triggerWinState == .won else {
+        print("FAIL: Built It did not fire on the target structure (PYLE)"); return 1
+    }
+    print("  builtit: WEAP no-op; PYLE (target) → won")
+
+    // (2) NoFactories ignores the Construction Yard (FACT).
+    let onlyConYard = makeStruct("FACT", .badGuy, cell: 100)
+    guard polledEventReady(.noFactories, threshold: 0, house: .badGuy, world: world) else {
+        print("FAIL: NoFactories should fire with only a con yard (FACT) present"); return 1
+    }
+    let weap = makeStruct("WEAP", .badGuy, cell: 102)
+    guard !polledEventReady(.noFactories, threshold: 0, house: .badGuy, world: world) else {
+        print("FAIL: NoFactories fired despite a real factory (WEAP)"); return 1
+    }
+    print("  nofactories: FACT-only fires; WEAP present does not")
+    onlyConYard.strength = 0; weap.strength = 0     // clear for the next sub-test
+
+    // (3) Destroyed-scan excludes the gunboat. A lone BOAT counts as destroyed.
+    let boat = GameObject(id: world.allocateId(), typeName: "BOAT", house: .badGuy, kind: .unit,
+                          worldX: 2000, worldY: 2000, facing: 0, strength: 100,
+                          mission: .guard_, speed: 0)
+    world.addObject(boat)
+    guard polledEventReady(.unitsDestroyed, threshold: 0, house: .badGuy, world: world),
+          polledEventReady(.allDestroyed, threshold: 0, house: .badGuy, world: world) else {
+        print("FAIL: a lone gunboat should count as units/all destroyed (excluded)"); return 1
+    }
+    let mtnk = GameObject(id: world.allocateId(), typeName: "MTNK", house: .badGuy, kind: .unit,
+                          worldX: 2100, worldY: 2000, facing: 0, strength: 400,
+                          mission: .guard_, speed: 0)
+    world.addObject(mtnk)
+    guard !polledEventReady(.unitsDestroyed, threshold: 0, house: .badGuy, world: world) else {
+        print("FAIL: a real unit (MTNK) should block units-destroyed"); return 1
+    }
+    print("  destroyed-scan: lone BOAT counts as destroyed; MTNK blocks it")
+
+    print("PASS: trigger event-detection fidelity (Gap #9) works")
+    return 0
+}
+
 /// `--test-enemy-superweapon` — verify the enemy half of Gap #5: a trigger that
 /// grants a superweapon to the ENEMY house charges and fires it at the player's
 /// base (highest-value building), then the one-time weapon removes itself.
