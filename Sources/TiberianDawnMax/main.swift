@@ -138,6 +138,13 @@ if let idx = CommandLine.arguments.firstIndex(of: "--determinism"),
     exit(headlessDeterminismCommand(scenario: scen, ticks: ticks))
 }
 
+// Asset-free determinism net: --test-synthetic [ticks]  (default 500)
+// Fabricates a scenario in code, so it runs in CI with no committed assets.
+if let idx = CommandLine.arguments.firstIndex(of: "--test-synthetic") {
+    let ticks = (idx + 1 < CommandLine.arguments.count ? Int(CommandLine.arguments[idx + 1]) : nil) ?? 500
+    exit(headlessTestSyntheticCommand(ticks: ticks))
+}
+
 // B3 AI decide() purity check: --ai-parity <SCEN> <ticks>
 if let idx = CommandLine.arguments.firstIndex(of: "--ai-parity"),
    idx + 2 < CommandLine.arguments.count {

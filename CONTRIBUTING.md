@@ -46,6 +46,14 @@ The simulation is **deterministic given a seed** — identical across separate p
 ./.build/debug/TiberianDawnMax --test-stacking SCG01EA
 ./.build/debug/TiberianDawnMax --test-harvester-economy
 ./.build/debug/TiberianDawnMax --test-flags    SCG01EA
+
+# Asset-free determinism/logic tests — these build a world in code (no MIX),
+# so they run in CI as well as locally:
+./.build/debug/TiberianDawnMax --test-synthetic 500
+./.build/debug/TiberianDawnMax --test-harvester-economy
+./.build/debug/TiberianDawnMax --test-triggers-ex
+./.build/debug/TiberianDawnMax --test-two-event
+./.build/debug/TiberianDawnMax --test-regions
 ```
 
 Rules of thumb:
@@ -54,7 +62,7 @@ Rules of thumb:
 - If your change *intentionally* alters the simulation, the digest will change — re-run `--determinism` to confirm it's still deterministic (all 3 trials match), then update the documented baselines in `CLAUDE.md`, explaining why in your PR.
 - Interactive-only features (e.g. fog-aware pathfinding) are gated so headless/AI stay omniscient and baselines hold. Keep it that way.
 
-> **CI note:** the determinism/`--test-*` flags load scenarios, which require game assets, so they run **locally**, not in CI. Continuous integration currently verifies that the project builds. A near-term roadmap item is a set of tiny synthetic (asset-free) fixtures so logic tests can also run in CI.
+> **CI note:** most `--determinism`/`--test-*` flags load scenarios from MIX, which require the user's own extracted assets, so those run **locally**. But the asset-free tests above — `--test-synthetic` (a full-tick determinism net over an in-code scenario) plus `--test-harvester-economy`, `--test-triggers-ex`, `--test-two-event`, `--test-regions` — build their world in code and run in **CI** on every push/PR. `--test-synthetic` asserts equality between two in-process runs; it does **not** pin a hex digest, because the digest can legitimately differ across the Swift 5.10/6.x matrix.
 
 ## Code conventions
 

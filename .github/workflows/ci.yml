@@ -36,8 +36,24 @@ jobs:
       - name: Build (release)
         run: swift build -c release
 
-      # NOTE: the --determinism / --test-* suites load game scenarios, which
-      # require assets extracted from a user's own Remastered Collection. Those
-      # assets are never committed, so the gameplay tests run locally rather than
-      # in CI (see CONTRIBUTING.md). A near-term roadmap item is a set of tiny
-      # asset-free synthetic fixtures so a subset of logic tests can run here too.
+      # Asset-free logic tests. These self-tests build a GameWorld() in code and
+      # never call loadScenario, so they run with ZERO committed assets: on a
+      # fresh runner the data dir simply doesn't exist, AssetManager.initialize()
+      # catches the missing-dir error and continues with 0 MIX files, and each
+      # test drives the real sim and exits non-zero on failure. They print MIX
+      # "NOT FOUND" / "Error loading MIX files" noise — that's expected here; CI
+      # keys on the exit code, not stderr.
+      - name: Logic tests (asset-free)
+        run: |
+          ./.build/debug/TiberianDawnMax --test-harvester-economy
+          ./.build/debug/TiberianDawnMax --test-triggers-ex
+          ./.build/debug/TiberianDawnMax --test-two-event
+          ./.build/debug/TiberianDawnMax --test-regions
+          # Full-tick determinism net on a scenario fabricated in code (no MIX):
+          ./.build/debug/TiberianDawnMax --test-synthetic 500
+
+      # NOTE: the --determinism and the remaining --test-* suites load scenarios
+      # from MIX, which require assets extracted from a user's own Remastered
+      # Collection. Those assets are never committed, so the scenario-backed tests
+      # run locally, not in CI (see CONTRIBUTING.md). --test-synthetic above is the
+      # asset-free equivalent that gives CI a real determinism regression net.
