@@ -283,10 +283,12 @@ func gameTick() {
                     let oy = Double.random(in: -halfH * 0.5...halfH * 0.5)
                     let anim = GameAnimation(type: .onFireBig, worldX: obj.worldX + ox, worldY: obj.worldY + oy)
                     anim.attachedToId = obj.id
+                    anim.isCosmetic = true
                     session.activeAnimations.append(anim)
                 } else if health <= 0.5 && health > 0.25 && !hasFireAnim {
                     let anim = GameAnimation(type: .smokeM, worldX: obj.worldX, worldY: obj.worldY)
                     anim.attachedToId = obj.id
+                    anim.isCosmetic = true
                     session.activeAnimations.append(anim)
                 }
             } else {
@@ -294,10 +296,12 @@ func gameTick() {
                 if health <= 0.25 && !hasFireAnim {
                     let anim = GameAnimation(type: .onFireSmall, worldX: obj.worldX, worldY: obj.worldY)
                     anim.attachedToId = obj.id
+                    anim.isCosmetic = true
                     session.activeAnimations.append(anim)
                 } else if health <= 0.5 && health > 0.25 && !hasFireAnim {
                     let anim = GameAnimation(type: .smokeM, worldX: obj.worldX, worldY: obj.worldY)
                     anim.attachedToId = obj.id
+                    anim.isCosmetic = true
                     session.activeAnimations.append(anim)
                 }
             }

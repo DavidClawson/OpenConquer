@@ -311,6 +311,10 @@ class GameAnimation {
     var delayCounter: Int       // Counts down between frames
     var isFinished: Bool = false
     var attachedToId: Int? = nil // Stick to a unit if isSticky
+    // Pure visual (damage-state indicator): never deals the anim type's damage.
+    // Cosmetic anims are placed with the SYSTEM RNG, so any sim effect from
+    // them would break determinism (it did — SCB11).
+    var isCosmetic: Bool = false
 
     init(type: GameAnimType, worldX: Double, worldY: Double) {
         self.type = type
@@ -388,8 +392,10 @@ func tickAnimations() {
             }
         }
 
-        // Apply damage to objects in cell (fire animations)
-        if anim.data.damage > 0 && world.tickCount % 4 == 0 {
+        // Apply damage to objects in cell (fire animations). Cosmetic
+        // damage-state indicators never damage — classic TD's on-building
+        // flames are decoration; only gameplay-spawned fire (napalm) burns.
+        if anim.data.damage > 0 && !anim.isCosmetic && world.tickCount % 4 == 0 {
             let cellX = Int(anim.worldX) / 24
             let cellY = Int(anim.worldY) / 24
             for obj in world.objects {

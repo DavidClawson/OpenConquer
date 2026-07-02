@@ -62,10 +62,16 @@ simulation shows up as a changed digest. (Other diagnostic flags: `--test-mix`,
   `--determinism SCG01EA 4000` print different digests for the same code. Compare
   like-for-like. The documented regression baselines are the `--determinism`
   values (as of 2026-07-01, **default ruleset = `classic1995`, veterancy OFF**):
-  SCG01EA 2500t `0x368A0F41B0BFC746`, 4000t `0x2220AD679F47F1A9`,
+  SCG01EA 2500t `0xF13E3EEE6E4094CF`, 4000t `0xDC151F8FFFD544C2`,
   SCB01EA 4000t `0x0712535052A6CB00`.
-  All three changed (from `0x8C9680DCE673649D` / `0xEAC76D413AB769D6` /
-  `0xA3C944E7664939D2`) when the classic INI mission spelling "Area Guard"
+  The SCG01EA digests changed (from `0x368A0F41B0BFC746` / `0x2220AD679F47F1A9`)
+  when cosmetic damage-state fire animations stopped dealing real damage —
+  they were finishing off crippled vehicles/structures mid-battle (classic
+  on-building flames are decoration; only gameplay fire like napalm burns).
+  The same change plus a tiberium-tie-break fix (equidistant cells now resolve
+  by lowest cell index, not Set hash order) made SCB08EA/EB and SCB11EA/EB
+  pass `--determinism` for the first time.
+  Before that, all three changed when the classic INI mission spelling "Area Guard"
   (MISSION.CPP:464) became parseable — scenario units with that initial
   mission previously downgraded silently to plain Guard and now get the
   pursue-and-return `guardArea` behavior.
