@@ -219,7 +219,11 @@ func loadScenario(_ name: String, from mixManager: MIXFileManager) -> ScenarioDa
         print("ScenarioLoader: Could not find \(name)")
         return nil
     }
-    return parseScenarioData(INIFile(data: data), name: name)
+    let ini = INIFile(data: data)
+    if ini.isEmpty {
+        print("ScenarioLoader: WARNING — \(name) parsed to zero INI sections (\(data.count) bytes); scenario would load blank")
+    }
+    return parseScenarioData(ini, name: name)
 }
 
 /// Parse an already-loaded `INIFile` into a `ScenarioData`. Split out of

@@ -14,9 +14,17 @@ struct INIFile {
     /// An empty INI, for building a scenario document from scratch.
     init() {}
 
+    /// True when no sections parsed — e.g. undecodable bytes or a wrong file.
+    var isEmpty: Bool { sectionOrder.isEmpty }
+
     init(data: Data) {
+        // isoLatin1 last: it never fails, so stray non-ASCII bytes (retail
+        // SCG06EA.INI has 4 in a garbled section header) degrade to mojibake
+        // in that one header instead of silently discarding the whole file —
+        // the original engine's byte-based WWGetPrivateProfile ignored them.
         guard let text = String(data: data, encoding: .ascii)
-           ?? String(data: data, encoding: .utf8) else {
+           ?? String(data: data, encoding: .utf8)
+           ?? String(data: data, encoding: .isoLatin1) else {
             return
         }
         parse(text)
