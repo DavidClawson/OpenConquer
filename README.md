@@ -45,11 +45,33 @@ Early but very playable: GDI and Nod campaign missions, AI, pathfinding, fog of 
 
 ## Assets
 
-OpenConquer ships **no game data** — you extract it from your own copy of the Remastered Collection. There are two asset sources:
+OpenConquer ships **no game data** — you extract it from your own legally-owned copy of the Remastered Collection.
+
+### One-command install (recommended)
+
+```bash
+pip3 install Pillow            # one-time: needed for HD sprite extraction
+./install-assets.sh /path/to/CnCRemastered
+```
+
+`install-assets.sh` is a guided installer that does the whole setup in one shot: it installs the classic MIX archives, then extracts the classic audio and all the remastered HD art (sprites, cursors, sidebar meters) and audio. Point it at your Remastered Collection install — either the folder that contains `Data/` or the `Data/` folder itself. If you omit the path it probes the usual macOS locations (Steam, `~/CnCRemastered`, `/Applications`, EA app).
+
+It's safe to re-run, and it never downloads or bundles game data — it only orchestrates the `tools/` extractors against **your** copy. Useful flags:
+
+```bash
+./install-assets.sh --dry-run   # show exactly what it would do, run nothing
+./install-assets.sh --help      # full usage
+```
+
+Everything lands in the engine's data directory, `~/Library/Application Support/Vanilla-Conquer/vanillatd/` (classic MIX archives) and `…/vanillatd/extracted/` (extracted art & audio) — the same data directory [Vanilla-Conquer](https://github.com/TheAssemblyArmada/Vanilla-Conquer) uses. When it finishes, just `swift run`.
+
+### Manual extraction (fallback)
+
+If you prefer to run the steps yourself, there are two asset sources:
 
 1. **Classic game data (MIX archives)** — the original sprites, maps, audio, and scenarios. The engine reads these from
    `~/Library/Application Support/Vanilla-Conquer/vanillatd/`.
-   (This is the same data directory [Vanilla-Conquer](https://github.com/TheAssemblyArmada/Vanilla-Conquer) uses; the classic `.MIX` files from the Remastered Collection's `CNCDATA` go here.)
+   (The classic `.MIX` files from the Remastered Collection's `CNCDATA/TIBERIAN_DAWN/CD1` (GDI/shared) and `CD2` (Nod) go here — the shared archives in the root, the side-specific `GENERAL.MIX`/`SCORES.MIX`/`MOVIES.MIX` in `gdi/` and `nod/`.)
 
 2. **Remastered HD art & audio (optional but recommended)** — extracted from the Remastered Collection's `.MEG` archives into `…/vanillatd/extracted/`. With the Remastered install downloaded to `~/CnCRemastered/Data`:
 
@@ -60,8 +82,6 @@ OpenConquer ships **no game data** — you extract it from your own copy of the 
    python3 tools/extract_remastered_audio.py              # HD music & sound
    python3 tools/extract_audio.py                         # classic AUD → WAV (from MIX)
    ```
-
-> The asset setup is currently multi-step. Streamlining it into a single guided installer that points at your Remastered install is a near-term roadmap item.
 
 ## Build & run
 
