@@ -33,12 +33,17 @@ The architectural linchpin. Pull tunable behavior out of code and into data.
 - [ ] Per-toggle overrides on top of a preset (e.g. Classic + just fog pathfinding) — currently preset-level only.
 - [ ] Expand the toggle vocabulary (more classic-vs-modified knobs as parity work surfaces them).
 
-## Phase 2 — Missions & triggers  → Goals A, C
+## Phase 2 — Missions & triggers  *(in progress)*  → Goals A, C
 
-Faithful campaign replay *and* the ability to author new missions.
+Faithful campaign replay *and* the ability to author new missions. A full
+trigger/team/campaign fidelity audit against the EA C++ has been done; the gaps
+below are tracked as Wave A (landed) and Wave B (remaining).
 
-- [ ] Harden scenario INI + the trigger/team system to original fidelity (leverage the existing `--editor-roundtrip` check).
-- [ ] Verify all original GDI/Nod missions play through correctly.
+- [~] Harden scenario INI + the trigger/team system to original fidelity (leverage the existing `--editor-roundtrip` check).
+  - [x] **Wave A:** `IsAutocreate` parse fix (enemy attack waves); AllowWin/Blockage win-gating (no more premature wins, covered by `--test-wingate`); `BeginProduction` scoped to the trigger's own house.
+  - [ ] **Wave B:** `WinLose` action + capture→win event (thread the firing event through `fireTrigger`); enemy superweapon recipient for `Nuke`/`Ion`; team-creation/`IsPrebuilt` production model; `InitNum`-at-start (gate behind non-classic ruleset); event-detection parity pass (BuiltIt specific-structure, scan exclusions, etc.).
+- [ ] Campaign branching + scenario variants + the GDI SCG06 sabotage skip (replace the linear `advanceMission`).
+- [ ] Verify all original GDI/Nod missions play through correctly (needs a mission-coverage scan over the scenario INIs).
 - [ ] Mission authoring path (hand-authored INI first; in-game editor per `docs/MISSION_EDITOR_PLAN.md` later).
 - [ ] Let a mission declare its ruleset.
 
