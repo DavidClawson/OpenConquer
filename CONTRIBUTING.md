@@ -56,6 +56,7 @@ The simulation is **deterministic given a seed** — identical across separate p
 ./.build/debug/TiberianDawnMax --test-regions
 ./.build/debug/TiberianDawnMax --test-wingate
 ./.build/debug/TiberianDawnMax --test-winlose
+./.build/debug/TiberianDawnMax --test-initteams
 ```
 
 Rules of thumb:

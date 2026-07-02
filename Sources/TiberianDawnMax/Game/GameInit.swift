@@ -300,10 +300,16 @@ func initGameWorld(scenario: ScenarioData, scenarioName: String) {
     // Parse team types and create initial teams
     parseTeamTypes(from: scenario.ini)
     session.activeTeams.removeAll()
-    for tt in session.teamTypes {
-        for _ in 0..<tt.initNum {
-            if let team = createAndRecruitTeam(type: tt) {
-                print("GameInit: Created initial team '\(tt.name)' with \(team.memberCount) members")
+    // Classic TD never spawns InitNum teams at scenario start — InitNum is an
+    // editor-only field (TEAMTYPE.CPP parse/write only; runtime teams come from
+    // AI autocreate + CREATE_TEAM triggers). Ruleset-gated so the faithful
+    // classic1995 preset skips it while .enhanced keeps the old behavior.
+    if session.rules.spawnsInitialTeams {
+        for tt in session.teamTypes {
+            for _ in 0..<tt.initNum {
+                if let team = createAndRecruitTeam(type: tt) {
+                    print("GameInit: Created initial team '\(tt.name)' with \(team.memberCount) members")
+                }
             }
         }
     }

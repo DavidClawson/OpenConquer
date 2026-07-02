@@ -40,6 +40,14 @@ struct Ruleset {
     /// Never enabled for the AI or headless runs, so determinism is unaffected.
     var fogAwarePathfinding: Bool
 
+    /// Whether TeamTypes with a non-zero `InitNum` spawn that many teams at
+    /// scenario start. FALSE is faithful to 1995: classic TD parses InitNum but
+    /// never consumes it at runtime (it appears only in TEAMTYPE.CPP parse/write,
+    /// never in a spawn path — runtime teams come from AI autocreate,
+    /// HOUSE.CPP:846/868 → Create_One_Of, and CREATE_TEAM triggers). Read at the
+    /// single branch point: the InitNum loop in `initGameWorld` (GameInit.swift).
+    var spawnsInitialTeams: Bool
+
     // Future tunables slot in here (crush behavior, build adjacency, economy
     // constants, …), each read at a single branch point in the simulation.
 
@@ -48,7 +56,8 @@ struct Ruleset {
         name: "Classic (1995)",
         summary: "No veterancy - classic wayfinding",
         veterancyEnabled: false,
-        fogAwarePathfinding: false
+        fogAwarePathfinding: false,
+        spawnsInitialTeams: false
     )
 
     /// Classic plus modern gameplay enhancements.
@@ -56,7 +65,8 @@ struct Ruleset {
         name: "Enhanced",
         summary: "Veterancy - fog-of-war-aware wayfinding",
         veterancyEnabled: true,
-        fogAwarePathfinding: true
+        fogAwarePathfinding: true,
+        spawnsInitialTeams: true
     )
 
     /// All built-in presets, in display order.

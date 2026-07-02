@@ -541,6 +541,58 @@ func headlessTestWinGateCommand() -> Int32 {
     return 0
 }
 
+/// `--test-initteams` — verify that InitNum-at-start team spawning is
+/// ruleset-gated (Gap #7): the faithful `.classic1995` preset spawns zero teams
+/// at scenario start (InitNum is editor-only in classic TD), while `.enhanced`
+/// spawns Σ InitNum. Asset-free (in-code scenario). Exit 0 = pass.
+func headlessTestInitTeamsCommand() -> Int32 {
+    print("test-initteams: InitNum-at-start spawning is ruleset-gated (Gap #7)")
+    // [TeamTypes] token order (parseTeamTypes / TEAMTYPE.CPP:301-336):
+    // House,RoundAbout,Learning,Suicide,Autocreate,Mercenary,RecruitPriority,
+    // MaxAllowed,InitNum(=2),Fear,ClassCount(=1),MTNK:1
+    let ini = """
+    [Basic]
+    BuildLevel=1
+    [GoodGuy]
+    Credits=50
+    [MAP]
+    Theater=TEMPERATE
+    X=2
+    Y=2
+    Width=60
+    Height=60
+    [UNITS]
+    0=GoodGuy,MTNK,256,2078,0,Guard,None
+    [TeamTypes]
+    ATTACK=GoodGuy,0,0,0,0,0,7,0,2,0,1,MTNK:1
+    """
+    let seed: UInt64 = 0xD1CE_D1CE_D1CE_D1CE
+    forcedGameSeed = seed
+    defer { forcedGameSeed = nil }
+
+    func initCount(_ rules: Ruleset) -> Int {
+        let saved = session.rules
+        session.rules = rules
+        defer { session.rules = saved }
+        let data = parseScenarioData(INIFile(string: ini), name: "SYNTHTEAM")
+        initGameWorld(scenario: data, scenarioName: "SYNTHTEAM")
+        return session.activeTeams.count
+    }
+
+    let classic = initCount(.classic1995)
+    let enhanced = initCount(.enhanced)
+    print("  classic1995 activeTeams=\(classic) (expect 0)")
+    print("  enhanced    activeTeams=\(enhanced) (expect 2)")
+    guard classic == 0 else {
+        print("FAIL: classic1995 spawned \(classic) init teams (should be 0)"); return 1
+    }
+    guard enhanced == 2 else {
+        print("FAIL: enhanced spawned \(enhanced) init teams (expected 2)"); return 1
+    }
+    print("PASS: InitNum-at-start spawning is ruleset-gated (Gap #7)")
+    return 0
+}
+
 /// `--test-winlose` — verify the Cap=Win/Des=Lose action branches on the firing
 /// event (Gap #2): a DESTROYED spring loses, a PLAYER_ENTERED (capture) spring
 /// wins. Mirrors TRIGGER.CPP:427-443. Exit 0 = pass.

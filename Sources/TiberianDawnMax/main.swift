@@ -199,6 +199,11 @@ if CommandLine.arguments.contains("--test-winlose") {
     exit(headlessTestWinLoseCommand())
 }
 
+// InitNum ruleset-gating self-test: --test-initteams
+if CommandLine.arguments.contains("--test-initteams") {
+    exit(headlessTestInitTeamsCommand())
+}
+
 // Tier-1 T4 self-test: --test-regions
 if CommandLine.arguments.contains("--test-regions") {
     exit(headlessTestRegionsCommand())
