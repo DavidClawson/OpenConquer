@@ -304,9 +304,12 @@ func gameTick() {
         }
     }
 
-    // Check cell triggers for units that may have moved
+    // Check cell triggers for units that may have moved. Aircraft never trip
+    // cell triggers — classic springs them from FootClass::Per_Cell_Process
+    // (FOOT.CPP:1408), and aircraft live in the air layer.
     for obj in world.objects {
-        if obj.strength > 0 && !obj.isInLimbo && (obj.kind == .unit || obj.kind == .infantry) {
+        if obj.strength > 0 && !obj.isInLimbo && !obj.isAircraft
+            && (obj.kind == .unit || obj.kind == .infantry) {
             checkCellTriggers(cell: obj.cell, enteringObject: obj)
         }
     }

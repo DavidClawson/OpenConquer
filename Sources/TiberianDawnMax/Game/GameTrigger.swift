@@ -647,32 +647,33 @@ func springTrigger(named triggerName: String, event: TriggerEvent) {
     }
 }
 
-/// Spring a cell trigger when a unit enters a cell.
-/// Player units fire .playerEntered; any unit fires triggers with .any event.
+/// Spring a cell trigger when a foot unit enters a cell. Despite the event's
+/// INI name ("Player Enters"), classic fires it for ANY foot unit whose owner
+/// matches the TRIGGER's house — `trigger->House == Owner()` (FOOT.CPP:1408) —
+/// so a Neutral-house escape trigger fires for escaping civilians, and the
+/// player's units cannot spring another house's cell triggers.
 func checkCellTriggers(cell: Int, enteringObject: GameObject) {
     guard let scenario = scenarioData else { return }
-    let isPlayer = enteringObject.house == session.world?.playerHouse
 
-    for ct in scenario.cellTriggers {
-        if ct.cell == cell {
-            if isPlayer {
-                springTrigger(named: ct.triggerName, event: .playerEntered)
-            }
-            // Also check for triggers that respond to any unit entering
-            for trigger in session.gameTriggers {
-                guard trigger.isActive else { continue }
-                guard trigger.name.caseInsensitiveCompare(ct.triggerName) == .orderedSame else { continue }
-                guard trigger.event == .any else { continue }
+    for ct in scenario.cellTriggers where ct.cell == cell {
+        for trigger in session.gameTriggers {
+            guard trigger.isActive else { continue }
+            guard trigger.name.caseInsensitiveCompare(ct.triggerName) == .orderedSame else { continue }
+            guard trigger.house == enteringObject.house else { continue }
 
-                if trigger.persistence == .semiPersistent {
-                    trigger.attachCount -= 1
-                    if trigger.attachCount <= 0 {
-                        registerEventSatisfied(trigger, isEvent2: false)
-                    }
-                } else if !isPlayer {
-                    // Only fire for non-player if we didn't already fire via springTrigger above
-                    registerEventSatisfied(trigger, isEvent2: false)
+            let matchesE1 = (trigger.event == .playerEntered || trigger.event == .any)
+            let matchesE2 = trigger.eventControl != .only && trigger.event2 != .none &&
+                            (trigger.event2 == .playerEntered || trigger.event2 == .any)
+            guard matchesE1 || matchesE2 else { continue }
+            let isEvent2 = !matchesE1
+
+            if trigger.persistence == .semiPersistent {
+                trigger.attachCount -= 1
+                if trigger.attachCount <= 0 {
+                    registerEventSatisfied(trigger, isEvent2: isEvent2, firingEvent: .playerEntered)
                 }
+            } else {
+                registerEventSatisfied(trigger, isEvent2: isEvent2, firingEvent: .playerEntered)
             }
         }
     }
