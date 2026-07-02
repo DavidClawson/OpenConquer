@@ -708,6 +708,22 @@ func resolveFlaggedWin() {
     session.triggerWinState = .won
 }
 
+/// Arm a house-owned superweapon (Nuke=Nod, Ion=GDI). Mirrors the classic
+/// `As_Pointer(HOUSE)->Weapon.Enable(...); Forced_Charge(PlayerPtr==HOUSE)`
+/// (TRIGGER.CPP:805-810): the weapon is only charged for the player when the
+/// player owns that house. When the owner is the enemy we deliberately do NOT
+/// arm the player's copy — enemy superweapons aren't modeled yet (Wave B #5), so
+/// the previous behavior of handing the player a free nuke/ion is simply wrong.
+func armSuperWeapon(_ weapon: SuperWeapon, ownerHouse: House, label: String) {
+    guard session.world?.playerHouse == ownerHouse else {
+        print("Trigger: \(label) belongs to \(ownerHouse.rawValue) (the enemy) — not arming the player; enemy superweapons are not yet modeled")
+        return
+    }
+    weapon.enable()
+    weapon.forceCharge()
+    print("Trigger: \(label) enabled and ready")
+}
+
 /// Flag the player to win (mirrors HouseClass::Flag_To_Win, HOUSE.CPP:4121). The
 /// win only actually completes once the win Blockage is drained (`resolveFlaggedWin`).
 func flagToWin() {
@@ -812,14 +828,15 @@ func executeTriggerAction(_ spec: TriggerActionSpec, trigger: GameTrigger,
         print("Trigger: Airstrike enabled and ready")
 
     case .nuke:
-        session.playerNukeStrike.enable()
-        session.playerNukeStrike.forceCharge()
-        print("Trigger: Nuclear strike enabled and ready")
+        // The nuke belongs to Nod (TRIGGER.CPP:805). Only arm the player's copy
+        // if the player IS Nod; otherwise it's the enemy's weapon and must NOT be
+        // handed to the player. (Enemy actually firing it needs per-house
+        // superweapon + AI support — tracked as Wave B #5.)
+        armSuperWeapon(session.playerNukeStrike, ownerHouse: .badGuy, label: "Nuclear strike")
 
     case .ionCannon:
-        session.playerIonCannon.enable()
-        session.playerIonCannon.forceCharge()
-        print("Trigger: Ion cannon enabled and ready")
+        // The ion cannon belongs to GDI (TRIGGER.CPP:809); same ownership rule.
+        armSuperWeapon(session.playerIonCannon, ownerHouse: .goodGuy, label: "Ion cannon")
 
     case .destroyXXXX:
         destroyTriggerNamed("XXXX")
