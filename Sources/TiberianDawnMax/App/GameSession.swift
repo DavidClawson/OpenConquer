@@ -47,6 +47,13 @@ class ScriptingState {
     var gameTriggers: [GameTrigger] = []
     var triggerWinState: TriggerWinState = .playing
     var allowWinFlag: Bool = false
+    /// Win-gating (mirrors HouseClass Blockage/IsToWin, TRIGGER.CPP:1078,313 +
+    /// HOUSE.CPP:794): `winBlockage` = number of unfired AllowWin triggers for the
+    /// player; a flagged win only completes once it reaches 0. `flaggedToWin`
+    /// mirrors IsToWin — a Win action sets it, but the mission only ends when the
+    /// blockage is drained.
+    var winBlockage: Int = 0
+    var flaggedToWin: Bool = false
     var teamTypes: [TeamType] = []
     var activeTeams: [ActiveTeam] = []
     var scenarioWaypoints: [Int: Int] = [:]
@@ -189,6 +196,14 @@ class GameSession {
     var allowWinFlag: Bool {
         get { scripting.allowWinFlag }
         set { scripting.allowWinFlag = newValue }
+    }
+    var winBlockage: Int {
+        get { scripting.winBlockage }
+        set { scripting.winBlockage = newValue }
+    }
+    var flaggedToWin: Bool {
+        get { scripting.flaggedToWin }
+        set { scripting.flaggedToWin = newValue }
     }
     var teamTypes: [TeamType] {
         get { scripting.teamTypes }

@@ -487,6 +487,60 @@ func headlessTestTriggersExCommand() -> Int32 {
     return 0
 }
 
+/// `--test-wingate` — verify AllowWin/Blockage win-gating (Gap #3): a Win action
+/// only ends the mission once every AllowWin trigger for the player has fired.
+/// Mirrors the load-time `Blockage++` (TRIGGER.CPP:1078), the per-fire decrement
+/// (TRIGGER.CPP:313), and the `Blockage <= 0` win gate (HOUSE.CPP:794). Exit 0 = pass.
+func headlessTestWinGateCommand() -> Int32 {
+    print("test-wingate: AllowWin/Blockage gates the Win action")
+
+    // A minimal world so parseTriggers can prime blockage against the player house.
+    let world = GameWorld()
+    world.playerHouse = .goodGuy
+    session.world = world
+
+    // Two separate player-house triggers: one Win, one AllowWin. One AllowWin
+    // trigger ⇒ blockage should prime to 1.
+    let ini = """
+    [Triggers]
+    TWIN=Time,Win,1,GoodGuy,None,2
+    TAW=Time,Allow Win,1,GoodGuy,None,2
+    """
+    parseTriggers(from: INIFile(string: ini))
+
+    guard session.winBlockage == 1 else {
+        print("FAIL: expected blockage primed to 1, got \(session.winBlockage)"); return 1
+    }
+    guard let tWin = session.gameTriggers.first(where: { $0.name == "TWIN" }),
+          let tAllow = session.gameTriggers.first(where: { $0.name == "TAW" }) else {
+        print("FAIL: triggers not parsed"); return 1
+    }
+    print("  parse: blockage primed to 1 (one AllowWin trigger)")
+
+    // Fire Win while still blocked — must NOT complete the mission.
+    fireTrigger(tWin)
+    guard session.triggerWinState == .playing else {
+        print("FAIL: Win completed while blockage>0 (state=\(session.triggerWinState))"); return 1
+    }
+    guard session.flaggedToWin else {
+        print("FAIL: Win did not flag the pending win"); return 1
+    }
+    print("  gate: Win fired but mission stays .playing (flagged, blockage=\(session.winBlockage))")
+
+    // Fire AllowWin — drains the blockage, so the pending win now completes.
+    fireTrigger(tAllow)
+    guard session.winBlockage == 0 else {
+        print("FAIL: AllowWin did not drain blockage (=\(session.winBlockage))"); return 1
+    }
+    guard session.triggerWinState == .won else {
+        print("FAIL: win did not complete after blockage drained (state=\(session.triggerWinState))"); return 1
+    }
+    print("  release: AllowWin drained blockage → mission WON")
+
+    print("PASS: AllowWin/Blockage win-gating (Gap #3) works")
+    return 0
+}
+
 /// `--test-two-event` — verify Tier-1 T3 (two-event AND/OR combining):
 /// `[TriggersEx]` `Event2`/`Control` parse, an AND trigger fires only after
 /// BOTH events occur, and an OR trigger fires on either. Exit 0 = pass.

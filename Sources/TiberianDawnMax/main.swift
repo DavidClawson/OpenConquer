@@ -177,6 +177,11 @@ if CommandLine.arguments.contains("--test-two-event") {
     exit(headlessTestTwoEventCommand())
 }
 
+// AllowWin/Blockage win-gating self-test: --test-wingate
+if CommandLine.arguments.contains("--test-wingate") {
+    exit(headlessTestWinGateCommand())
+}
+
 // Tier-1 T4 self-test: --test-regions
 if CommandLine.arguments.contains("--test-regions") {
     exit(headlessTestRegionsCommand())

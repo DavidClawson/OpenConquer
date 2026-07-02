@@ -662,11 +662,15 @@ func parseTeamTypes(from ini: INIFile) {
         let house = House.from(parts[0].trimmingCharacters(in: .whitespaces))
         let teamType = TeamType(name: name, house: house)
 
-        // Parse flags: RoundAbout, Learning, Suicide, Spy(unused), Mercenary
+        // Parse flags: RoundAbout, Learning, Suicide, Autocreate, Mercenary.
+        // Token order mirrors TeamTypeClass::Read_INI (TEAMTYPE.CPP:301-321):
+        // House,RoundAbout,Learning,Suicide,Autocreate,Mercenary,RecruitPriority,...
         if parts.count > 1 { teamType.isRoundAbout = parts[1].trimmingCharacters(in: .whitespaces) == "1" }
         if parts.count > 2 { teamType.isLearning = parts[2].trimmingCharacters(in: .whitespaces) == "1" }
         if parts.count > 3 { teamType.isSuicide = parts[3].trimmingCharacters(in: .whitespaces) == "1" }
-        // parts[4] = Spy (unused in TD)
+        // parts[4] = IsAutocreate (TEAMTYPE.CPP:316) — was previously dropped as
+        // "Spy (unused)", which left AI autocreate attack waves unable to form.
+        if parts.count > 4 { teamType.isAutocreate = parts[4].trimmingCharacters(in: .whitespaces) == "1" }
         if parts.count > 5 { teamType.isMercenary = parts[5].trimmingCharacters(in: .whitespaces) == "1" }
 
         // RecruitPriority, MaxAllowed, InitNum, Fear

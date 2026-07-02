@@ -281,6 +281,8 @@ func parseTriggers(from ini: INIFile) {
     session.gameTriggers.removeAll()
     session.triggerWinState = .playing
     session.allowWinFlag = false
+    session.winBlockage = 0
+    session.flaggedToWin = false
 
     // [Triggers] section: TriggerName = EventName,ActionName,Data,HouseName,TeamName,IsPersistent
     for entry in ini.entries("Triggers") {
@@ -329,6 +331,16 @@ func parseTriggers(from ini: INIFile) {
     // Tier-1 [TriggersEx]: extra actions + optional second event + region ref
     // per trigger. Classic scenarios have no such section, so this is inert.
     parseTriggersEx(from: ini)
+
+    // Prime the win Blockage: one per AllowWin action belonging to the player's
+    // house, so a Win action can't complete until every AllowWin has fired
+    // (mirrors the load-time `Blockage++` in TRIGGER.CPP:1078; the win gate is
+    // HOUSE.CPP:794). Count across all action slots so a TriggersEx-added
+    // AllowWin is included. Must run after parseTriggersEx.
+    let playerHouse = session.world?.playerHouse
+    for trigger in session.gameTriggers where trigger.house == playerHouse {
+        session.winBlockage += trigger.actions.filter { $0.action == .allowWin }.count
+    }
 
     // Tier-1 [Regions]: named zones for Enter/Leave Region events.
     parseRegions(from: ini)
@@ -684,6 +696,17 @@ func springTriggerBuiltIt(structureType: String) {
 
 // MARK: - Trigger Actions
 
+/// Complete a flagged win once the win Blockage is fully drained. Mirrors the
+/// per-frame gate `if (IsToWin && ... && Blockage <= 0)` (HOUSE.CPP:794). Called
+/// after a Win action flags the win and after each AllowWin action drains a unit
+/// of blockage, so it resolves regardless of the two firing in either order.
+func resolveFlaggedWin() {
+    guard session.flaggedToWin, session.winBlockage <= 0,
+          session.triggerWinState == .playing else { return }
+    print(">>> MISSION WON <<<")
+    session.triggerWinState = .won
+}
+
 func fireTrigger(_ trigger: GameTrigger) {
     guard trigger.isActive else { return }
 
@@ -715,11 +738,16 @@ func executeTriggerAction(_ spec: TriggerActionSpec, trigger: GameTrigger) {
     let teamName = spec.teamName ?? trigger.teamName
     switch spec.action {
     case .win:
-        print(">>> MISSION WON <<<")
-        session.triggerWinState = .won
+        // Flag to win — but the mission only actually ends once every AllowWin
+        // trigger has fired (winBlockage drained to 0). Mirrors Flag_To_Win +
+        // the HOUSE.CPP:794 win gate. When a scenario has no AllowWin triggers,
+        // blockage is 0 and this wins immediately (the common case).
+        if session.triggerWinState == .playing { session.flaggedToWin = true }
+        resolveFlaggedWin()
 
     case .lose:
         print(">>> MISSION LOST <<<")
+        session.flaggedToWin = false      // Flag_To_Lose clears IsToWin (HOUSE.CPP:4155)
         session.triggerWinState = .lost
 
     case .allHunt:
@@ -734,14 +762,13 @@ func executeTriggerAction(_ spec: TriggerActionSpec, trigger: GameTrigger) {
         }
 
     case .beginProduction:
-        // Enable AI production for all non-player, non-neutral houses
-        if let world = session.world {
-            for (house, state) in session.houseStates {
-                if house != world.playerHouse && house != .neutral {
-                    state.productionEnabled = true
-                    print("Trigger: AI production enabled for \(house.rawValue)")
-                }
-            }
+        // Enable production for the TRIGGER'S house only, mirroring
+        // As_Pointer(House)->Begin_Production() (TRIGGER.CPP:490). The previous
+        // behavior enabled every AI house at once, which over-activated the map.
+        // A trigger with no house parses to .neutral; skip it (nothing to produce).
+        if trigger.house != .neutral {
+            getHouseState(trigger.house).productionEnabled = true
+            print("Trigger: production enabled for \(trigger.house.rawValue)")
         }
 
     case .createTeam:
@@ -798,14 +825,19 @@ func executeTriggerAction(_ spec: TriggerActionSpec, trigger: GameTrigger) {
         print("Trigger: Autocreate enabled — AI will auto-create teams")
 
     case .winLose:
-        // Cap=Win/Des=Lose — handled via object events (capture = win, destroy = lose)
-        // This is set up by the trigger being attached to a building;
-        // when captured, the player wins; when destroyed, the player loses.
-        print("Trigger: Win/Lose condition set")
+        // Cap=Win/Des=Lose — resolved by the firing event (see the event-aware
+        // overload below). This event-less path is only reached by callers that
+        // don't yet thread the firing event; it can't decide win vs lose, so it
+        // is a no-op here. #2 (event threading + capture spring) is Wave B.
+        print("Trigger: Win/Lose condition set (awaiting event-aware handling)")
 
     case .allowWin:
+        // Consume one unit of win Blockage (TRIGGER.CPP:313-314); once the
+        // blockage is drained a previously-flagged Win can complete.
         session.allowWinFlag = true
-        print("Trigger: Allow win flag set")
+        if session.winBlockage > 0 { session.winBlockage -= 1 }
+        print("Trigger: Allow win — blockage now \(session.winBlockage)")
+        resolveFlaggedWin()
 
     case .dz:
         // Drop zone at waypoint 'Z' (waypoint 25) — reveal fog around the drop zone

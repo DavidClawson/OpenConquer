@@ -29,6 +29,7 @@ watching the game. Run the built binary directly:
 ./.build/debug/TiberianDawnMax --determinism <SCEN> <ticks>       # 3 clean subprocess trials, assert identical
 ./.build/debug/TiberianDawnMax --reset-check  <SCEN> <ticks>      # two in-process worlds, assert session state fully reset
 ./.build/debug/TiberianDawnMax --test-synthetic [ticks]          # ASSET-FREE determinism net (in-code scenario) — runs in CI
+./.build/debug/TiberianDawnMax --test-wingate                    # ASSET-FREE: AllowWin/Blockage win-gating (Gap #3) — runs in CI
 ./.build/debug/TiberianDawnMax --ai-parity    <SCEN> <ticks>      # B3: assert the AI decide() phase is pure (no RNG/world mutation)
 ./.build/debug/TiberianDawnMax --ai-trace     <SCEN> <ticks>      # B3: print the per-house goal/decision stream each decide tick
 ./.build/debug/TiberianDawnMax --test-flags   <SCEN>             # Tier-1: per-instance invulnerable / must-survive flags
