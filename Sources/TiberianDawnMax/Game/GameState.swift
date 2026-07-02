@@ -56,7 +56,10 @@ enum Mission: String {
         case "retreat":        return .retreat
         case "enter":          return .enter
         case "capture":        return .capture
+        // "Area Guard" is the classic INI spelling (MISSION.CPP:464);
+        // "Guard Area" kept for editor/serialized round-trips.
         case "guard area":     return .guardArea
+        case "area guard":     return .guardArea
         case "return":         return .return_
         case "unload":         return .unload
         case "repair":         return .repair

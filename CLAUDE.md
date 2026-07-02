@@ -62,9 +62,14 @@ simulation shows up as a changed digest. (Other diagnostic flags: `--test-mix`,
   `--determinism SCG01EA 4000` print different digests for the same code. Compare
   like-for-like. The documented regression baselines are the `--determinism`
   values (as of 2026-07-01, **default ruleset = `classic1995`, veterancy OFF**):
-  SCG01EA 2500t `0x8C9680DCE673649D`, 4000t `0xEAC76D413AB769D6`,
-  SCB01EA 4000t `0xA3C944E7664939D2`.
-  The SCG01EA digests changed from `0xF2FC92976A82C252` / `0xF8D1E05941A069C1`
+  SCG01EA 2500t `0x368A0F41B0BFC746`, 4000t `0x2220AD679F47F1A9`,
+  SCB01EA 4000t `0x0712535052A6CB00`.
+  All three changed (from `0x8C9680DCE673649D` / `0xEAC76D413AB769D6` /
+  `0xA3C944E7664939D2`) when the classic INI mission spelling "Area Guard"
+  (MISSION.CPP:464) became parseable — scenario units with that initial
+  mission previously downgraded silently to plain Guard and now get the
+  pursue-and-return `guardArea` behavior.
+  Before that, the SCG01EA digests changed from `0xF2FC92976A82C252` / `0xF8D1E05941A069C1`
   when Data=0 time triggers were fixed to fire on their first check (classic
   decrement-before-test, TRIGGER.CPP:374-380): SCG01EA's `ATK2` (Time,Create
   Team,0) now actually spawns its Nod attack team. 13 campaign variants were
