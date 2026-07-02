@@ -127,9 +127,12 @@ func tickAI() {
         rallyEnemyUnits(world: world)
     }
 
-    // Periodically create autocreate teams (every ~45 seconds)
-    if session.aiTickCounter % 675 == 0 && session.aiTickCounter > 300 {
-        tryAutocreateTeam()
+    // Faithful team formation (Gap #6): a regular former on a 90-tick cadence
+    // plus an alerted burst, both scoring via Suggested_New_Team. Driven every
+    // 30 ticks; the internal cadences do the fine timing. Replaces the old
+    // flat every-675-tick random autocreate pick.
+    if session.aiTickCounter % 30 == 0 {
+        tickAITeamFormation(world: world)
     }
 
     // Escalation: after 5 minutes, send all idle units to hunt
@@ -241,24 +244,6 @@ func decideEscalation(world: GameWorld) -> [GameObject] {
 /// EFFECTFUL (B3-P3): set the escalation squad to hunt mode.
 func applyEscalation(units: [GameObject]) {
     for obj in units { obj.mission = .hunt }
-}
-
-/// Try to create an autocreate team from available team types
-func tryAutocreateTeam() {
-    let autocreateTypes = session.teamTypes.filter { $0.isAutocreate }
-    guard !autocreateTypes.isEmpty else { return }
-
-    // Pick a random autocreate team type
-    let type = autocreateTypes[rndInt(0..<autocreateTypes.count)]
-
-    if let team = createAndRecruitTeam(type: type) {
-        if team.memberCount > 0 {
-            print("AI: Auto-created team '\(type.name)' with \(team.memberCount) members")
-        } else {
-            // No units to recruit — remove the empty team
-            session.activeTeams.removeAll { $0 === team }
-        }
-    }
 }
 
 // MARK: - AI Production System

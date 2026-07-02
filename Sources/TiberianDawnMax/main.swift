@@ -214,6 +214,11 @@ if CommandLine.arguments.contains("--test-eventparity") {
     exit(headlessTestEventParityCommand())
 }
 
+// AI team-formation scoring self-test: --test-team-former
+if CommandLine.arguments.contains("--test-team-former") {
+    exit(headlessTestTeamFormerCommand())
+}
+
 // Tier-1 T4 self-test: --test-regions
 if CommandLine.arguments.contains("--test-regions") {
     exit(headlessTestRegionsCommand())

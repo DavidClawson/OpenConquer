@@ -541,6 +541,59 @@ func headlessTestWinGateCommand() -> Int32 {
     return 0
 }
 
+/// `--test-team-former` — verify the AI team-creation scoring (Gap #6):
+/// Suggested_New_Team picks by RecruitPriority, skips MaxAllowed==0 (never
+/// suggested) and capped types, and only considers autocreate types while
+/// alerted. Asset-free, pure decide function. Exit 0 = pass.
+func headlessTestTeamFormerCommand() -> Int32 {
+    print("test-team-former: Suggested_New_Team priority/cap/alerted gating (Gap #6)")
+    let world = GameWorld()
+    world.playerHouse = .goodGuy      // so BadGuy is the AI house under test
+    session.world = world
+
+    func makeType(_ name: String, pri: Int, max: Int, auto: Bool) -> TeamType {
+        let t = TeamType(name: name, house: .badGuy)
+        t.recruitPriority = pri
+        t.maxAllowed = max
+        t.isAutocreate = auto
+        t.classSlots = [TeamClassSlot(kind: .infantry, typeName: "E1", desiredCount: 1)]
+        return t
+    }
+    // HI pri10/max1, LO pri5/max2, ZERO pri99/max0 (never), AUTO pri20/max1 autocreate.
+    session.teamTypes = [makeType("HI", pri: 10, max: 1, auto: false),
+                         makeType("LO", pri: 5,  max: 2, auto: false),
+                         makeType("ZERO", pri: 99, max: 0, auto: false),
+                         makeType("AUTO", pri: 20, max: 1, auto: true)]
+    session.activeTeams.removeAll()
+
+    // A BadGuy E1 in the field → hasNeeded true (full, not halved, priority).
+    let e1 = GameObject(id: world.allocateId(), typeName: "E1", house: .badGuy, kind: .infantry,
+                        worldX: 100, worldY: 100, facing: 0, strength: 50, mission: .guard_,
+                        speed: resolveSpeed(typeName: "E1", kind: .infantry))
+    world.addObject(e1)
+
+    // 1. Not alerted: HI (pri10) wins; ZERO (max0) never suggested even at pri99;
+    //    AUTO excluded because the house isn't alerted.
+    guard decideSuggestedTeam(house: .badGuy, world: world, alerted: false)?.name == "HI" else {
+        print("FAIL: expected HI (pri10) when not alerted"); return 1
+    }
+    // 2. Alerted: AUTO (pri20) now participates and outscores HI.
+    guard decideSuggestedTeam(house: .badGuy, world: world, alerted: true)?.name == "AUTO" else {
+        print("FAIL: expected AUTO (pri20) when alerted"); return 1
+    }
+    print("  score: HI wins unalerted (ZERO max0 excluded); AUTO wins alerted")
+
+    // 3. Cap: once HI is at MaxAllowed(1), LO (pri5) becomes the pick.
+    session.activeTeams.append(ActiveTeam(type: session.teamTypes[0]))   // one HI active
+    guard decideSuggestedTeam(house: .badGuy, world: world, alerted: false)?.name == "LO" else {
+        print("FAIL: expected LO after HI hit its MaxAllowed cap"); return 1
+    }
+    print("  cap: HI at MaxAllowed=1 → LO is next")
+
+    print("PASS: Suggested_New_Team priority/cap/alerted gating (Gap #6) works")
+    return 0
+}
+
 /// `--test-eventparity` — verify Gap #9 trigger event-detection fidelity:
 /// (1) Built It fires only for the SPECIFIC target structure, (2) NoFactories
 /// ignores the Construction Yard, (3) the all/units-destroyed scan excludes

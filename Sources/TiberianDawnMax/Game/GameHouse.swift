@@ -40,6 +40,7 @@ class HouseState {
     // AI base building state
     var aiBuildCycleCount: Int = 0       // Number of buildings placed (for defense scheduling)
     var aiLastAttackTick: Int = -9999    // Last tick an attack wave was sent
+    var aiLastTeamFormTick: Int = 0      // Last tick the regular team-former ran (Gap #6)
     var aiLastBuildCheckTick: Int = 0    // Last tick building priorities were evaluated
 
     // AI tactical state — memory, scouting, harassment

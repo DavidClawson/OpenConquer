@@ -744,10 +744,12 @@ func parseTeamTypes(from ini: INIFile) {
 
 // MARK: - Create Team Instance
 
-/// Create an active team from a team type definition
-func createTeam(type: TeamType) -> ActiveTeam? {
-    // Check max allowed
-    if type.maxAllowed > 0 {
+/// Create an active team from a team type definition. `bypassCap` skips the
+/// MaxAllowed check (the C++ `ScenarioInit++` path used by the alerted burst).
+func createTeam(type: TeamType, bypassCap: Bool = false) -> ActiveTeam? {
+    // Check max allowed (0 = unlimited here — note this differs from
+    // decideSuggestedTeam, where MaxAllowed==0 means "never suggested").
+    if !bypassCap && type.maxAllowed > 0 {
         let currentCount = session.activeTeams.filter { $0.type.name == type.name }.count
         if currentCount >= type.maxAllowed { return nil }
     }
@@ -760,6 +762,13 @@ func createTeam(type: TeamType) -> ActiveTeam? {
 /// Create a team and recruit members
 func createAndRecruitTeam(type: TeamType) -> ActiveTeam? {
     guard let team = createTeam(type: type) else { return nil }
+    team.recruitMembers()
+    return team
+}
+
+/// Like `createAndRecruitTeam` but ignores the MaxAllowed cap (alerted burst).
+func forceCreateAndRecruitTeam(type: TeamType) -> ActiveTeam? {
+    guard let team = createTeam(type: type, bypassCap: true) else { return nil }
     team.recruitMembers()
     return team
 }

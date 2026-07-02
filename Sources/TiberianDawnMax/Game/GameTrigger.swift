@@ -891,18 +891,20 @@ func executeTriggerAction(_ spec: TriggerActionSpec, trigger: GameTrigger,
         destroyTriggerNamed("ZZZZ")
 
     case .autocreate:
-        // Enable autocreate AI mode: the AI will periodically create teams
-        // from TeamTypes that have isAutocreate = true
+        // Enable autocreate AI mode: mark AI houses alerted so the team-former's
+        // burst path forms autocreate teams (mirrors ACTION_AUTOCREATE setting
+        // House->IsAlerted, TRIGGER.CPP:495). alertTimer=0 → first burst fires
+        // promptly on the next formation tick.
         if let world = session.world {
             for (house, state) in session.houseStates {
                 if house != world.playerHouse && house != .neutral {
                     state.productionEnabled = true
+                    state.isAlerted = true
+                    state.alertTimer = 0
                 }
             }
         }
-        // Immediately try to create an autocreate team
-        tryAutocreateTeam()
-        print("Trigger: Autocreate enabled — AI will auto-create teams")
+        print("Trigger: Autocreate enabled — AI houses alerted, will form teams")
 
     case .winLose:
         // Cap=Win/Des=Lose — branch on the event that sprang the trigger,

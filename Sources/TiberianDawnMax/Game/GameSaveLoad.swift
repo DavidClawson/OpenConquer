@@ -285,6 +285,7 @@ struct MidMissionSavedHouse: Codable {
     // AI base building
     let aiBuildCycleCount: Int
     let aiLastAttackTick: Int
+    let aiLastTeamFormTick: Int
     let aiLastBuildCheckTick: Int
 }
 
@@ -503,6 +504,7 @@ func saveMission(slot: Int, description: String? = nil) -> Bool {
             aiStructureQueue: serializeProductionQueue(state.aiStructureQueue),
             aiBuildCycleCount: state.aiBuildCycleCount,
             aiLastAttackTick: state.aiLastAttackTick,
+            aiLastTeamFormTick: state.aiLastTeamFormTick,
             aiLastBuildCheckTick: state.aiLastBuildCheckTick
         ))
     }
@@ -935,6 +937,7 @@ func loadMission(slot: Int) -> Bool {
             hs.productionEnabled = sh.productionEnabled
             hs.aiBuildCycleCount = sh.aiBuildCycleCount
             hs.aiLastAttackTick = sh.aiLastAttackTick
+            hs.aiLastTeamFormTick = sh.aiLastTeamFormTick
             hs.aiLastBuildCheckTick = sh.aiLastBuildCheckTick
             restoreProductionQueue(hs.aiUnitQueue, from: sh.aiUnitQueue)
             restoreProductionQueue(hs.aiInfantryQueue, from: sh.aiInfantryQueue)

@@ -45,7 +45,8 @@ below are tracked as Wave A (landed) and Wave B (remaining).
   - [x] **Wave B (#5):** `Nuke`/`Ion` arm the owning house (Nod/GDI), not the player; and the enemy now **charges and fires** its trigger-granted superweapon at the player's highest-value building (per-house `HouseState.superWeapons`, one-time + force-charged, mirrors HouseClass::AI). Fixes SCG15/SCB12/SCB13. Covered by `--test-enemy-superweapon`.
   - [x] **Wave B (#7):** `InitNum`-at-start team spawning is now ruleset-gated — `classic1995` skips it (faithful; InitNum is editor-only in classic TD), `enhanced` keeps it. Covered by `--test-initteams`.
   - [x] **Wave B (#9):** event-detection parity — Built It matches the specific target structure (was: any structure → wrong wins); NoFactories ignores the Construction Yard; all/units-destroyed exclude gunboat/transport/cargo/A-10 (HOUSE.CPP scan masks). Covered by `--test-eventparity`.
-  - [ ] **Wave B (rest):** team-creation/`IsPrebuilt` production model (#6) — the largest item; staged (regular former → alerted burst → prebuild gating).
+  - [x] **Wave B (#6, A+B):** AI team-creation model — a `Suggested_New_Team`-scored regular former (RecruitPriority, MaxAllowed cap, owned-type check) plus an alerted burst; `isAlerted` wired from the Autocreate trigger. Replaces the old flat every-675-tick random pick. Covered by `--test-team-former`; decide phase stays pure (`--ai-parity`).
+  - [ ] **Wave B (#6, C — deferred):** `IsPrebuilt` production gating (pre-build units to fill team templates) — the highest-risk composition change; fold into the build deciders as a follow-up.
 
   **Mission-coverage scan** (via `--dump-scenario`, over the classic campaign INIs):
   - AllowWin gating (#3, fixed) is used by **SCB04–SCB07** — four Nod missions that previously won early.

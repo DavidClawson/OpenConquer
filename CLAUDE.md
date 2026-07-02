@@ -34,6 +34,7 @@ watching the game. Run the built binary directly:
 ./.build/debug/TiberianDawnMax --test-initteams                  # ASSET-FREE: InitNum-at-start ruleset-gated (Gap #7) — runs in CI
 ./.build/debug/TiberianDawnMax --test-enemy-superweapon          # ASSET-FREE: enemy trigger-granted Nuke/Ion fires at player (Gap #5) — runs in CI
 ./.build/debug/TiberianDawnMax --test-eventparity                # ASSET-FREE: Built It / NoFactories / destroyed-scan fidelity (Gap #9) — runs in CI
+./.build/debug/TiberianDawnMax --test-team-former                # ASSET-FREE: AI Suggested_New_Team priority/cap/alerted scoring (Gap #6) — runs in CI
 ./.build/debug/TiberianDawnMax --ai-parity    <SCEN> <ticks>      # B3: assert the AI decide() phase is pure (no RNG/world mutation)
 ./.build/debug/TiberianDawnMax --ai-trace     <SCEN> <ticks>      # B3: print the per-house goal/decision stream each decide tick
 ./.build/debug/TiberianDawnMax --test-flags   <SCEN>             # Tier-1: per-instance invulnerable / must-survive flags
@@ -61,8 +62,15 @@ simulation shows up as a changed digest. (Other diagnostic flags: `--test-mix`,
   `--determinism SCG01EA 4000` print different digests for the same code. Compare
   like-for-like. The documented regression baselines are the `--determinism`
   values (as of 2026-07-01, **default ruleset = `classic1995`, veterancy OFF**):
-  SCG01EA 2500t `0xF2FC92976A82C252`, 4000t `0xC645B24188C4D2CC`,
-  SCB01EA 4000t `0xA3C944E7664939D2` (changed from `0xD46F9A67468411FF` when the
+  SCG01EA 2500t `0xF2FC92976A82C252`, 4000t `0xF8D1E05941A069C1`,
+  SCB01EA 4000t `0xA3C944E7664939D2`.
+  SCG01EA 4000t changed from `0xC645B24188C4D2CC` when the AI team-creation model
+  (Gap #6) replaced the old flat every-675-tick autocreate pick with the faithful
+  Suggested_New_Team former: once the GDI-vs-Nod AI's production enables mid-mission
+  it now forms a priority-scored team, which perturbs the run after ~2500t (the
+  2500t digest is unchanged; SCB01EA didn't move — its AI forms nothing in-window).
+  See `GameAITeamFormer.swift`.
+  SCB01EA 4000t earlier changed from `0xD46F9A67468411FF` when the
   A* corner-cut rule was exempted for bridge/ford decks — units/AI now cross the
   diagonal bridge deck in that Nod mission; see `findPath` + `deckCells`).
   The SCG01EA digests changed from
