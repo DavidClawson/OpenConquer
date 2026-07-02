@@ -6,7 +6,7 @@ The phases map to three overlapping goals: **(A)** play it & build new missions,
 
 ---
 
-## Phase 0 — Open-source foundation  *(in progress)*  → Goal B
+## Phase 0 — Open-source foundation  *(mostly done)*  → Goal B
 
 Make it something a stranger can build, trust, and contribute to.
 
@@ -14,22 +14,24 @@ Make it something a stranger can build, trust, and contribute to.
 - [x] **README** — what it is, requirements, asset-extraction walkthrough, disclaimer.
 - [x] **CONTRIBUTING** — build, the determinism contract, conventions, "no assets" rule.
 - [x] **VISION / ROADMAP** docs.
-- [x] **CI** (GitHub Actions, macOS) — builds on every push/PR.
-- [ ] **Publish:** rename the GitHub repo to `OpenConquer`, flip to public, add topics/description.
+- [x] **CI** (GitHub Actions, macOS) — multi-Swift matrix (5.10 + 6.x) builds on every push/PR.
+- [x] **Publish:** repo public at `DavidClawson/OpenConquer`, GPLv3, topics/description set.
 - [ ] **Streamlined asset installer** — one guided script that points at a Remastered install and runs all extraction steps, with a clear preflight error when assets are missing.
 - [ ] **Synthetic (asset-free) test fixtures** so a subset of logic/determinism tests can run in CI.
-- [ ] Issue templates, `good first issue` labels, screenshots/GIFs in the README.
+- [ ] Issue templates, `good first issue` labels, screenshots/GIFs in the README (screenshots: awaiting user PNGs in `docs/screenshots/`).
 
-## Phase 1 — Ruleset layer  *(starting)*  → Goals C, A, B
+## Phase 1 — Ruleset layer  *(mostly done)*  → Goals C, A, B
 
 The architectural linchpin. Pull tunable behavior out of code and into data.
 
-- [ ] Define a `Ruleset` model + a canonical **`Classic1995`** ruleset (the pinned, determinism-tested baseline).
-- [ ] Named presets (`Enhanced`, …) and per-toggle overrides.
-- [ ] **First proof: veterancy toggle** (off in `Classic1995`).
-- [ ] Fold existing modern toggles (window size, zoom, fog-aware pathfinding) into the same system.
-- [ ] In-game **Options** screen to pick a preset / flip toggles.
-- [ ] Determinism becomes **per-ruleset**: `Classic1995` stays pinned; modified rulesets carry their own baselines or are exempt.
+- [x] Define a `Ruleset` model + a canonical **`Classic1995`** ruleset (the pinned, determinism-tested baseline) — `Game/GameRules.swift`.
+- [x] Named presets (`Enhanced`) and per-toggle fields.
+- [x] **First proof: veterancy toggle** (off in `Classic1995`, gated at `GameObject.veteranLevel`).
+- [x] Fold fog-aware pathfinding into the ruleset (`fogAwarePathfinding`). *(window size / zoom are runtime view settings, not sim rules — intentionally left out.)*
+- [x] In-game **Options** screen to pick a preset (`UI/OptionsScreen`, `MenuRenderer.makeRulesetButtons`).
+- [x] Determinism is **per-ruleset**: `Classic1995` stays pinned; `.enhanced` carries its own (or is exempt).
+- [ ] Per-toggle overrides on top of a preset (e.g. Classic + just fog pathfinding) — currently preset-level only.
+- [ ] Expand the toggle vocabulary (more classic-vs-modified knobs as parity work surfaces them).
 
 ## Phase 2 — Missions & triggers  → Goals A, C
 
