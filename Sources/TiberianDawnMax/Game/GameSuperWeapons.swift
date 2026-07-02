@@ -103,7 +103,7 @@ class SuperWeapon {
     }
 
     /// Tick the charge timer
-    func tick() {
+    func tick(isPlayer: Bool = true) {
         guard isPresent && !isReady && !isSuspended else { return }
         if chargeRemaining > 0 {
             chargeRemaining -= 1
@@ -111,7 +111,9 @@ class SuperWeapon {
         if chargeRemaining <= 0 {
             isReady = true
             print("SuperWeapon: \(type) fully charged!")
-            // EVA announcement for player super weapons
+            // EVA "ready" announcements are the player's own weapons only — an
+            // enemy-owned weapon charging must not speak the player's EVA lines.
+            guard isPlayer else { return }
             switch type {
             case .ionCannon:
                 session.speakEVA(.ionReady)
@@ -463,62 +465,54 @@ func tickScreenEffects() {
 
 // MARK: - AI Super Weapon Usage
 
-/// AI fires super weapons when ready (called from tickAI)
+/// Fire any enemy-owned superweapon that's ready. Called from the effectful part
+/// of the tick (GameLoop, after tickAI). In campaign TD the AI never gets ion/nuke
+/// from a building (those enable branches are `IsHuman`-gated, HOUSE.CPP:1112/1168);
+/// the only path is a trigger grant (TRIGGER.CPP:417-424), stored per-house in
+/// `HouseState.superWeapons` by `armSuperWeapon`. A trigger-granted weapon is
+/// one-time and force-charged, so it fires the next tick a valid target exists
+/// and then removes itself (mirrors HouseClass::AI + Discharged, HOUSE.CPP:1101/1163,
+/// SUPER.CPP:237). No RNG in this path — target order is stable, damage is fixed.
 func tickAISuperWeapons() {
-    guard let world = session.world else { return }
+    guard session.world != nil else { return }
 
-    // Process for each AI house
     for house in session.houseStates.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
-        guard let state = session.houseStates[house] else { continue }
-        guard !state.isHuman else { continue }
+        guard let state = session.houseStates[house], !state.isHuman else { continue }
+        guard !state.superWeapons.isEmpty else { continue }
 
-        // AI Ion Cannon
-        let hasEye = world.hasBuilding(type: "EYE", house: house)
-        if hasEye {
-            // Simple AI: fire at player base when ready
-            // (Using a simplified timer approach for AI)
-            if world.tickCount % ionCannonChargeTime == 0 && world.tickCount > 0 {
-                if let target = findBestAITarget(house: house) {
-                    deployAIIonCannon(worldX: target.worldX, worldY: target.worldY, house: house)
-                }
+        for type in SpecialWeaponType.allCases {
+            guard let sw = state.superWeapons[type], sw.isPresent else { continue }
+            // Force-charged grants are already ready; this only advances a weapon
+            // that's charging normally (future building-enable path).
+            if !sw.isReady && !sw.isSuspended { sw.tick(isPlayer: false) }
+            guard sw.isReady else { continue }
+            guard let target = findBestAISuperWeaponTarget(house: house) else { continue }
+            switch type {
+            case .ionCannon:     deployAIIonCannon(worldX: target.worldX, worldY: target.worldY, house: house)
+            case .nuclearStrike: deployAINukeStrike(worldX: target.worldX, worldY: target.worldY, house: house)
+            case .airStrike:     break   // no AI airstrike path yet
             }
-        }
-
-        // AI Nuclear Strike
-        let hasTemple = world.hasBuilding(type: "TMPL", house: house)
-        if hasTemple {
-            if world.tickCount % nuclearStrikeChargeTime == 0 && world.tickCount > 0 {
-                if let target = findBestAITarget(house: house) {
-                    deployAINukeStrike(worldX: target.worldX, worldY: target.worldY, house: house)
-                }
-            }
+            sw.discharged()                              // one-time → removes itself
+            if !sw.isPresent { state.superWeapons[type] = nil }
         }
     }
 }
 
-/// Find best target for AI super weapons (highest value enemy structure)
-func findBestAITarget(house: House) -> GameObject? {
+/// Target for an AI superweapon: the highest-value enemy BUILDING (not units),
+/// mirroring Special_Weapon_AI (HOUSE.CPP:2326-2344). Strict `>` so the first
+/// building wins on ties, matching the C++ `best == -1` seed + `>` scan.
+func findBestAISuperWeaponTarget(house: House) -> GameObject? {
     guard let world = session.world else { return nil }
-    var bestTarget: GameObject? = nil
-    var bestValue = 0
-
-    for obj in world.objects {
-        guard obj.strength > 0 else { continue }
-        guard obj.house != house && obj.house != .neutral else { continue }
-
-        let value: Int
-        if obj.kind == .structure {
-            value = obj.cost + 500  // Structures are high priority
-        } else {
-            value = obj.cost
-        }
-
-        if value > bestValue {
-            bestValue = value
-            bestTarget = obj
+    var best: GameObject? = nil
+    var bestValue = -1
+    for obj in world.objects where obj.kind == .structure {
+        guard obj.strength > 0, obj.house != house, obj.house != .neutral else { continue }
+        if obj.cost > bestValue {
+            bestValue = obj.cost
+            best = obj
         }
     }
-    return bestTarget
+    return best
 }
 
 /// AI deploys ion cannon (same damage, different house)

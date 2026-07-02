@@ -52,6 +52,7 @@ jobs:
           ./.build/debug/TiberianDawnMax --test-wingate
           ./.build/debug/TiberianDawnMax --test-winlose
           ./.build/debug/TiberianDawnMax --test-initteams
+          ./.build/debug/TiberianDawnMax --test-enemy-superweapon
           # Full-tick determinism net on a scenario fabricated in code (no MIX):
           ./.build/debug/TiberianDawnMax --test-synthetic 500
 

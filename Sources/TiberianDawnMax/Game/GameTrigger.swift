@@ -714,14 +714,30 @@ func resolveFlaggedWin() {
 /// player owns that house. When the owner is the enemy we deliberately do NOT
 /// arm the player's copy — enemy superweapons aren't modeled yet (Wave B #5), so
 /// the previous behavior of handing the player a free nuke/ion is simply wrong.
-func armSuperWeapon(_ weapon: SuperWeapon, ownerHouse: House, label: String) {
-    guard session.world?.playerHouse == ownerHouse else {
-        print("Trigger: \(label) belongs to \(ownerHouse.rawValue) (the enemy) — not arming the player; enemy superweapons are not yet modeled")
+func armSuperWeapon(_ weapon: SuperWeapon, ownerHouse: House,
+                    type: SpecialWeaponType, label: String) {
+    // Player owns this weapon's house → arm the player's copy (existing behavior).
+    if session.world?.playerHouse == ownerHouse {
+        weapon.enable()
+        weapon.forceCharge()
+        print("Trigger: \(label) enabled and ready")
         return
     }
-    weapon.enable()
-    weapon.forceCharge()
-    print("Trigger: \(label) enabled and ready")
+    // Otherwise it's the ENEMY's weapon: grant it a one-time, force-charged copy
+    // on its HouseState (mirrors As_Pointer(HOUSE)->Weapon.Enable(true,false) +
+    // Forced_Charge, TRIGGER.CPP:417-424). tickAISuperWeapons fires it next tick.
+    let chargeTime: Int
+    switch type {
+    case .ionCannon:     chargeTime = ionCannonChargeTime
+    case .airStrike:     chargeTime = airStrikeChargeTime
+    case .nuclearStrike: chargeTime = nuclearStrikeChargeTime
+    }
+    let state = getHouseState(ownerHouse)
+    let sw = state.superWeapons[type] ?? SuperWeapon(type: type, chargeTime: chargeTime)
+    sw.enable(oneTime: true)
+    sw.forceCharge()
+    state.superWeapons[type] = sw
+    print("Trigger: \(label) granted to enemy \(ownerHouse.rawValue) — will fire at the player")
 }
 
 /// Flag the player to win (mirrors HouseClass::Flag_To_Win, HOUSE.CPP:4121). The
@@ -832,11 +848,11 @@ func executeTriggerAction(_ spec: TriggerActionSpec, trigger: GameTrigger,
         // if the player IS Nod; otherwise it's the enemy's weapon and must NOT be
         // handed to the player. (Enemy actually firing it needs per-house
         // superweapon + AI support — tracked as Wave B #5.)
-        armSuperWeapon(session.playerNukeStrike, ownerHouse: .badGuy, label: "Nuclear strike")
+        armSuperWeapon(session.playerNukeStrike, ownerHouse: .badGuy, type: .nuclearStrike, label: "Nuclear strike")
 
     case .ionCannon:
         // The ion cannon belongs to GDI (TRIGGER.CPP:809); same ownership rule.
-        armSuperWeapon(session.playerIonCannon, ownerHouse: .goodGuy, label: "Ion cannon")
+        armSuperWeapon(session.playerIonCannon, ownerHouse: .goodGuy, type: .ionCannon, label: "Ion cannon")
 
     case .destroyXXXX:
         destroyTriggerNamed("XXXX")

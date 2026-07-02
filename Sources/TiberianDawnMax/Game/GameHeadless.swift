@@ -541,6 +541,50 @@ func headlessTestWinGateCommand() -> Int32 {
     return 0
 }
 
+/// `--test-enemy-superweapon` — verify the enemy half of Gap #5: a trigger that
+/// grants a superweapon to the ENEMY house charges and fires it at the player's
+/// base (highest-value building), then the one-time weapon removes itself.
+/// Asset-free. Exit 0 = pass.
+func headlessTestEnemySuperWeaponCommand() -> Int32 {
+    print("test-enemy-superweapon: enemy Nuke fires at the player (Gap #5)")
+    let world = GameWorld()
+    world.playerHouse = .goodGuy
+    session.world = world
+    session.houseStates[.goodGuy] = HouseState(type: .goodGuy, credits: 0, isHuman: true)
+    session.houseStates[.badGuy]  = HouseState(type: .badGuy, credits: 0, isHuman: false)
+
+    // A player building for the enemy nuke to target.
+    let hq = GameObject(id: world.allocateId(), typeName: "FACT", house: .goodGuy,
+                        kind: .structure, worldX: Double(30 * 24 + 12), worldY: Double(30 * 24 + 12),
+                        facing: 0, strength: 400, mission: .guard_, speed: 0)
+    world.addObject(hq)
+    let startHP = hq.strength
+
+    // Grant the enemy (Nod) a nuke via the trigger action. ownerHouse is fixed to
+    // .badGuy in the .nuke case, so the enemy branch of armSuperWeapon runs.
+    executeTriggerAction(TriggerActionSpec(action: .nuke, teamName: nil),
+                         trigger: GameTrigger(name: "T", event: .destroyed, action: .nuke,
+                                              house: .badGuy, teamName: nil,
+                                              persistence: .volatile, data: 0))
+    let sw = getHouseState(.badGuy).superWeapons[.nuclearStrike]
+    guard sw?.isPresent == true, sw?.isReady == true else {
+        print("FAIL: enemy nuke not present+ready after grant"); return 1
+    }
+    print("  grant: enemy Nod holds a ready one-time nuke")
+
+    // Fire it (a few ticks; fires the first tick a target exists).
+    for _ in 0..<3 { tickAISuperWeapons() }
+    guard hq.strength < startHP else {
+        print("FAIL: enemy nuke did not damage the player building (\(hq.strength)/\(startHP))"); return 1
+    }
+    guard getHouseState(.badGuy).superWeapons[.nuclearStrike] == nil else {
+        print("FAIL: one-time weapon was not removed after firing"); return 1
+    }
+    print("  fire: FACT \(startHP)→\(hq.strength); one-time weapon removed")
+    print("PASS: enemy trigger-granted superweapon fires at the player (Gap #5)")
+    return 0
+}
+
 /// `--test-initteams` — verify that InitNum-at-start team spawning is
 /// ruleset-gated (Gap #7): the faithful `.classic1995` preset spawns zero teams
 /// at scenario start (InitNum is editor-only in classic TD), while `.enhanced`

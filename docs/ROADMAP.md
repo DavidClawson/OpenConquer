@@ -42,9 +42,9 @@ below are tracked as Wave A (landed) and Wave B (remaining).
 - [~] Harden scenario INI + the trigger/team system to original fidelity (leverage the existing `--editor-roundtrip` check).
   - [x] **Wave A:** `IsAutocreate` parse fix (enemy attack waves); AllowWin/Blockage win-gating (no more premature wins, covered by `--test-wingate`); `BeginProduction` scoped to the trigger's own house.
   - [x] **Wave B (#2):** `WinLose` (Cap=Win/Des=Lose) now branches on the firing event — DESTROYED→lose, capture (PLAYER_ENTERED)→win. Firing event threaded through `fireTrigger`/`executeTriggerAction`; building capture springs the trigger. Covered by `--test-winlose`.
-  - [x] **Wave B (#5 recipient):** `Nuke`/`Ion` arm the owning house (Nod/GDI), not always the player — no more free enemy superweapon (SCG15/SCB12/SCB13). Enemy *firing* it still open (needs AI superweapon support).
+  - [x] **Wave B (#5):** `Nuke`/`Ion` arm the owning house (Nod/GDI), not the player; and the enemy now **charges and fires** its trigger-granted superweapon at the player's highest-value building (per-house `HouseState.superWeapons`, one-time + force-charged, mirrors HouseClass::AI). Fixes SCG15/SCB12/SCB13. Covered by `--test-enemy-superweapon`.
   - [x] **Wave B (#7):** `InitNum`-at-start team spawning is now ruleset-gated — `classic1995` skips it (faithful; InitNum is editor-only in classic TD), `enhanced` keeps it. Covered by `--test-initteams`.
-  - [ ] **Wave B (rest):** enemy superweapon *firing* (per-house state + AI); team-creation/`IsPrebuilt` production model (#6); event-detection parity pass (BuiltIt specific-structure, all/units-destroyed scan exclusions, noFactories mask — #9).
+  - [ ] **Wave B (rest):** team-creation/`IsPrebuilt` production model (#6); event-detection parity pass (BuiltIt specific-structure, all/units-destroyed scan exclusions, noFactories mask — #9).
 
   **Mission-coverage scan** (via `--dump-scenario`, over the classic campaign INIs):
   - AllowWin gating (#3, fixed) is used by **SCB04–SCB07** — four Nod missions that previously won early.

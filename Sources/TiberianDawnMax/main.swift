@@ -204,6 +204,11 @@ if CommandLine.arguments.contains("--test-initteams") {
     exit(headlessTestInitTeamsCommand())
 }
 
+// Enemy superweapon firing self-test: --test-enemy-superweapon
+if CommandLine.arguments.contains("--test-enemy-superweapon") {
+    exit(headlessTestEnemySuperWeaponCommand())
+}
+
 // Tier-1 T4 self-test: --test-regions
 if CommandLine.arguments.contains("--test-regions") {
     exit(headlessTestRegionsCommand())

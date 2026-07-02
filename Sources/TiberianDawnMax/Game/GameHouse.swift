@@ -21,6 +21,12 @@ class HouseState {
     var buildingsKilled: Int = 0
     var buildingsLost: Int = 0
 
+    // Enemy-owned superweapons granted by a trigger (Nuke=BadGuy, Ion=GoodGuy).
+    // The player's copies live on session.combat; this dict is only populated for
+    // AI houses. Recreated per world by initHouseStates, so it resets with the
+    // world — no save/load needed (a trigger grant is one-time and fires next tick).
+    var superWeapons: [SpecialWeaponType: SuperWeapon] = [:]
+
     // AI state
     var isAlerted: Bool = false     // Under attack alert
     var alertTimer: Int = 0
