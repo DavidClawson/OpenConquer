@@ -857,13 +857,20 @@ func executeTriggerAction(_ spec: TriggerActionSpec, trigger: GameTrigger,
         }
 
     case .beginProduction:
-        // Enable production for the TRIGGER'S house only, mirroring
-        // As_Pointer(House)->Begin_Production() (TRIGGER.CPP:490). The previous
-        // behavior enabled every AI house at once, which over-activated the map.
-        // A trigger with no house parses to .neutral; skip it (nothing to produce).
+        // Enable production for the TRIGGER'S house, mirroring
+        // As_Pointer(House)->Begin_Production() (TRIGGER.CPP:490/875). A house
+        // of "None" (parses to .neutral) is a NULL As_Pointer in classic — a
+        // wild deref there; the cell-sprung overload's rule (TRIGGER.CPP:679-684)
+        // and the evident author intent (SCB13EA 'prod=Discovered,Production,
+        // 0,None' waking the GDI base) is "enable the player's ENEMY house",
+        // so we resolve None that way instead of dropping the action.
         if trigger.house != .neutral {
             getHouseState(trigger.house).productionEnabled = true
             print("Trigger: production enabled for \(trigger.house.rawValue)")
+        } else if let world = session.world {
+            let enemy: House = (world.playerHouse == .goodGuy) ? .badGuy : .goodGuy
+            getHouseState(enemy).productionEnabled = true
+            print("Trigger: production enabled for \(enemy.rawValue) (None-house trigger -> player's enemy)")
         }
 
     case .createTeam:
@@ -907,20 +914,19 @@ func executeTriggerAction(_ spec: TriggerActionSpec, trigger: GameTrigger,
         destroyTriggerNamed("ZZZZ")
 
     case .autocreate:
-        // Enable autocreate AI mode: mark AI houses alerted so the team-former's
-        // burst path forms autocreate teams (mirrors ACTION_AUTOCREATE setting
-        // House->IsAlerted, TRIGGER.CPP:495). alertTimer=0 → first burst fires
-        // promptly on the next formation tick.
-        if let world = session.world {
-            for (house, state) in session.houseStates {
-                if house != world.playerHouse && house != .neutral {
-                    state.productionEnabled = true
-                    state.isAlerted = true
-                    state.alertTimer = 0
-                }
-            }
+        // Classic ACTION_AUTOCREATE sets IsAlerted on ONE house — the attached
+        // object's (TRIGGER.CPP:494-496) — and never touches production. We
+        // don't thread the springing object here; the trigger's own house is
+        // equivalent in the shipped campaigns (autocreate triggers attach to
+        // objects of their own house). alertTimer=0 → the team-former's burst
+        // path fires promptly on the next formation tick.
+        if let world = session.world,
+           trigger.house != .neutral, trigger.house != world.playerHouse {
+            let state = getHouseState(trigger.house)
+            state.isAlerted = true
+            state.alertTimer = 0
+            print("Trigger: Autocreate — \(trigger.house.rawValue) alerted, will form teams")
         }
-        print("Trigger: Autocreate enabled — AI houses alerted, will form teams")
 
     case .winLose:
         // Cap=Win/Des=Lose — branch on the event that sprang the trigger,
