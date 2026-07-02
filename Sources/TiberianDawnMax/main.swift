@@ -104,6 +104,18 @@ if let dumpIdx = CommandLine.arguments.firstIndex(of: "--dump-scenario"),
         for s in data.structures where s.house.rawValue == playerHouse {
             print("  bldg \(s.typeName) cell=\(s.cell) (\(s.cell % 64),\(s.cell / 64))")
         }
+        // Raw [Triggers] / [TeamTypes] — useful for mission-fidelity work: shows
+        // which scenarios lean on AllowWin, Cap=Win/Des=Lose, Autocreate, Nuke/Ion, etc.
+        let trigs = data.ini.entries("Triggers")
+        if !trigs.isEmpty {
+            print("--- Triggers (\(trigs.count)) ---")
+            for t in trigs { print("  \(t.key)=\(t.value)") }
+        }
+        let teams = data.ini.entries("TeamTypes")
+        if !teams.isEmpty {
+            print("--- TeamTypes (\(teams.count)) ---")
+            for t in teams { print("  \(t.key)=\(t.value)") }
+        }
     } else {
         print("Could not load scenario \(scen)")
     }

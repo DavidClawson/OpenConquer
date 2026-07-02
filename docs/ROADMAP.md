@@ -43,6 +43,12 @@ below are tracked as Wave A (landed) and Wave B (remaining).
   - [x] **Wave A:** `IsAutocreate` parse fix (enemy attack waves); AllowWin/Blockage win-gating (no more premature wins, covered by `--test-wingate`); `BeginProduction` scoped to the trigger's own house.
   - [x] **Wave B (#2):** `WinLose` (Cap=Win/Des=Lose) now branches on the firing event — DESTROYED→lose, capture (PLAYER_ENTERED)→win. Firing event threaded through `fireTrigger`/`executeTriggerAction`; building capture springs the trigger. Covered by `--test-winlose`.
   - [ ] **Wave B (rest):** enemy superweapon recipient for `Nuke`/`Ion` (needs AI superweapon support); team-creation/`IsPrebuilt` production model; `InitNum`-at-start (gate behind non-classic ruleset); event-detection parity pass (BuiltIt specific-structure, scan exclusions, etc.).
+
+  **Mission-coverage scan** (via `--dump-scenario`, over the classic campaign INIs):
+  - AllowWin gating (#3, fixed) is used by **SCB04–SCB07** — four Nod missions that previously won early.
+  - Cap=Win/Des=Lose (#2, fixed) is used by **SCB03, SCB12**.
+  - Enemy superweapon (#5, open) affects **SCG15** (final GDI, Nuke), **SCB12, SCB13** (Ion) — the weapon currently arms the player instead of the AI; needs per-house / AI superweapon support.
+  - Autocreate (#1, fixed) appears in ~35 team definitions across both campaigns.
 - [ ] Campaign branching + scenario variants + the GDI SCG06 sabotage skip (replace the linear `advanceMission`).
 - [ ] Verify all original GDI/Nod missions play through correctly (needs a mission-coverage scan over the scenario INIs).
 - [ ] Mission authoring path (hand-authored INI first; in-game editor per `docs/MISSION_EDITOR_PLAN.md` later).
