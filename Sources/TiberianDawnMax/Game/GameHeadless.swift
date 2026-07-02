@@ -541,6 +541,36 @@ func headlessTestWinGateCommand() -> Int32 {
     return 0
 }
 
+/// `--test-winlose` — verify the Cap=Win/Des=Lose action branches on the firing
+/// event (Gap #2): a DESTROYED spring loses, a PLAYER_ENTERED (capture) spring
+/// wins. Mirrors TRIGGER.CPP:427-443. Exit 0 = pass.
+func headlessTestWinLoseCommand() -> Int32 {
+    print("test-winlose: Cap=Win/Des=Lose branches on the firing event")
+    let ini = """
+    [Triggers]
+    TWL=Any,Cap=Win/Des=Lose,0,GoodGuy,None,0
+    """
+
+    // Sub-test 1: capture (PLAYER_ENTERED) → win.
+    parseTriggers(from: INIFile(string: ini))
+    springTrigger(named: "TWL", event: .playerEntered)
+    guard session.triggerWinState == .won else {
+        print("FAIL: capture (PLAYER_ENTERED) did not win (state=\(session.triggerWinState))"); return 1
+    }
+    print("  capture: PLAYER_ENTERED spring → MISSION WON")
+
+    // Sub-test 2: destruction (DESTROYED) → lose. Re-parse to reset win state.
+    parseTriggers(from: INIFile(string: ini))
+    springTrigger(named: "TWL", event: .destroyed)
+    guard session.triggerWinState == .lost else {
+        print("FAIL: destruction (DESTROYED) did not lose (state=\(session.triggerWinState))"); return 1
+    }
+    print("  destroy: DESTROYED spring → MISSION LOST")
+
+    print("PASS: Cap=Win/Des=Lose event branching (Gap #2) works")
+    return 0
+}
+
 /// `--test-two-event` — verify Tier-1 T3 (two-event AND/OR combining):
 /// `[TriggersEx]` `Event2`/`Control` parse, an AND trigger fires only after
 /// BOTH events occur, and an OR trigger fires on either. Exit 0 = pass.

@@ -41,7 +41,8 @@ below are tracked as Wave A (landed) and Wave B (remaining).
 
 - [~] Harden scenario INI + the trigger/team system to original fidelity (leverage the existing `--editor-roundtrip` check).
   - [x] **Wave A:** `IsAutocreate` parse fix (enemy attack waves); AllowWin/Blockage win-gating (no more premature wins, covered by `--test-wingate`); `BeginProduction` scoped to the trigger's own house.
-  - [ ] **Wave B:** `WinLose` action + capture→win event (thread the firing event through `fireTrigger`); enemy superweapon recipient for `Nuke`/`Ion`; team-creation/`IsPrebuilt` production model; `InitNum`-at-start (gate behind non-classic ruleset); event-detection parity pass (BuiltIt specific-structure, scan exclusions, etc.).
+  - [x] **Wave B (#2):** `WinLose` (Cap=Win/Des=Lose) now branches on the firing event — DESTROYED→lose, capture (PLAYER_ENTERED)→win. Firing event threaded through `fireTrigger`/`executeTriggerAction`; building capture springs the trigger. Covered by `--test-winlose`.
+  - [ ] **Wave B (rest):** enemy superweapon recipient for `Nuke`/`Ion` (needs AI superweapon support); team-creation/`IsPrebuilt` production model; `InitNum`-at-start (gate behind non-classic ruleset); event-detection parity pass (BuiltIt specific-structure, scan exclusions, etc.).
 - [ ] Campaign branching + scenario variants + the GDI SCG06 sabotage skip (replace the linear `advanceMission`).
 - [ ] Verify all original GDI/Nod missions play through correctly (needs a mission-coverage scan over the scenario INIs).
 - [ ] Mission authoring path (hand-authored INI first; in-game editor per `docs/MISSION_EDITOR_PLAN.md` later).

@@ -50,6 +50,7 @@ jobs:
           ./.build/debug/TiberianDawnMax --test-two-event
           ./.build/debug/TiberianDawnMax --test-regions
           ./.build/debug/TiberianDawnMax --test-wingate
+          ./.build/debug/TiberianDawnMax --test-winlose
           # Full-tick determinism net on a scenario fabricated in code (no MIX):
           ./.build/debug/TiberianDawnMax --test-synthetic 500
 

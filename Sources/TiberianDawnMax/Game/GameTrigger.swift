@@ -496,16 +496,17 @@ func parseTriggersEx(from ini: INIFile) {
 /// - `.and`/`.linked`: latch each event; fire once both have been satisfied.
 /// For `.only` single-event triggers this is exactly `fireTrigger(trigger)`,
 /// preserving classic behavior bit-for-bit.
-func registerEventSatisfied(_ trigger: GameTrigger, isEvent2: Bool) {
+func registerEventSatisfied(_ trigger: GameTrigger, isEvent2: Bool,
+                            firingEvent: TriggerEvent = .any) {
     switch trigger.eventControl {
     case .only:
-        if !isEvent2 { fireTrigger(trigger) }
+        if !isEvent2 { fireTrigger(trigger, firingEvent: firingEvent) }
     case .or:
-        fireTrigger(trigger)
+        fireTrigger(trigger, firingEvent: firingEvent)
     case .and, .linked:
         if isEvent2 { trigger.e2Satisfied = true } else { trigger.e1Satisfied = true }
         if trigger.e1Satisfied && trigger.e2Satisfied {
-            fireTrigger(trigger)
+            fireTrigger(trigger, firingEvent: firingEvent)
         }
     }
 }
@@ -620,10 +621,10 @@ func springTrigger(named triggerName: String, event: TriggerEvent) {
         if trigger.persistence == .semiPersistent {
             trigger.attachCount -= 1
             if trigger.attachCount <= 0 {
-                registerEventSatisfied(trigger, isEvent2: isEvent2)
+                registerEventSatisfied(trigger, isEvent2: isEvent2, firingEvent: event)
             }
         } else {
-            registerEventSatisfied(trigger, isEvent2: isEvent2)
+            registerEventSatisfied(trigger, isEvent2: isEvent2, firingEvent: event)
         }
     }
 }
@@ -707,7 +708,27 @@ func resolveFlaggedWin() {
     session.triggerWinState = .won
 }
 
-func fireTrigger(_ trigger: GameTrigger) {
+/// Flag the player to win (mirrors HouseClass::Flag_To_Win, HOUSE.CPP:4121). The
+/// win only actually completes once the win Blockage is drained (`resolveFlaggedWin`).
+func flagToWin() {
+    guard session.triggerWinState == .playing else { return }
+    session.flaggedToWin = true
+    resolveFlaggedWin()
+}
+
+/// Flag the player to lose (mirrors HouseClass::Flag_To_Lose, HOUSE.CPP:4152 —
+/// clears IsToWin). In this model a loss resolves immediately.
+func flagToLose() {
+    guard session.triggerWinState == .playing else { return }
+    print(">>> MISSION LOST <<<")
+    session.flaggedToWin = false
+    session.triggerWinState = .lost
+}
+
+/// Fire a trigger's actions. `firingEvent` is the event that caused the spring —
+/// most actions ignore it, but `WinLose` (Cap=Win/Des=Lose) branches on it
+/// (TRIGGER.CPP:427-443). Defaults to `.any` for callers that force-fire.
+func fireTrigger(_ trigger: GameTrigger, firingEvent: TriggerEvent = .any) {
     guard trigger.isActive else { return }
 
     print("Trigger '\(trigger.name)' fired: actions=\(trigger.actions.map { $0.action })")
@@ -728,13 +749,15 @@ func fireTrigger(_ trigger: GameTrigger) {
 
     // Run every action in order (classic triggers have exactly one).
     for spec in trigger.actions {
-        executeTriggerAction(spec, trigger: trigger)
+        executeTriggerAction(spec, trigger: trigger, firingEvent: firingEvent)
     }
 }
 
 /// Perform a single trigger action. Team-based actions use the spec's teamName
-/// (falling back to the trigger's own team field).
-func executeTriggerAction(_ spec: TriggerActionSpec, trigger: GameTrigger) {
+/// (falling back to the trigger's own team field). `firingEvent` is the event
+/// that sprang the trigger (used by `WinLose`).
+func executeTriggerAction(_ spec: TriggerActionSpec, trigger: GameTrigger,
+                          firingEvent: TriggerEvent = .any) {
     let teamName = spec.teamName ?? trigger.teamName
     switch spec.action {
     case .win:
@@ -742,13 +765,10 @@ func executeTriggerAction(_ spec: TriggerActionSpec, trigger: GameTrigger) {
         // trigger has fired (winBlockage drained to 0). Mirrors Flag_To_Win +
         // the HOUSE.CPP:794 win gate. When a scenario has no AllowWin triggers,
         // blockage is 0 and this wins immediately (the common case).
-        if session.triggerWinState == .playing { session.flaggedToWin = true }
-        resolveFlaggedWin()
+        flagToWin()
 
     case .lose:
-        print(">>> MISSION LOST <<<")
-        session.flaggedToWin = false      // Flag_To_Lose clears IsToWin (HOUSE.CPP:4155)
-        session.triggerWinState = .lost
+        flagToLose()
 
     case .allHunt:
         // Send all enemy units to hunt mode
@@ -825,11 +845,18 @@ func executeTriggerAction(_ spec: TriggerActionSpec, trigger: GameTrigger) {
         print("Trigger: Autocreate enabled — AI will auto-create teams")
 
     case .winLose:
-        // Cap=Win/Des=Lose — resolved by the firing event (see the event-aware
-        // overload below). This event-less path is only reached by callers that
-        // don't yet thread the firing event; it can't decide win vs lose, so it
-        // is a no-op here. #2 (event threading + capture spring) is Wave B.
-        print("Trigger: Win/Lose condition set (awaiting event-aware handling)")
+        // Cap=Win/Des=Lose — branch on the event that sprang the trigger,
+        // mirroring TRIGGER.CPP:427-443:
+        //   DESTROYED       → lose (unless we've already secured the win)
+        //   PLAYER_ENTERED  → win  (a capture; unless we're already losing)
+        switch firingEvent {
+        case .destroyed:
+            if !session.flaggedToWin || session.winBlockage > 0 { flagToLose() }
+        case .playerEntered:
+            if session.triggerWinState != .lost { flagToWin() }
+        default:
+            break   // any other event can't resolve a Cap=Win/Des=Lose trigger
+        }
 
     case .allowWin:
         // Consume one unit of win Blockage (TRIGGER.CPP:313-314); once the

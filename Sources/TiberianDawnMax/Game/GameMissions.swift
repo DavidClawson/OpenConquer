@@ -429,6 +429,12 @@ extension GameObject {
                             // Player captured an enemy building
                             let vox: VoxType = previousOwner == .badGuy ? .nodCaptured : .gdiCaptured
                             session.speakEVA(vox)
+                            // Spring the building's trigger with PLAYER_ENTERED so a
+                            // Cap=Win/Des=Lose (WinLose) trigger resolves to a win on
+                            // capture (mirrors the classic capture→EVENT_PLAYER_ENTERED).
+                            if let trigName = target.triggerName {
+                                springTrigger(named: trigName, event: .playerEntered)
+                            }
                         } else if previousOwner == world.playerHouse {
                             // Enemy captured player's building
                             session.speakEVA(.structureLost, cooldownTicks: 45)

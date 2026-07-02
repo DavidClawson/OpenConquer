@@ -182,6 +182,11 @@ if CommandLine.arguments.contains("--test-wingate") {
     exit(headlessTestWinGateCommand())
 }
 
+// Cap=Win/Des=Lose event-branching self-test: --test-winlose
+if CommandLine.arguments.contains("--test-winlose") {
+    exit(headlessTestWinLoseCommand())
+}
+
 // Tier-1 T4 self-test: --test-regions
 if CommandLine.arguments.contains("--test-regions") {
     exit(headlessTestRegionsCommand())
