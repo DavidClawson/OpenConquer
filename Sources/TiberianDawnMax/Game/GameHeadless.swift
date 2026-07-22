@@ -1147,6 +1147,111 @@ func headlessTestReinforcementsCommand() -> Int32 {
     return 0
 }
 
+/// `--test-civ-evac` — verify the civilian-evacuation win model: a civilian
+/// boarding a transport aircraft sends it off the map (AIRCRAFT.CPP:2530-2542),
+/// the off-map exit sets the house `isCivEvacuated` flag without springing the
+/// evacuee's Destroyed trigger (classic delete, AIRCRAFT.CPP:836-855), and the
+/// Civ. Evac. trigger event wins the mission (HOUSE.CPP:1257). Also checks the
+/// negative: a non-civilian boarding does NOT trigger the evacuation flight.
+/// Asset-free (in-code scenario). Exit 0 = pass.
+func headlessTestCivEvacCommand() -> Int32 {
+    print("test-civ-evac: civilian evacuation win model (SCG11/SCG12)")
+    let ini = """
+    [Basic]
+    BuildLevel=1
+    [GoodGuy]
+    Credits=50
+    [MAP]
+    Theater=TEMPERATE
+    X=2
+    Y=2
+    Width=60
+    Height=60
+    [Triggers]
+    win=Civ. Evac.,Win,0,GoodGuy,None,0
+    los1=Destroyed,Lose,0,None,None,0
+    [INFANTRY]
+    0=GoodGuy,MOEBIUS,256,2078,0,Guard,0,los1
+    1=GoodGuy,E1,256,2079,0,Guard,0,None
+    """
+    let seed: UInt64 = 0xC1BE_BAC0_0DAD_FACE
+    forcedGameSeed = seed
+    defer { forcedGameSeed = nil }
+    let saved = session.rules
+    session.rules = .classic1995
+    defer { session.rules = saved }
+
+    let data = parseScenarioData(INIFile(string: ini), name: "SYNTHEVAC")
+    initGameWorld(scenario: data, scenarioName: "SYNTHEVAC")
+    guard let world = session.world else { print("FAIL: no world"); return 1 }
+
+    guard let moebius = world.objects.first(where: { $0.typeName == "MOEBIUS" }),
+          let grunt = world.objects.first(where: { $0.typeName == "E1" }) else {
+        print("FAIL: infantry not placed"); return 1
+    }
+
+    // 1. Negative first: a non-civilian boarding does NOT start the evac flight
+    let apcHeli = createAircraft(world: world, type: .transport, house: .goodGuy,
+                                 worldX: grunt.worldX + 18.0, worldY: grunt.worldY,
+                                 facing: 0, mission: .guard_)
+    world.addObject(apcHeli)
+    grunt.enterTransportID = apcHeli.id
+    grunt.mission = .enter
+    grunt.tickEnterTransport()
+    guard grunt.isInLimbo, apcHeli.passengers.contains(grunt.id) else {
+        print("FAIL: E1 did not board the transport"); return 1
+    }
+    guard apcHeli.mission != .retreat else {
+        print("FAIL: non-civilian boarding started an evacuation flight"); return 1
+    }
+    print("  board: E1 loads as a passenger; no evacuation flight for soldiers")
+
+    // 2. The civilian boards → the transport immediately flies off the map
+    let evacHeli = createAircraft(world: world, type: .transport, house: .goodGuy,
+                                  worldX: moebius.worldX + 18.0, worldY: moebius.worldY,
+                                  facing: 0, mission: .guard_)
+    world.addObject(evacHeli)
+    moebius.enterTransportID = evacHeli.id
+    moebius.mission = .enter
+    moebius.tickEnterTransport()
+    guard moebius.isInLimbo, evacHeli.passengers.contains(moebius.id) else {
+        print("FAIL: MOEBIUS did not board the transport"); return 1
+    }
+    guard evacHeli.mission == .retreat else {
+        print("FAIL: civilian boarding did not start the evacuation flight "
+              + "(mission=\(evacHeli.mission))"); return 1
+    }
+    print("  civ: MOEBIUS boards → transport assigned retreat (evacuation flight)")
+
+    // 3. Fly out: off-map exit sets the flag, deletes without a 'kill'
+    var ticks = 0
+    while evacHeli.strength > 0 && ticks < 3000 {
+        evacHeli.tickAircraftRetreat()
+        ticks += 1
+    }
+    guard evacHeli.strength <= 0 else {
+        print("FAIL: transport never left the map (\(ticks) ticks)"); return 1
+    }
+    guard getHouseState(.goodGuy).isCivEvacuated else {
+        print("FAIL: isCivEvacuated not set after off-map exit"); return 1
+    }
+    guard moebius.strength <= 0, moebius.triggerName == nil else {
+        print("FAIL: evacuee not cleanly removed (hp=\(moebius.strength), trig=\(String(describing: moebius.triggerName)))"); return 1
+    }
+    print("  exit: off-map after \(ticks) ticks → isCivEvacuated set, evacuee removed as a delete")
+
+    // 4. Trigger poll: Civ. Evac. wins — and the evacuee's Destroyed-Lose
+    //    trigger must NOT have fired
+    tickTriggers()
+    guard session.triggerWinState == .won else {
+        print("FAIL: Civ. Evac. trigger did not win (state=\(session.triggerWinState))"); return 1
+    }
+    print("  win: Civ. Evac. trigger fired → MISSION WON (lose trigger untouched)")
+
+    print("PASS: civilian evacuation win model (SCG11/SCG12) works")
+    return 0
+}
+
 /// `--test-winlose` — verify the Cap=Win/Des=Lose action branches on the firing
 /// event (Gap #2): a DESTROYED spring loses, a PLAYER_ENTERED (capture) spring
 /// wins. Mirrors TRIGGER.CPP:427-443. Exit 0 = pass.

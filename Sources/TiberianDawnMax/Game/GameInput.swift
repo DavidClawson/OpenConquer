@@ -288,6 +288,36 @@ func handleGameRightClick(_ x: Int32, _ y: Int32, shiftHeld: Bool = false) {
         return
     }
 
+    // Right-clicking one of our own transports (APC/TRAN) with infantry
+    // selected orders them aboard (classic ACTION_ENTER). Boarding is what
+    // drives the civ-evac missions: a civilian entering a transport aircraft
+    // makes it fly off the map (AIRCRAFT.CPP:2530-2542).
+    if let transport = world.objects.first(where: { obj in
+        obj.kind == .unit && obj.house == world.playerHouse && obj.strength > 0 &&
+        !obj.isInLimbo && obj.isTransporter &&
+        abs(obj.worldX - worldPos.worldX) < 14.0 && abs(obj.worldY - worldPos.worldY) < 14.0
+    }) {
+        var ordered = false
+        var slots = transport.maxPassengers - transport.passengerCount
+        for obj in selected where obj.kind == .infantry && obj.house == world.playerHouse {
+            guard slots > 0 else { break }
+            obj.enterTransportID = transport.id
+            obj.mission = .enter
+            obj.attackTarget = nil
+            obj.isAttackMoving = false
+            obj.moveWaypoints = []
+            obj.movePath = []
+            obj.moveTargetX = nil
+            obj.moveTargetY = nil
+            slots -= 1
+            ordered = true
+        }
+        if ordered {
+            audioManager.play(audioManager.unitAcknowledgeSound())
+            return
+        }
+    }
+
     // Right-clicking one of our own special-service buildings issues a
     // service order rather than a move:
     //   • refinery (PROC) + harvester(s) → go dock & unload there

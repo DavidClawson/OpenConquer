@@ -383,4 +383,58 @@ extension GameObject {
               let data = aircraftTypeDataTable[at] else { return false }
         return data.isFixedWing
     }
+
+    /// MISSION_RETREAT for aircraft: fly to the nearest map edge and leave.
+    /// Once off the map, passengers are checked for the civ-evac condition —
+    /// a civilian aboard sets the owning house's `isCivEvacuated` flag
+    /// (AIRCRAFT.CPP:831-855) — then transport and passengers are removed.
+    /// Removal is a classic `delete`, NOT a kill: it must not spring Destroyed
+    /// triggers or the must-survive loss (the evacuee leaving is the win).
+    func tickAircraftRetreat() {
+        guard let world = session.world else { return }
+        let bounds = world.mapBounds ?? MapBounds(x: 0, y: 0, width: 64, height: 64)
+
+        if moveTargetX == nil {
+            // Head for the nearest edge, exiting a few cells beyond it
+            let left   = worldX - Double(bounds.x * 24)
+            let right  = Double((bounds.x + bounds.width) * 24) - worldX
+            let top    = worldY - Double(bounds.y * 24)
+            let bottom = Double((bounds.y + bounds.height) * 24) - worldY
+            let nearest = min(left, right, top, bottom)
+            if nearest == left {
+                moveTargetX = Double(bounds.x * 24) - 96.0
+                moveTargetY = worldY
+            } else if nearest == right {
+                moveTargetX = Double((bounds.x + bounds.width) * 24) + 96.0
+                moveTargetY = worldY
+            } else if nearest == top {
+                moveTargetX = worldX
+                moveTargetY = Double(bounds.y * 24) - 96.0
+            } else {
+                moveTargetX = worldX
+                moveTargetY = Double((bounds.y + bounds.height) * 24) + 96.0
+            }
+        }
+        _ = flyToward()
+
+        // Off the map (past the one-cell fringe)?
+        if cellX < bounds.x - 1 || cellX > bounds.x + bounds.width ||
+           cellY < bounds.y - 1 || cellY > bounds.y + bounds.height {
+            for pid in passengers {
+                guard let p = world.findObject(id: pid), p.strength > 0 else { continue }
+                if p.kind == .infantry,
+                   let data = getInfantryTypeDataByName(p.typeName.uppercased()),
+                   data.isCivilian {
+                    getHouseState(house).isCivEvacuated = true
+                }
+                p.triggerName = nil
+                p.mustSurvive = false
+                p.strength = 0
+            }
+            passengers.removeAll()
+            triggerName = nil
+            mustSurvive = false
+            strength = 0
+        }
+    }
 }

@@ -58,6 +58,7 @@ jobs:
           ./.build/debug/TiberianDawnMax --test-prebuilt
           ./.build/debug/TiberianDawnMax --test-campaign-graph
           ./.build/debug/TiberianDawnMax --test-reinforcements
+          ./.build/debug/TiberianDawnMax --test-civ-evac
           # Full-tick determinism net on a scenario fabricated in code (no MIX):
           ./.build/debug/TiberianDawnMax --test-synthetic 500
 

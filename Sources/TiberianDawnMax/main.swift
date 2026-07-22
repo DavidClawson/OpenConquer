@@ -209,6 +209,11 @@ if CommandLine.arguments.contains("--test-reinforcements") {
     exit(headlessTestReinforcementsCommand())
 }
 
+// Civilian-evacuation win model self-test: --test-civ-evac
+if CommandLine.arguments.contains("--test-civ-evac") {
+    exit(headlessTestCivEvacCommand())
+}
+
 // Enemy superweapon firing self-test: --test-enemy-superweapon
 if CommandLine.arguments.contains("--test-enemy-superweapon") {
     exit(headlessTestEnemySuperWeaponCommand())

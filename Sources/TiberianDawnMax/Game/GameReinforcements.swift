@@ -819,6 +819,61 @@ func tickReinforcements() {
     }
 }
 
+// MARK: - Transport Boarding (player-ordered ACTION_ENTER)
+
+extension GameObject {
+
+    /// Tick the enter-transport mission: walk to the transport and load as a
+    /// passenger. A civilian (non-technician) boarding a transport AIRCRAFT
+    /// makes it immediately fly off the map — the classic evacuation flight
+    /// (AircraftClass::Receive_Message RADIO_IM_IN, AIRCRAFT.CPP:2530-2542).
+    func tickEnterTransport() {
+        guard let world = session.world,
+              let tid = enterTransportID,
+              let transport = world.findObject(id: tid),
+              transport.strength > 0, !transport.isInLimbo,
+              transport.isTransporter,
+              transport.passengerCount < transport.maxPassengers else {
+            // Transport gone, full, or invalid — stand down
+            enterTransportID = nil
+            mission = .guard_
+            moveTargetX = nil
+            moveTargetY = nil
+            movePath = []
+            return
+        }
+
+        let dx = transport.worldX - worldX
+        let dy = transport.worldY - worldY
+        if sqrt(dx * dx + dy * dy) <= 20.0 {
+            enterTransportID = nil
+            moveTargetX = nil
+            moveTargetY = nil
+            movePath = []
+            mission = .guard_
+            transport.loadPassenger(self)
+
+            // Classic technicians (per-instance IsTechnician civilians spawned
+            // from destroyed buildings) don't count — we never spawn those, so
+            // every isCivilian type qualifies here.
+            if transport.isAircraft,
+               let data = getInfantryTypeDataByName(typeName.uppercased()),
+               data.isCivilian {
+                transport.mission = .retreat
+                transport.moveTargetX = nil
+                transport.moveTargetY = nil
+            }
+        } else {
+            if moveTargetX == nil {
+                moveTargetX = transport.worldX
+                moveTargetY = transport.worldY
+                movePath = []
+            }
+            moveOneStep()
+        }
+    }
+}
+
 // MARK: - APC / Transport Unload Mission
 
 extension GameObject {

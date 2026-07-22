@@ -50,6 +50,12 @@ class HouseState {
     // world — no save/load needed (a trigger grant is one-time and fires next tick).
     var superWeapons: [SpecialWeaponType: SuperWeapon] = [:]
 
+    // Civ-evac win condition (HOUSE.H:128 IsCivEvacuated): set when a transport
+    // aircraft owned by this house leaves the map carrying a civilian
+    // (AIRCRAFT.CPP:836-842); polled by the Civ. Evac. trigger event
+    // (HOUSE.CPP:1257). Never reset once set.
+    var isCivEvacuated: Bool = false
+
     // AI state
     var isAlerted: Bool = false     // Under attack alert
     var alertTimer: Int = 0

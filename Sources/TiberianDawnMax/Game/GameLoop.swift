@@ -122,6 +122,9 @@ func gameTick() {
             case .hunt, .timedHunt:
                 obj.tickAircraftGuard()
                 if obj.mission == .guard_ { obj.mission = .hunt }
+            case .retreat:
+                // Leave the map; evacuates civilian passengers (civ-evac win)
+                obj.tickAircraftRetreat()
             case .unload:
                 // Aircraft transport unloading (C17/TRAN) — handled by tickReinforcements
                 // for pending deliveries; direct unload for already-arrived transports
@@ -178,7 +181,10 @@ func gameTick() {
         case .return_:
             obj.tickReturn()
         case .enter:
-            if obj.repairBuildingID != nil {
+            if obj.enterTransportID != nil {
+                // Player ordered this infantry into a transport — board it.
+                obj.tickEnterTransport()
+            } else if obj.repairBuildingID != nil {
                 // Player sent this vehicle to a repair bay (FIX) — drive in and heal.
                 obj.tickRepairAtFacility()
             } else if obj.moveTargetX != nil {

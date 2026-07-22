@@ -38,6 +38,7 @@ watching the game. Run the built binary directly:
 ./.build/debug/TiberianDawnMax --test-prebuilt                   # ASSET-FREE: IsPrebuilt team-demand production gating (#6C) — runs in CI
 ./.build/debug/TiberianDawnMax --test-campaign-graph             # ASSET-FREE: CountryArray branching + GDI sabotage skip — runs in CI
 ./.build/debug/TiberianDawnMax --test-reinforcements             # ASSET-FREE: Edge= entry, team mission lists, loaner + limbo fidelity — runs in CI
+./.build/debug/TiberianDawnMax --test-civ-evac                   # ASSET-FREE: civilian-evacuation win model (SCG11/SCG12) — runs in CI
 ./.build/debug/TiberianDawnMax --ai-parity    <SCEN> <ticks>      # B3: assert the AI decide() phase is pure (no RNG/world mutation)
 ./.build/debug/TiberianDawnMax --ai-trace     <SCEN> <ticks>      # B3: print the per-house goal/decision stream each decide tick
 ./.build/debug/TiberianDawnMax --test-flags   <SCEN>             # Tier-1: per-instance invulnerable / must-survive flags

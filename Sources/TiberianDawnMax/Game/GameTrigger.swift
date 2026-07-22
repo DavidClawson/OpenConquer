@@ -562,12 +562,11 @@ func polledEventReady(_ event: TriggerEvent, threshold: Int, house: House, world
             obj.house == house && obj.strength > 0 && !obj.isInLimbo && isCellVisible(obj.cell)
         }
     case .civEvacuated:
-        guard world.tickCount % 8 == 0 else { return false }
-        guard let evacPos = waypointWorldPos(25) else { return false }
-        return world.objects.contains { obj in
-            obj.house == .neutral && obj.kind == .infantry && obj.strength > 0 && !obj.isInLimbo &&
-            abs(obj.worldX - evacPos.x) < 24.0 && abs(obj.worldY - evacPos.y) < 24.0
-        }
+        // EVENT_EVAC_CIVILIAN (HOUSE.CPP:1257): springs once the house's
+        // civ-evacuated flag is set — a transport aircraft left the map
+        // carrying a civilian (AIRCRAFT.CPP:836-842). Replaces the old
+        // neutral-infantry-near-waypoint-25 proxy that made SCG11/12 unwinnable.
+        return getHouseState(house).isCivEvacuated
     default:
         // Sprung events (.playerEntered/.attacked/.destroyed/.discovered/
         // .builtIt/.any) and .none are not polled here.

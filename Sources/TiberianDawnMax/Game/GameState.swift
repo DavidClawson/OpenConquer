@@ -150,6 +150,10 @@ class GameObject {
     // Repair facility (FIX) — vehicle the player sent to a repair bay to be healed
     var repairBuildingID: Int? = nil
 
+    // Transport boarding — infantry the player ordered into a transport
+    // (walks over and loads as a passenger; drives the civ-evac flow)
+    var enterTransportID: Int? = nil
+
     // Animation state (infantry walk cycle, fire animation)
     var animFrame: Int = 0          // Current animation frame offset (0 = stand, 1+ = walk cycle)
     var animTickCounter: Int = 0    // Tick counter for animation timing
