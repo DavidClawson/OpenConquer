@@ -204,6 +204,11 @@ if CommandLine.arguments.contains("--test-initteams") {
     exit(headlessTestInitTeamsCommand())
 }
 
+// Reinforcement fidelity self-test: --test-reinforcements
+if CommandLine.arguments.contains("--test-reinforcements") {
+    exit(headlessTestReinforcementsCommand())
+}
+
 // Enemy superweapon firing self-test: --test-enemy-superweapon
 if CommandLine.arguments.contains("--test-enemy-superweapon") {
     exit(headlessTestEnemySuperWeaponCommand())

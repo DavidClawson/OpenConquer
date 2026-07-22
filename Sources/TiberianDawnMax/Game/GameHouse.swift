@@ -4,6 +4,29 @@ import Foundation
 // Ported from Vanilla Conquer house.h/house.cpp
 // Manages per-house economy, power, production, and tracking
 
+// MARK: - Map Edge (reinforcement source)
+
+/// The map edge a house's reinforcements arrive from — the INI `Edge=` key in
+/// each house section (HOUSE.CPP:1672-1675, default SOURCE_NORTH). Only the four
+/// edge sources are scenario-settable; shipping/beach/air are derived from team
+/// composition (REINF.CPP:111-128).
+enum MapEdge: String {
+    case north = "North"
+    case east = "East"
+    case south = "South"
+    case west = "West"
+
+    static func from(_ string: String) -> MapEdge? {
+        MapEdge(rawValue: string.trimmingCharacters(in: .whitespaces).capitalized)
+    }
+}
+
+/// The edge a house's ground/air reinforcements enter from (`Edge=` in the
+/// house's INI section; default north per HOUSE.CPP:351,1674).
+func houseEdge(_ house: House) -> MapEdge {
+    session.houseEdges[house] ?? .north
+}
+
 class HouseState {
     let type: House
     var credits: Int

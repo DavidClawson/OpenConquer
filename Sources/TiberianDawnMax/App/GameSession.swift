@@ -57,6 +57,8 @@ class ScriptingState {
     var teamTypes: [TeamType] = []
     var activeTeams: [ActiveTeam] = []
     var scenarioWaypoints: [Int: Int] = [:]
+    /// Per-house reinforcement entry edge (`Edge=` in house INI sections).
+    var houseEdges: [House: MapEdge] = [:]
     var aiTickCounter: Int = 0
     var pendingReinforcements: [PendingReinforcement] = []
     /// Tier-1 T4: named region zones, keyed by uppercased name.
@@ -216,6 +218,10 @@ class GameSession {
     var scenarioWaypoints: [Int: Int] {
         get { scripting.scenarioWaypoints }
         set { scripting.scenarioWaypoints = newValue }
+    }
+    var houseEdges: [House: MapEdge] {
+        get { scripting.houseEdges }
+        set { scripting.houseEdges = newValue }
     }
     var scenarioRegions: [String: ScenarioRegion] {
         get { scripting.scenarioRegions }

@@ -1002,6 +1002,151 @@ func headlessTestInitTeamsCommand() -> Int32 {
     return 0
 }
 
+/// `--test-reinforcements` — verify reinforcement fidelity (REINF.CPP port):
+/// house `Edge=` parsing + edge entry, force-active teams executing their
+/// TeamType mission list, the transport-only loaner exemption (SCG12's evac
+/// chopper survives), team-less fixed-wing hunting (A10 strikes), and limboed
+/// cargo being untargetable. Asset-free (in-code scenario). Exit 0 = pass.
+func headlessTestReinforcementsCommand() -> Int32 {
+    print("test-reinforcements: Edge= entry, team mission lists, loaner + limbo fidelity")
+    // [TeamTypes] token order: House,RoundAbout,Learning,Suicide,Autocreate,
+    // Mercenary,RecruitPriority,MaxAllowed,InitNum,Fear,ClassCount,classes...,
+    // MissionCount,missions...,IsReinforcable,IsPrebuilt
+    let ini = """
+    [Basic]
+    BuildLevel=1
+    [GoodGuy]
+    Credits=50
+    [BadGuy]
+    Edge=West
+    [MAP]
+    Theater=TEMPERATE
+    X=2
+    Y=2
+    Width=60
+    Height=60
+    [Waypoints]
+    0=2080
+    [UNITS]
+    0=GoodGuy,MTNK,256,2078,0,Guard,None
+    [TeamTypes]
+    GRND=BadGuy,0,0,0,0,0,7,0,0,0,1,MTNK:2,1,Move:0,0,1
+    EVAC=GoodGuy,0,0,0,0,0,7,0,0,0,1,TRAN:1,1,Move:0,0,1
+    A10S=BadGuy,0,0,0,0,0,7,0,0,0,1,A10:1,0,0,1
+    """
+    let seed: UInt64 = 0xF00D_FACE_BEEF_CAFE
+    forcedGameSeed = seed
+    defer { forcedGameSeed = nil }
+    let saved = session.rules
+    session.rules = .classic1995
+    defer { session.rules = saved }
+
+    let data = parseScenarioData(INIFile(string: ini), name: "SYNTHREINF")
+    initGameWorld(scenario: data, scenarioName: "SYNTHREINF")
+    guard let world = session.world else { print("FAIL: no world"); return 1 }
+    let bounds = world.mapBounds ?? MapBounds(x: 0, y: 0, width: 64, height: 64)
+
+    // 1. Edge= parsing: BadGuy overridden to West, GoodGuy defaults to North
+    guard houseEdge(.badGuy) == .west, houseEdge(.goodGuy) == .north else {
+        print("FAIL: Edge= parse — badGuy=\(houseEdge(.badGuy)) goodGuy=\(houseEdge(.goodGuy))"); return 1
+    }
+    print("  edge: BadGuy Edge=West parsed; GoodGuy defaults to North")
+
+    // 2. Ground team enters from the house's west edge under team control
+    let before = Set(world.objects.map { $0.id })
+    doReinforcements(teamName: "GRND")
+    let grndObjs = world.objects.filter { !before.contains($0.id) }
+    guard grndObjs.count == 2 else {
+        print("FAIL: GRND spawned \(grndObjs.count) objects (expected 2)"); return 1
+    }
+    let westCol = bounds.x - 1
+    guard grndObjs.allSatisfy({ $0.cellX == westCol }) else {
+        print("FAIL: GRND entered at cols \(grndObjs.map { $0.cellX }) (expected \(westCol))"); return 1
+    }
+    guard session.activeTeams.count == 1, let grndTeam = session.activeTeams.first,
+          grndTeam.members.count == 2 else {
+        print("FAIL: GRND team not created/populated (teams=\(session.activeTeams.count))"); return 1
+    }
+    print("  ground: 2 MTNK entered at west edge col \(westCol), teamed")
+
+    // 3. Force-active launch: the mission list runs without full-strength wait
+    grndTeam.tick()
+    let wpPos = cellToPixel(2080)
+    let moving = grndObjs.filter { obj in
+        obj.mission == .move && abs((obj.moveTargetX ?? 0) - (Double(wpPos.px) + 12.0)) < 60
+    }
+    guard !moving.isEmpty else {
+        print("FAIL: team mission list did not send members to waypoint 0 "
+              + "(missions=\(grndObjs.map { $0.mission }))"); return 1
+    }
+    print("  team: force-active launch — members moving to waypoint 0 (Move:0)")
+
+    // 4. Transport-only team: the chopper IS the reinforcement — no loaner,
+    //    no scripted fly-out, driven by its own mission list
+    let pendingBefore = session.pendingReinforcements.count
+    let beforeEvac = Set(world.objects.map { $0.id })
+    doReinforcements(teamName: "EVAC")
+    guard let tran = world.objects.first(where: { !beforeEvac.contains($0.id) }),
+          tran.typeName == "TRAN" else {
+        print("FAIL: EVAC did not spawn a TRAN"); return 1
+    }
+    guard !tran.isALoaner else {
+        print("FAIL: transport-only TRAN marked loaner (would be culled — SCG12 evac bug)"); return 1
+    }
+    guard session.pendingReinforcements.count == pendingBefore else {
+        print("FAIL: transport-only TRAN got a scripted unload/fly-out delivery"); return 1
+    }
+    guard let evacTeam = session.activeTeams.first(where: { $0.members.contains(tran.id) }) else {
+        print("FAIL: TRAN not in its team"); return 1
+    }
+    evacTeam.tick()
+    guard tran.mission == .move, tran.moveTargetX != nil else {
+        print("FAIL: EVAC team did not send TRAN to its waypoint (mission=\(tran.mission))"); return 1
+    }
+    print("  evac: transport-only TRAN kept (not loaner), following its Move:0 mission")
+
+    // 5. Team-less fixed-wing strike: A10 hunts (REINF.CPP:366-368) as a loaner
+    let beforeA10 = Set(world.objects.map { $0.id })
+    doReinforcements(teamName: "A10S")
+    guard let a10 = world.objects.first(where: { !beforeA10.contains($0.id) }),
+          a10.typeName == "A10" else {
+        print("FAIL: A10S did not spawn an A10"); return 1
+    }
+    guard a10.mission == .hunt, a10.isALoaner else {
+        print("FAIL: team-less A10 mission=\(a10.mission) loaner=\(a10.isALoaner) "
+              + "(expected hunt + loaner)"); return 1
+    }
+    print("  a10: team-less fixed-wing enters hunting, always a loaner")
+
+    // 6. Limboed cargo is untargetable and takes no splash
+    guard let playerTank = world.objects.first(where: { $0.typeName == "MTNK" && $0.house == .goodGuy }) else {
+        print("FAIL: no player MTNK"); return 1
+    }
+    let lurker = GameObject(
+        id: world.allocateId(), typeName: "E1", house: .badGuy, kind: .infantry,
+        worldX: playerTank.worldX + 24.0, worldY: playerTank.worldY,
+        facing: 0, strength: 50, mission: .guard_, speed: 1.0)
+    lurker.isInLimbo = true
+    world.addObject(lurker)
+    if let hit = findNearestEnemy(playerTank, range: 100, requireVisibility: false), hit.id == lurker.id {
+        print("FAIL: limboed object acquired as a target"); return 1
+    }
+    let hpBefore = lurker.strength
+    applySplashDamage(at: lurker.worldX, worldY: lurker.worldY, warhead: .he,
+                      baseDamage: 100, attackerHouse: .goodGuy)
+    guard lurker.strength == hpBefore else {
+        print("FAIL: limboed object took splash damage"); return 1
+    }
+    lurker.isInLimbo = false
+    guard findNearestEnemy(playerTank, range: 100, requireVisibility: false)?.id == lurker.id else {
+        print("FAIL: unlimboed object not reacquired"); return 1
+    }
+    print("  limbo: in-transit cargo untargetable + splash-immune; targetable once unloaded")
+
+    print("PASS: reinforcement fidelity (Edge=, team missions, loaners, limbo)")
+    return 0
+}
+
 /// `--test-winlose` — verify the Cap=Win/Des=Lose action branches on the firing
 /// event (Gap #2): a DESTROYED spring loses, a PLAYER_ENTERED (capture) spring
 /// wins. Mirrors TRIGGER.CPP:427-443. Exit 0 = pass.

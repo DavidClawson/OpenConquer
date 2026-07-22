@@ -131,6 +131,9 @@ class ActiveTeam {
     var missionTimeout: Int = 0     // Ticks until mission times out
     var isSuspended: Bool = false
     var suspendTimer: Int = 0
+    /// Force_Active (TEAM.H:185): launch the mission list even below full
+    /// strength. Set for reinforcement teams, which arrive pre-populated.
+    var isForcedActive: Bool = false
 
     init(type: TeamType) {
         self.type = type
@@ -176,7 +179,11 @@ extension ActiveTeam {
         let desired = desiredCount
 
         isFullStrength = (current >= desired)
-        if type.isReinforcable {
+        if isForcedActive {
+            // Force_Active suppresses the understrength state until launch
+            // (TEAM.H:185 sets IsUnderStrength=false).
+            isUnderStrength = false
+        } else if type.isReinforcable {
             isUnderStrength = (current <= desired / 3) && current < desired
         } else {
             isUnderStrength = !isHasBeen && current < desired
@@ -199,13 +206,14 @@ extension ActiveTeam {
             return
         }
 
-        // Launch mission when full strength (or forced)
-        if !isMoving && isFullStrength {
+        // Launch mission when full strength (or forced — TEAM.CPP:420-444)
+        if !isMoving && (isFullStrength || isForcedActive) {
             isMoving = true
             isHasBeen = true
             isUnderStrength = false
             currentMission = -1
             isNextMission = true
+            isForcedActive = false
         }
 
         // Recruit if not full strength
@@ -552,7 +560,7 @@ extension ActiveTeam {
         var bestDist = Double.infinity
 
         for obj in world.objects {
-            guard (obj.kind == .unit || obj.kind == .infantry) && obj.strength > 0 else { continue }
+            guard (obj.kind == .unit || obj.kind == .infantry) && obj.strength > 0 && !obj.isInLimbo else { continue }
             guard obj.house != house && obj.house != .neutral else { continue }
 
             let dx = obj.worldX - centerX
@@ -573,7 +581,7 @@ extension ActiveTeam {
         var bestDist = Double.infinity
 
         for obj in world.objects {
-            guard obj.strength > 0 else { continue }
+            guard obj.strength > 0 && !obj.isInLimbo else { continue }
             guard obj.house == .neutral else { continue }
 
             let dx = obj.worldX - centerX
@@ -594,7 +602,7 @@ extension ActiveTeam {
         var bestDist = Double.infinity
 
         for obj in world.objects {
-            guard obj.strength > 0 else { continue }
+            guard obj.strength > 0 && !obj.isInLimbo else { continue }
             guard obj.house != house && obj.house != .neutral else { continue }
 
             let dx = obj.worldX - centerX
@@ -770,6 +778,19 @@ func createAndRecruitTeam(type: TeamType) -> ActiveTeam? {
 func forceCreateAndRecruitTeam(type: TeamType) -> ActiveTeam? {
     guard let team = createTeam(type: type, bypassCap: true) else { return nil }
     team.recruitMembers()
+    return team
+}
+
+/// Create a force-active team for a reinforcement (Do_Reinforcements,
+/// REINF.CPP:75-80): members arrive pre-created and are added directly rather
+/// than recruited, and the mission list launches immediately regardless of
+/// strength. Bypasses MaxAllowed (classic reinforcement teams are not capped
+/// at creation).
+func createReinforcementTeam(type: TeamType) -> ActiveTeam? {
+    guard !type.missionList.isEmpty else { return nil }
+    guard let team = createTeam(type: type, bypassCap: true) else { return nil }
+    team.isForcedActive = true
+    team.isUnderStrength = false
     return team
 }
 

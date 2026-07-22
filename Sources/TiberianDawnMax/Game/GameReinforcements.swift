@@ -151,12 +151,17 @@ extension GameObject {
 
 // MARK: - Reinforcement Delivery System
 
-/// Enhanced reinforcement spawning with C17 cargo plane fly-in delivery.
-/// Replaces the simple `spawnReinforcements` stub in GameTrigger.swift.
+/// Create and place a reinforcement team — port of Do_Reinforcements
+/// (REINF.CPP:63-430).
 ///
-/// Logic ported from VC Do_Reinforcements (reinf.cpp):
-/// - If the team contains an aircraft (TRAN/C17), use air delivery
-/// - Otherwise, spawn ground units at map edge and move them in
+/// - A team with a mission list gets a force-active `ActiveTeam` that executes
+///   those missions (REINF.CPP:75-80); members without one enter and hold.
+/// - Delivery source: any aircraft → air; hovercraft → beach; gunboat →
+///   shipping; otherwise the owning house's `Edge=` (REINF.CPP:111-128).
+/// - Loaner rules (REINF.CPP:169-199): a transport is a loaner only when it is
+///   carrying something AND is not a ground unit; a transport-only team (e.g.
+///   SCG12's evac chopper) IS the reinforcement and keeps its transport.
+///   Fixed-wing attack craft (A10) are always loaners.
 func doReinforcements(teamName: String) {
     guard session.world != nil else { return }
 
@@ -164,106 +169,187 @@ func doReinforcements(teamName: String) {
         print("Reinforcements: Unknown team type '\(teamName)'")
         return
     }
+    guard !teamType.classSlots.isEmpty else { return }
 
-    // Determine delivery method by examining team composition (VC reinf.cpp logic)
-    var hasAirTransport = false
-    var hasWaterTransport = false
-    var hasGunboat = false
+    // Team composition flags (REINF.CPP:89-105)
+    var airTransport = false
+    var waterTransport = false
+    var onlyTransport = true
 
     for slot in teamType.classSlots {
         let upper = slot.typeName.uppercased()
-        if let at = AircraftType.from(iniName: upper), let data = aircraftTypeDataTable[at] {
-            if data.isTransporter || data.isFixedWing {
-                hasAirTransport = true
+        let isAircraftType = AircraftType.from(iniName: upper) != nil
+        var isTransporterType = false
+        if let ut = UnitType.from(iniName: upper), let data = unitTypeDataTable[ut] {
+            isTransporterType = data.isTransporter
+            if data.isTransporter && data.speed == .hover {
+                waterTransport = true
             }
         }
-        if let ut = UnitType.from(iniName: upper), let data = unitTypeDataTable[ut] {
-            if data.isTransporter && data.speed == .hover {
-                hasWaterTransport = true  // Hovercraft/LST
-            }
-            if ut.isGunboat {
-                hasGunboat = true  // Gunboat arrives via SOURCE_SHIPPING
-            }
+        if isTransporterType || isAircraftType {
+            if isAircraftType { airTransport = true }
+        } else {
+            onlyTransport = false
         }
     }
 
-    if hasAirTransport {
-        doAirReinforcement(teamType: teamType)
-    } else if hasWaterTransport || hasGunboat {
-        doBeachReinforcement(teamType: teamType, isGunboat: hasGunboat)
+    // Gunboat special case: keys off the FIRST class slot (REINF.CPP:123)
+    let isGunboat: Bool
+    if let first = teamType.classSlots.first,
+       let ut = UnitType.from(iniName: first.typeName.uppercased()), ut.isGunboat {
+        isGunboat = true
     } else {
-        doGroundReinforcement(teamType: teamType)
+        isGunboat = false
+    }
+
+    // Controlling team: only created when there are missions to run
+    // (REINF.CPP:70-80). The team handler assigns the members' missions.
+    let team = createReinforcementTeam(type: teamType)
+
+    if airTransport {
+        doAirReinforcement(teamType: teamType, team: team, onlyTransport: onlyTransport)
+    } else if waterTransport || isGunboat {
+        doBeachReinforcement(teamType: teamType, team: team, isGunboat: isGunboat)
+    } else {
+        doGroundReinforcement(teamType: teamType, team: team,
+                              edge: houseEdge(teamType.house))
     }
 }
 
-// MARK: - Air Reinforcement (C17 / Transport Helicopter)
+// MARK: - Edge Cell Selection (DisplayClass::Calculated_Cell)
 
-/// Deliver reinforcements by C17 cargo plane or transport helicopter.
-/// The transport flies in from the right edge, drops units at the airstrip
-/// (for C17) or a waypoint, then flies off.
-private func doAirReinforcement(teamType: TeamType) {
+/// Pick a clear cell along a map edge for a reinforcement to enter at — port of
+/// Calculated_Cell's SOURCE_NORTH/EAST/SOUTH/WEST arms (DISPLAY.CPP:2413-2450):
+/// random starting offset, then scan the whole edge for a cell where both the
+/// edge cell and its inward neighbor are passable. Returns nil if the edge is
+/// fully blocked. Uses the seeded RNG — this is simulation randomness.
+func calculatedEdgeCell(edge: MapEdge, bounds: MapBounds) -> Int? {
+    func clear(_ cell: Int) -> Bool {
+        cell >= 0 && cell < 4096 && landPassability[cell]
+    }
+
+    switch edge {
+    case .north, .south:
+        let row = (edge == .north) ? bounds.y - 1 : bounds.y + bounds.height
+        let inward = (edge == .north) ? 64 : -64
+        let index = rndInt(1...bounds.width)
+        for x in 0..<bounds.width {
+            let cell = row * 64 + bounds.x + (x + index) % bounds.width
+            if clear(cell) && clear(cell + inward) { return cell }
+        }
+    case .east, .west:
+        let col = (edge == .east) ? bounds.x + bounds.width : bounds.x - 1
+        let inward = (edge == .east) ? -1 : 1
+        let index = rndInt(1...bounds.height)
+        for y in 0..<bounds.height {
+            let cell = (bounds.y + (y + index) % bounds.height) * 64 + col
+            if clear(cell) && clear(cell + inward) { return cell }
+        }
+    }
+    return nil
+}
+
+/// Facing (0-255) pointing inward from a map edge.
+func edgeInwardFacing(_ edge: MapEdge) -> Int {
+    switch edge {
+    case .north: return 128  // enter from north → face south
+    case .east:  return 192  // face west
+    case .south: return 0    // face north
+    case .west:  return 64   // face east
+    }
+}
+
+/// Cell delta stepping inward (onto the map) from a given edge.
+func edgeInwardDelta(_ edge: MapEdge) -> Int {
+    switch edge {
+    case .north: return 64
+    case .east:  return -1
+    case .south: return -64
+    case .west:  return 1
+    }
+}
+
+// MARK: - Air Reinforcement (C17 / Transport Helicopter / Fixed-Wing)
+
+/// Deliver reinforcements by air — port of the SOURCE_AIR arm of
+/// Do_Reinforcements (REINF.CPP:340-394). Aircraft enter from the owning
+/// house's `Edge=` (cargo planes align with the airstrip row, east edge).
+/// Fidelity points:
+/// - Transporters carrying cargo are loaners; a transport-only team keeps its
+///   transport (that IS the reinforcement — SCG12's evac chopper).
+/// - Team-less fixed-wing (A10 strike) gets MISSION_HUNT (REINF.CPP:366-368)
+///   and is always a loaner (REINF.CPP:191-193).
+/// - Teamed aircraft enter under team control and follow the mission list.
+private func doAirReinforcement(teamType: TeamType, team: ActiveTeam?, onlyTransport: Bool) {
     guard let world = session.world else { return }
+    let bounds = world.mapBounds ?? MapBounds(x: 0, y: 0, width: 64, height: 64)
+    let edge = houseEdge(teamType.house)
 
-    // Separate transport slots from cargo slots
+    // Split slots: air transports carry, everything else (incl. fixed-wing
+    // attack craft and any ground cargo) is delivered (REINF.CPP:169-199).
     var transportSlots: [TeamClassSlot] = []
-    var cargoSlots: [TeamClassSlot] = []
-
+    var otherSlots: [TeamClassSlot] = []
     for slot in teamType.classSlots {
         let upper = slot.typeName.uppercased()
-        if let at = AircraftType.from(iniName: upper), let data = aircraftTypeDataTable[at] {
-            if data.isTransporter || data.isFixedWing {
-                transportSlots.append(slot)
-            } else {
-                cargoSlots.append(slot)
-            }
+        if let at = AircraftType.from(iniName: upper), let data = aircraftTypeDataTable[at],
+           data.isTransporter {
+            transportSlots.append(slot)
         } else {
-            cargoSlots.append(slot)
+            otherSlots.append(slot)
         }
     }
 
-    // If no explicit transport, use C17 as default for air delivery
-    if transportSlots.isEmpty {
-        transportSlots.append(TeamClassSlot(kind: .unit, typeName: "C17", desiredCount: 1))
+    // Drop destination: Calculated_Cell(SOURCE_AIR) = waypoint 25, else map
+    // center (DISPLAY.CPP:2452-2462); C17s align with the airstrip instead.
+    let hasC17 = transportSlots.contains { $0.typeName.uppercased() == "C17" }
+        || transportSlots.contains { AircraftType.from(iniName: $0.typeName.uppercased()) == .cargo }
+    var dropCell = session.scenarioWaypoints[25]
+        ?? ((bounds.y + bounds.height / 2) * 64 + bounds.x + bounds.width / 2)
+    if hasC17, let airstrip = findAirstrip(house: teamType.house) {
+        dropCell = airstrip.cell
     }
-
-    // Find drop zone: airstrip for C17, or waypoint 25 (WAYPT_REINF), or map center
-    let dropCell: Int
-    let transportType = transportSlots[0].typeName.uppercased()
-
-    if transportType == "C17" {
-        // Look for an airstrip belonging to this house
-        if let airstrip = findAirstrip(house: teamType.house) {
-            dropCell = airstrip.cell
-        } else if let reinfCell = session.scenarioWaypoints[25] {
-            dropCell = reinfCell
-        } else if let bounds = world.mapBounds {
-            dropCell = (bounds.y + bounds.height / 2) * 64 + (bounds.x + bounds.width / 2)
-        } else {
-            dropCell = 32 * 64 + 32
-        }
-    } else {
-        // Transport helicopter: use waypoint 25 or map center
-        if let reinfCell = session.scenarioWaypoints[25] {
-            dropCell = reinfCell
-        } else if let bounds = world.mapBounds {
-            dropCell = (bounds.y + bounds.height / 2) * 64 + (bounds.x + bounds.width / 2)
-        } else {
-            dropCell = 32 * 64 + 32
-        }
-    }
-
     let dropPos = cellToPixel(dropCell)
     let dropX = Double(dropPos.px) + 12.0
     let dropY = Double(dropPos.py) + 12.0
 
-    // Create cargo objects (in limbo)
+    // Entry point along the house's edge (REINF.CPP:349-357); C17s always
+    // stream in from the east at the drop row (classic aligns with the
+    // airstrip docking row, east edge).
+    let entryPoint: (x: Double, y: Double)
+    if hasC17 {
+        entryPoint = (x: Double((bounds.x + bounds.width) * 24) + 48.0, y: dropY)
+    } else if let cell = calculatedEdgeCell(edge: edge, bounds: bounds) {
+        let pos = cellToPixel(cell)
+        entryPoint = (x: Double(pos.px) + 12.0, y: Double(pos.py) + 12.0)
+    } else {
+        entryPoint = (x: Double((bounds.x + bounds.width) * 24) + 48.0, y: dropY)
+    }
+    let entryFacing = edgeInwardFacing(edge)
+
+    // Cargo objects ride in limbo aboard the first transport
     var cargoIds: [Int] = []
-    for slot in cargoSlots {
+    var fixedWingObjects: [GameObject] = []
+    for slot in otherSlots {
         for _ in 0..<slot.desiredCount {
+            let upper = slot.typeName.uppercased()
+            if let at = AircraftType.from(iniName: upper),
+               let data = aircraftTypeDataTable[at], data.isFixedWing {
+                // Fixed-wing attack craft (A10): its own delivery, not cargo
+                let plane = createAircraft(
+                    world: world, type: at, house: teamType.house,
+                    worldX: entryPoint.x, worldY: entryPoint.y,
+                    facing: entryFacing,
+                    mission: team != nil ? .guard_ : .hunt  // REINF.CPP:366-368
+                )
+                plane.isALoaner = true  // A10s always loaners (REINF.CPP:191-193)
+                world.addObject(plane)
+                fixedWingObjects.append(plane)
+                team?.members.append(plane.id)
+                continue
+            }
             let kind = slot.kind
             let speed = resolveSpeed(typeName: slot.typeName, kind: kind)
             let hp = resolveStrength(typeName: slot.typeName, kind: kind, scenarioStrength: 256)
-
             let cargo = GameObject(
                 id: world.allocateId(),
                 typeName: slot.typeName,
@@ -278,66 +364,62 @@ private func doAirReinforcement(teamType: TeamType) {
             cargo.isInLimbo = true
             world.addObject(cargo)
             cargoIds.append(cargo.id)
+            team?.members.append(cargo.id)
         }
     }
 
-    // Create transport aircraft
+    // Suppress the arrival announcement for loaded cargo planes — it plays at
+    // the unload instead (REINF.CPP:222-229 okvoice).
+    var announceNow = true
+
     for slot in transportSlots {
         for _ in 0..<slot.desiredCount {
-            // Spawn at right edge of map, aligned with drop zone Y
-            let spawnX: Double
-            if let bounds = world.mapBounds {
-                spawnX = Double((bounds.x + bounds.width) * 24) + 48.0
-            } else {
-                spawnX = 64.0 * 24.0 + 48.0
-            }
-
-            let transport: GameObject
-            if let at = AircraftType.from(iniName: slot.typeName.uppercased()) {
-                transport = createAircraft(
-                    world: world,
-                    type: at,
-                    house: teamType.house,
-                    worldX: spawnX,
-                    worldY: dropY,
-                    facing: 192,  // Face west
-                    mission: .unload
-                )
-            } else {
-                // Fallback: create C17
-                transport = createAircraft(
-                    world: world,
-                    type: .cargo,
-                    house: teamType.house,
-                    worldX: spawnX,
-                    worldY: dropY,
-                    facing: 192,
-                    mission: .unload
-                )
-            }
-
-            transport.isALoaner = true
-            transport.passengers = cargoIds
-            transport.moveTargetX = dropX
-            transport.moveTargetY = dropY
-
-            world.addObject(transport)
-
-            // Track the reinforcement delivery
-            let pending = PendingReinforcement(
-                transportId: transport.id,
-                dropCell: dropCell,
-                house: teamType.house
+            let at = AircraftType.from(iniName: slot.typeName.uppercased()) ?? .cargo
+            let transport = createAircraft(
+                world: world, type: at, house: teamType.house,
+                worldX: entryPoint.x, worldY: entryPoint.y,
+                facing: entryFacing,
+                mission: .guard_
             )
-            session.pendingReinforcements.append(pending)
+            world.addObject(transport)
+            team?.members.append(transport.id)
 
-            print("Reinforcements: C17/transport spawned at (\(Int(spawnX)), \(Int(dropY))), "
-                  + "delivering \(cargoIds.count) units to cell \(dropCell)")
+            if !cargoIds.isEmpty && transport.passengers.isEmpty {
+                // First transport carries everything (REINF.CPP:218-233)
+                transport.passengers = cargoIds
+                // A carrying transport is a loaner — delivery agent only
+                // (REINF.CPP:176-178). A transport-only team is NOT.
+                transport.isALoaner = !onlyTransport
+            }
+
+            if team == nil {
+                if transport.hasCargo {
+                    // Fly to the drop cell, unload, exit (classic
+                    // MISSION_UNLOAD → Assign_Destination, REINF.CPP:369-374)
+                    transport.mission = .unload
+                    transport.moveTargetX = dropX
+                    transport.moveTargetY = dropY
+                    session.pendingReinforcements.append(PendingReinforcement(
+                        transportId: transport.id, dropCell: dropCell, house: teamType.house))
+                    if at == .cargo { announceNow = false }
+                } else {
+                    // Empty transport IS the reinforcement: fly to the drop
+                    // cell and await orders (REINF.CPP:371-374)
+                    transport.mission = .move
+                    transport.moveTargetX = dropX
+                    transport.moveTargetY = dropY
+                }
+            }
+            // With a team: the force-active team's mission list drives it
+            // (move/unload waypoints) — no scripted exit, no forced unload.
+
+            print("Reinforcements: \(slot.typeName) entering from \(edge.rawValue) "
+                  + "with \(transport.passengerCount) passengers"
+                  + (team != nil ? " (teamed)" : ""))
         }
     }
 
-    // Announce reinforcements if this is the player's house
-    if teamType.house == world.playerHouse {
+    if announceNow && teamType.house == world.playerHouse {
         audioManager.speak(.reinforcements)
     }
 }
@@ -346,10 +428,11 @@ private func doAirReinforcement(teamType: TeamType) {
 
 /// Deliver reinforcements via beach landing (hovercraft/LST) or shipping lane (gunboat).
 /// Ported from VC reinf.cpp SOURCE_BEACH / SOURCE_SHIPPING logic.
+/// The hover lander itself never joins the team (REINF.CPP:160); its cargo does.
 ///
 /// Hovercraft: Spawns at southern water edge, sails north to beach, unloads cargo.
 /// Gunboat: Spawns at eastern water edge, sails west across map.
-private func doBeachReinforcement(teamType: TeamType, isGunboat: Bool) {
+private func doBeachReinforcement(teamType: TeamType, team: ActiveTeam?, isGunboat: Bool) {
     guard let world = session.world else { return }
     let bounds = world.mapBounds ?? MapBounds(x: 0, y: 0, width: 64, height: 64)
 
@@ -496,6 +579,9 @@ private func doBeachReinforcement(teamType: TeamType, isGunboat: Bool) {
                     obj.isALoaner = true
                 } else {
                     cargoObjects.append(obj)
+                    // Cargo joins the controlling team; the lander never does
+                    // (REINF.CPP:160)
+                    team?.members.append(obj.id)
                 }
 
                 world.addObject(obj)
@@ -522,109 +608,131 @@ private func doBeachReinforcement(teamType: TeamType, isGunboat: Bool) {
 
 // MARK: - Ground Reinforcement
 
-/// Deliver reinforcements by ground — spawn at map edge and move in.
-private func doGroundReinforcement(teamType: TeamType) {
+/// Deliver reinforcements by ground from the owning house's map edge — port of
+/// the SOURCE_NORTH/EAST/SOUTH/WEST arm of Do_Reinforcements
+/// (REINF.CPP:257-335). Teamed members enter with MISSION_GUARD and the team
+/// handler drives them; team-less members move one cell inward and hold.
+private func doGroundReinforcement(teamType: TeamType, team: ActiveTeam?, edge: MapEdge) {
     guard let world = session.world else { return }
+    let bounds = world.mapBounds ?? MapBounds(x: 0, y: 0, width: 64, height: 64)
 
-    // Find spawn location: map edge
-    let spawnX: Double
-    let spawnY: Double
-
-    if let bounds = world.mapBounds {
-        // Spawn at right edge (VC uses house edge, we simplify to right)
-        spawnX = Double((bounds.x + bounds.width) * 24) + 12.0
-        spawnY = Double(bounds.y * 24 + bounds.height * 12)
+    // Entry point along the house's edge; fall back to the edge midpoint if the
+    // whole edge is blocked (classic aborts — we degrade gracefully instead).
+    let entryCell: Int
+    if let cell = calculatedEdgeCell(edge: edge, bounds: bounds) {
+        entryCell = cell
     } else {
-        spawnX = 64.0 * 24.0 - 12.0
-        spawnY = 32.0 * 24.0
+        switch edge {
+        case .north: entryCell = (bounds.y - 1) * 64 + bounds.x + bounds.width / 2
+        case .south: entryCell = (bounds.y + bounds.height) * 64 + bounds.x + bounds.width / 2
+        case .east:  entryCell = (bounds.y + bounds.height / 2) * 64 + bounds.x + bounds.width
+        case .west:  entryCell = (bounds.y + bounds.height / 2) * 64 + bounds.x - 1
+        }
     }
+    let facing = edgeInwardFacing(edge)
 
-    // Destination: waypoint 25 or map center
-    let destX: Double
-    let destY: Double
-
-    if let reinfCell = session.scenarioWaypoints[25] {
-        let pos = cellToPixel(reinfCell)
-        destX = Double(pos.px) + 12.0
-        destY = Double(pos.py) + 12.0
-    } else if let bounds = world.mapBounds {
-        destX = Double(bounds.x * 24 + bounds.width * 12)
-        destY = Double(bounds.y * 24 + bounds.height * 12)
-    } else {
-        destX = 32.0 * 24.0
-        destY = 32.0 * 24.0
-    }
-
-    print("Reinforcements: Spawning ground team '\(teamType.name)' at (\(Int(spawnX)), \(Int(spawnY)))")
-
+    // Create the members, splitting ground transports (APC) from the rest.
+    // Ground transports are never loaners (REINF.CPP:176): the crate arrives
+    // with the goods and both are keepers.
     var transportObj: GameObject? = nil
     var cargoObjects: [GameObject] = []
 
     for slot in teamType.classSlots {
-        for i in 0..<slot.desiredCount {
+        for _ in 0..<slot.desiredCount {
             let kind = slot.kind
             let speed = resolveSpeed(typeName: slot.typeName, kind: kind)
             let hp = resolveStrength(typeName: slot.typeName, kind: kind, scenarioStrength: 256)
-            let offset = Double(i) * 12.0
 
             let upper = slot.typeName.uppercased()
-            let isTransport: Bool
+            var isTransport = false
             if let ut = UnitType.from(iniName: upper), let data = unitTypeDataTable[ut] {
                 isTransport = data.isTransporter
-            } else {
-                isTransport = false
             }
 
+            let pos = cellToPixel(entryCell)
             let obj = GameObject(
                 id: world.allocateId(),
                 typeName: slot.typeName,
                 house: teamType.house,
                 kind: kind,
-                worldX: spawnX + offset, worldY: spawnY,
-                facing: 192,  // Face west (into map)
+                worldX: Double(pos.px) + 12.0, worldY: Double(pos.py) + 12.0,
+                facing: facing,
                 strength: hp,
-                mission: .move,
+                mission: .guard_,
                 speed: speed
             )
 
-            if isTransport {
+            if isTransport && transportObj == nil {
                 transportObj = obj
             } else {
                 cargoObjects.append(obj)
             }
-
             world.addObject(obj)
         }
     }
 
-    // If there's a transport (APC), load cargo into it
+    // If a transport came along, everything else rides inside it
+    // (REINF.CPP:218-233: Attach + place only the transport).
+    var placedObjects: [GameObject]
     if let transport = transportObj, !cargoObjects.isEmpty {
         for cargo in cargoObjects {
             transport.loadPassenger(cargo)
         }
-        transport.moveTargetX = destX
-        transport.moveTargetY = destY
-        transport.mission = .move
+        placedObjects = [transport]
     } else {
-        // No transport: all objects move independently to destination
-        for obj in world.objects.suffix(teamType.classSlots.reduce(0) { $0 + $1.desiredCount }) {
-            if obj.house == teamType.house && obj.mission == .move && obj.moveTargetX == nil {
-                obj.moveTargetX = destX
-                obj.moveTargetY = destY
+        placedObjects = cargoObjects
+        if let transport = transportObj { placedObjects.append(transport) }
+    }
+
+    // Stagger on-map entry cells: first object on the entry cell, the rest on
+    // nearby free cells along the edge (approximates the classic adjacent-cell
+    // unlimbo scatter, REINF.CPP:296-312).
+    var usedCells = Set<Int>()
+    for obj in placedObjects {
+        var cell = entryCell
+        if usedCells.contains(cell) {
+            let lateral = (edge == .north || edge == .south) ? 1 : 64
+            for step in 1...8 {
+                let candidates = [entryCell + step * lateral, entryCell - step * lateral]
+                if let free = candidates.first(where: {
+                    !usedCells.contains($0) && $0 >= 0 && $0 < 4096 && landPassability[$0]
+                }) {
+                    cell = free
+                    break
+                }
             }
         }
-        // Set move targets for all spawned objects
-        let totalSpawned = cargoObjects.count + (transportObj != nil ? 1 : 0)
-        let allObjects = world.objects
-        let startIdx = max(0, allObjects.count - totalSpawned)
-        for idx in startIdx..<allObjects.count {
-            let obj = allObjects[idx]
-            if obj.moveTargetX == nil {
-                obj.moveTargetX = destX
-                obj.moveTargetY = destY
-            }
+        usedCells.insert(cell)
+        let pos = cellToPixel(cell)
+        obj.worldX = Double(pos.px) + 12.0
+        obj.worldY = Double(pos.py) + 12.0
+        obj.prevWorldX = obj.worldX
+        obj.prevWorldY = obj.worldY
+
+        if let team = team {
+            // Team handler assigns the real missions (REINF.CPP:287-289)
+            obj.mission = .guard_
+            team.members.append(obj.id)
+        } else {
+            // No mission list: step onto the map and hold (REINF.CPP:290-292)
+            let inwardCell = cell + edgeInwardDelta(edge)
+            let dest = cellToPixel(inwardCell)
+            obj.mission = .move
+            obj.moveTargetX = Double(dest.px) + 12.0
+            obj.moveTargetY = Double(dest.py) + 12.0
         }
     }
+    // Limboed passengers follow their transport's team membership implicitly —
+    // classic adds them to the team too; ours recruit into it on unload if the
+    // team still exists. Keep them listed so team strength counts the cargo.
+    if let team = team, let transport = transportObj, !cargoObjects.isEmpty {
+        for cargo in cargoObjects where cargo.id != transport.id {
+            team.members.append(cargo.id)
+        }
+    }
+
+    print("Reinforcements: ground team '\(teamType.name)' entering from \(edge.rawValue) at cell \(entryCell)"
+          + (team != nil ? " (teamed, \(teamType.missionList.count) missions)" : ""))
 
     if teamType.house == world.playerHouse {
         audioManager.speak(.reinforcements)
@@ -662,7 +770,12 @@ func tickReinforcements() {
             }
 
         case .unloading:
-            // Drop all cargo at the current position
+            // Drop all cargo at the current position. The arrival announcement
+            // for loaded cargo planes plays here, not at map entry
+            // (REINF.CPP:222-229 okvoice → announced on unload).
+            if pending.house == world.playerHouse {
+                audioManager.speak(.reinforcements)
+            }
             transport.unloadPassengers()
             pending.state = .flyingOut
 

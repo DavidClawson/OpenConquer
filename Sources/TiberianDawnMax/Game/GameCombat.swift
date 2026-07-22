@@ -77,6 +77,8 @@ func findNearestEnemy(_ obj: GameObject, range: Double, requireVisibility: Bool 
     for other in world.objects {
         if other.id == obj.id { continue }
         if other.strength <= 0 { continue }
+        // Limboed objects (cargo in transit) are off the map and untargetable
+        if other.isInLimbo { continue }
         if !isEnemy(obj, other) { continue }
         // Anti-aircraft weapons (SAM) can only target aircraft
         if aaOnly && !other.isAircraft { continue }
@@ -296,6 +298,7 @@ extension GameObject {
         guard let targetId = attackTarget,
               let target = findObjectById(targetId),
               target.strength > 0,
+              !target.isInLimbo,
               !(isAntiAirOnly(self) && !target.isAircraft) else {
             // Target gone, dead, or invalid (e.g. SAM vs ground) — find new target or return to guard
             attackTarget = nil
@@ -543,6 +546,8 @@ func applySplashDamage(at worldX: Double, worldY: Double, warhead: WarheadType,
 
     for obj in world.objects {
         if obj.strength <= 0 { continue }
+        // Limboed objects (cargo in transit) are off the map — no splash
+        if obj.isInLimbo { continue }
         // Skip the primary target (already received full damage)
         if let primaryId = primaryTargetId, obj.id == primaryId { continue }
 
@@ -674,6 +679,7 @@ func findEnemyAtWorldPos(worldX: Double, worldY: Double) -> GameObject? {
 
     for obj in world.objects {
         if obj.strength <= 0 { continue }
+        if obj.isInLimbo { continue }
         if obj.house == world.playerHouse { continue }
         if obj.house == .neutral { continue }
 

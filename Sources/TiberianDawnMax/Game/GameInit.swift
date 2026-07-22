@@ -297,6 +297,9 @@ func initGameWorld(scenario: ScenarioData, scenarioName: String) {
         session.scenarioWaypoints[wp.id] = wp.cell
     }
 
+    // Store per-house reinforcement edges (Edge= in house sections)
+    session.houseEdges = scenario.houseEdges
+
     // Parse team types and create initial teams
     parseTeamTypes(from: scenario.ini)
     session.activeTeams.removeAll()

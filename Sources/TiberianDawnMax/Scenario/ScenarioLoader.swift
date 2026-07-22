@@ -172,6 +172,7 @@ struct ScenarioData {
     let ini: INIFile  // Keep reference for trigger parsing
     let credits: Int      // Starting credits from [Basic] section
     let buildLevel: Int   // Tech level cap from [Basic] section (1-15)
+    let houseEdges: [House: MapEdge]  // Edge= per house section (reinforcement entry)
 }
 
 // MARK: - Cell Coordinate Helpers
@@ -372,6 +373,15 @@ func parseScenarioData(_ ini: INIFile, name: String) -> ScenarioData {
     print("  Credits: \(credits), BuildLevel: \(buildLevel)")
 
 
+    // Edge= from each house section (HOUSE.CPP:1672-1675): the map edge that
+    // house's ground/air reinforcements enter from. Missing/invalid → north.
+    var houseEdges: [House: MapEdge] = [:]
+    for house in House.allCases where ini.hasSection(house.rawValue) {
+        if let edge = MapEdge.from(ini.string(house.rawValue, "Edge", default: "")) {
+            houseEdges[house] = edge
+        }
+    }
+
     return ScenarioData(
         theater: theater,
         mapBounds: mapBounds,
@@ -385,6 +395,7 @@ func parseScenarioData(_ ini: INIFile, name: String) -> ScenarioData {
         baseBuildings: baseBuildings,
         ini: ini,
         credits: credits,
-        buildLevel: buildLevel
+        buildLevel: buildLevel,
+        houseEdges: houseEdges
     )
 }

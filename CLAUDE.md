@@ -37,6 +37,7 @@ watching the game. Run the built binary directly:
 ./.build/debug/TiberianDawnMax --test-team-former                # ASSET-FREE: AI Suggested_New_Team priority/cap/alerted scoring (Gap #6) — runs in CI
 ./.build/debug/TiberianDawnMax --test-prebuilt                   # ASSET-FREE: IsPrebuilt team-demand production gating (#6C) — runs in CI
 ./.build/debug/TiberianDawnMax --test-campaign-graph             # ASSET-FREE: CountryArray branching + GDI sabotage skip — runs in CI
+./.build/debug/TiberianDawnMax --test-reinforcements             # ASSET-FREE: Edge= entry, team mission lists, loaner + limbo fidelity — runs in CI
 ./.build/debug/TiberianDawnMax --ai-parity    <SCEN> <ticks>      # B3: assert the AI decide() phase is pure (no RNG/world mutation)
 ./.build/debug/TiberianDawnMax --ai-trace     <SCEN> <ticks>      # B3: print the per-house goal/decision stream each decide tick
 ./.build/debug/TiberianDawnMax --test-flags   <SCEN>             # Tier-1: per-instance invulnerable / must-survive flags
@@ -63,10 +64,20 @@ simulation shows up as a changed digest. (Other diagnostic flags: `--test-mix`,
   their digests are **not comparable** — `--headless SCG01EA 4000` and
   `--determinism SCG01EA 4000` print different digests for the same code. Compare
   like-for-like. The documented regression baselines are the `--determinism`
-  values (as of 2026-07-01, **default ruleset = `classic1995`, veterancy OFF**):
-  SCG01EA 2500t `0xF13E3EEE6E4094CF`, 4000t `0xDC151F8FFFD544C2`,
-  SCB01EA 4000t `0x0712535052A6CB00`.
-  The SCG01EA digests changed (from `0x368A0F41B0BFC746` / `0x2220AD679F47F1A9`)
+  values (as of 2026-07-22, **default ruleset = `classic1995`, veterancy OFF**):
+  SCG01EA 2500t `0xD188B0F93C6A9815`, 4000t `0xCDD2FC25630E52F8`,
+  SCB01EA 4000t `0xD0A4B022F77129B4`.
+  All three digests changed (from `0xF13E3EEE6E4094CF` / `0xDC151F8FFFD544C2` /
+  `0x0712535052A6CB00`) when reinforcement delivery was ported to REINF.CPP
+  fidelity: reinforcement teams now enter from the owning house's `Edge=`
+  (seeded random edge-cell pick, `calculatedEdgeCell`), get a force-active
+  team that executes the TeamType mission list (previously: spawn east, walk
+  to waypoint 25), transports are loaners only when carrying cargo
+  (transport-only teams like SCG12's evac chopper survive), team-less
+  fixed-wing (A10) hunts, and limboed cargo is untargetable. Both baseline
+  missions fire `Reinforce.` triggers in-window (SCG01EA RNF1@3, SCB01EA
+  rnf1@2), so their runs diverge. See `GameReinforcements.swift`.
+  The SCG01EA digests earlier changed (from `0x368A0F41B0BFC746` / `0x2220AD679F47F1A9`)
   when cosmetic damage-state fire animations stopped dealing real damage —
   they were finishing off crippled vehicles/structures mid-battle (classic
   on-building flames are decoration; only gameplay fire like napalm burns).
