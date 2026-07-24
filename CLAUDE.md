@@ -39,6 +39,7 @@ watching the game. Run the built binary directly:
 ./.build/debug/TiberianDawnMax --test-campaign-graph             # ASSET-FREE: CountryArray branching + GDI sabotage skip — runs in CI
 ./.build/debug/TiberianDawnMax --test-reinforcements             # ASSET-FREE: Edge= entry, team mission lists, loaner + limbo fidelity — runs in CI
 ./.build/debug/TiberianDawnMax --test-civ-evac                   # ASSET-FREE: civilian-evacuation win model (SCG11/SCG12) — runs in CI
+./.build/debug/TiberianDawnMax --test-ai-gating                  # ASSET-FREE: enhanced enemy-AI layer OFF under classic1995 — runs in CI
 ./.build/debug/TiberianDawnMax --ai-parity    <SCEN> <ticks>      # B3: assert the AI decide() phase is pure (no RNG/world mutation)
 ./.build/debug/TiberianDawnMax --ai-trace     <SCEN> <ticks>      # B3: print the per-house goal/decision stream each decide tick
 ./.build/debug/TiberianDawnMax --test-flags   <SCEN>             # Tier-1: per-instance invulnerable / must-survive flags
@@ -65,10 +66,22 @@ simulation shows up as a changed digest. (Other diagnostic flags: `--test-mix`,
   their digests are **not comparable** — `--headless SCG01EA 4000` and
   `--determinism SCG01EA 4000` print different digests for the same code. Compare
   like-for-like. The documented regression baselines are the `--determinism`
-  values (as of 2026-07-22, **default ruleset = `classic1995`, veterancy OFF**):
-  SCG01EA 2500t `0xD188B0F93C6A9815`, 4000t `0xCDD2FC25630E52F8`,
-  SCB01EA 4000t `0xD0A4B022F77129B4`.
-  All three digests changed (from `0xF13E3EEE6E4094CF` / `0xDC151F8FFFD544C2` /
+  values (as of 2026-07-24, **default ruleset = `classic1995`, veterancy OFF,
+  enhanced enemy AI OFF**):
+  SCG01EA 2500t `0x70572C2165FB3BBC`, 4000t `0xB3E6E8566D689265`,
+  SCB01EA 4000t `0xE824320DE6F2C796`.
+  All three digests changed (from `0xD188B0F93C6A9815` / `0xCDD2FC25630E52F8` /
+  `0xD0A4B022F77129B4`) when the enhanced (non-classic) enemy-AI layer became
+  a ruleset toggle that is OFF in `classic1995` (`Ruleset.enhancedEnemyAI`):
+  rally raids, idle-army attack waves, the 5-minute hunt escalation, the
+  tactics suite, damaged-unit retreat, the 3-minute production auto-enable
+  timeout, the personality-pool production fallback, and free-form base
+  building no longer run — classic campaign AI is trigger/teamtype-driven
+  only (HOUSE.CPP:1892). The faithful paths (guard/turret target acquisition,
+  hunt, the Suggested_New_Team former, Suggest_New_Object demand production)
+  are unchanged. Both baselines diverged because rally raids used to fire at
+  tick 300 (and consume rally-jitter RNG). Covered by `--test-ai-gating`.
+  Before that, all three changed (from `0xF13E3EEE6E4094CF` / `0xDC151F8FFFD544C2` /
   `0x0712535052A6CB00`) when reinforcement delivery was ported to REINF.CPP
   fidelity: reinforcement teams now enter from the owning house's `Edge=`
   (seeded random edge-cell pick, `calculatedEdgeCell`), get a force-active

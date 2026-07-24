@@ -214,6 +214,11 @@ if CommandLine.arguments.contains("--test-civ-evac") {
     exit(headlessTestCivEvacCommand())
 }
 
+// Enhanced-AI ruleset gating self-test: --test-ai-gating
+if CommandLine.arguments.contains("--test-ai-gating") {
+    exit(headlessTestAIGatingCommand())
+}
+
 // Enemy superweapon firing self-test: --test-enemy-superweapon
 if CommandLine.arguments.contains("--test-enemy-superweapon") {
     exit(headlessTestEnemySuperWeaponCommand())

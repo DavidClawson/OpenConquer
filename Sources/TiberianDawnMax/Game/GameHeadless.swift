@@ -600,6 +600,13 @@ func headlessTestTeamFormerCommand() -> Int32 {
 /// functions (no RNG draw), plus the satisfaction/exclusion/clamp rules.
 func headlessTestPrebuiltCommand() -> Int32 {
     print("test-prebuilt: IsPrebuilt team-demand production gating (#6C)")
+    // Enhanced rules: this test exercises the demand-vs-personality-pool
+    // interplay, and the pool fallback is enhanced-only (classic1995 has
+    // faithful build-nothing semantics — see decideUnitBuild Priority 3 and
+    // --test-ai-gating). Demand steps 1-2/4-5 behave identically either way.
+    let savedRules = session.rules
+    session.rules = .enhanced
+    defer { session.rules = savedRules }
     let world = GameWorld()
     world.playerHouse = .goodGuy      // BadGuy is the AI house under test
     session.world = world
@@ -1249,6 +1256,102 @@ func headlessTestCivEvacCommand() -> Int32 {
     print("  win: Civ. Evac. trigger fired → MISSION WON (lose trigger untouched)")
 
     print("PASS: civilian evacuation win model (SCG11/SCG12) works")
+    return 0
+}
+
+/// `--test-ai-gating` — verify the enhanced enemy-AI layer is ruleset-gated:
+/// under classic1995 the AI is trigger/teamtype-driven only (no production
+/// timeout, no rally raids, no escalation — HOUSE.CPP:1892 production starts
+/// only via the Production trigger), while the enhanced preset keeps the
+/// modern layer. Asset-free (in-code world). Exit 0 = pass.
+func headlessTestAIGatingCommand() -> Int32 {
+    print("test-ai-gating: enhanced enemy-AI layer is ruleset-gated")
+    let savedRules = session.rules
+    defer { session.rules = savedRules }
+
+    struct PhaseResult {
+        var productionEnabled: Bool
+        var produced: Int        // units built beyond the starting army
+        var idleTanks: Int       // original BadGuy LTNKs still sitting on guard
+    }
+
+    // One phase = a fresh in-code world driven purely through tickAI(): a
+    // GoodGuy base structure far from a BadGuy weapons factory + 4 idle LTNKs
+    // (out of aggro range, below the attack-wave threshold of 6), no team
+    // templates and no Production trigger. 4600 ticks covers the rally
+    // interval (300), the production timeout (2700), and escalation (4500).
+    func runPhase(_ rules: Ruleset) -> PhaseResult {
+        session.rules = rules
+        seedGameRandom(0xA1_6A71_A6_0000_0001)
+        session.aiTickCounter = 0
+        session.houseStates.removeAll()
+        session.activeTeams.removeAll()
+        session.teamTypes = []
+
+        let world = GameWorld()
+        world.playerHouse = .goodGuy
+        session.world = world
+
+        let fact = GameObject(id: world.allocateId(), typeName: "FACT", house: .goodGuy,
+                              kind: .structure, worldX: 96, worldY: 96, facing: 0,
+                              strength: 400, mission: .guard_, speed: 0)
+        world.addObject(fact)
+        let weap = GameObject(id: world.allocateId(), typeName: "WEAP", house: .badGuy,
+                              kind: .structure, worldX: 1200, worldY: 1176, facing: 0,
+                              strength: 400, mission: .guard_, speed: 0)
+        world.addObject(weap)
+        getHouseState(.badGuy).credits = 5000
+        var armyIDs: Set<Int> = []
+        for i in 0..<4 {
+            let tank = GameObject(id: world.allocateId(), typeName: "LTNK", house: .badGuy,
+                                  kind: .unit, worldX: Double(1250 + i * 30), worldY: 1250,
+                                  facing: 0, strength: 300, mission: .guard_,
+                                  speed: resolveSpeed(typeName: "LTNK", kind: .unit))
+            world.addObject(tank)
+            armyIDs.insert(tank.id)
+        }
+
+        for _ in 0..<4600 { tickAI() }
+
+        let state = getHouseState(.badGuy)
+        // Only the original army — enhanced production spawns fresh (idle) tanks.
+        let idle = world.objects.filter {
+            armyIDs.contains($0.id) && $0.mission == .guard_ && $0.moveTargetX == nil
+        }.count
+        let produced = world.objects.filter {
+            $0.house == .badGuy && $0.kind == .unit && !armyIDs.contains($0.id)
+        }.count
+        return PhaseResult(productionEnabled: state.productionEnabled,
+                           produced: produced,
+                           idleTanks: idle)
+    }
+
+    // 1. classic1995: nothing moves — no Production trigger means no production
+    //    (no timeout), and rally/waves/escalation never touch the idle army.
+    let classic = runPhase(.classic1995)
+    guard !classic.productionEnabled, classic.produced == 0 else {
+        print("FAIL: classic1995 production ran without a Production trigger "
+              + "(enabled=\(classic.productionEnabled) produced=\(classic.produced))"); return 1
+    }
+    guard classic.idleTanks == 4 else {
+        print("FAIL: classic1995 moved idle units (\(4 - classic.idleTanks) of 4) "
+              + "— rally/escalation not gated"); return 1
+    }
+    print("  classic1995: production stayed off past the timeout; 4/4 units never moved (4600 ticks)")
+
+    // 2. enhanced: the timeout enables production (queue starts) and the rally
+    //    raid pulls the idle army toward the player base.
+    let enhanced = runPhase(.enhanced)
+    guard enhanced.productionEnabled, enhanced.produced > 0 else {
+        print("FAIL: enhanced production timeout did not build anything "
+              + "(enabled=\(enhanced.productionEnabled) produced=\(enhanced.produced))"); return 1
+    }
+    guard enhanced.idleTanks == 0 else {
+        print("FAIL: enhanced rally left \(enhanced.idleTanks) units idle"); return 1
+    }
+    print("  enhanced: timeout auto-enabled production (built \(enhanced.produced)); rally moved all 4 units")
+
+    print("PASS: enhanced enemy-AI layer is ruleset-gated (classic1995 = scripted-only)")
     return 0
 }
 

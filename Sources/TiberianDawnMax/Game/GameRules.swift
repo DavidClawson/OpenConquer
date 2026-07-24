@@ -40,6 +40,22 @@ struct Ruleset {
     /// Never enabled for the AI or headless runs, so determinism is unaffected.
     var fogAwarePathfinding: Bool
 
+    /// Whether the enhanced (non-classic) enemy-AI layer runs. The classic 1995
+    /// campaign AI is entirely trigger/teamtype-driven: production starts only
+    /// via the Production trigger (HOUSE.CPP:1892), attack pressure comes from
+    /// Autocreate/Suggested_New_Team teams executing their mission lists, and
+    /// units otherwise hold their scripted missions. FALSE (faithful) disables
+    /// the modern layer on top of that: rally raids, idle-army attack waves,
+    /// the 5-minute hunt escalation, the tactics suite (recon/hit-and-run/
+    /// flanking/harassment), damaged-unit retreat, the 3-minute production
+    /// auto-enable timeout, the personality-pool free production fallback, and
+    /// free-form base building. The classic-faithful AI paths are NOT gated:
+    /// turret/guard target acquisition, hunt, the Suggested_New_Team former,
+    /// Suggest_New_Object team-demand production (incl. harvester replacement),
+    /// and harvesters resuming work. Branch points read this in GameAI.swift
+    /// (tickAI, tickAIProduction, decideUnitBuild/decideInfantryBuild).
+    var enhancedEnemyAI: Bool
+
     /// Whether TeamTypes with a non-zero `InitNum` spawn that many teams at
     /// scenario start. FALSE is faithful to 1995: classic TD parses InitNum but
     /// never consumes it at runtime (it appears only in TEAMTYPE.CPP parse/write,
@@ -54,18 +70,20 @@ struct Ruleset {
     /// The authentic 1995 experience. Canonical, determinism-pinned baseline.
     static let classic1995 = Ruleset(
         name: "Classic (1995)",
-        summary: "No veterancy - classic wayfinding",
+        summary: "No veterancy - classic wayfinding - scripted AI",
         veterancyEnabled: false,
         fogAwarePathfinding: false,
+        enhancedEnemyAI: false,
         spawnsInitialTeams: false
     )
 
     /// Classic plus modern gameplay enhancements.
     static let enhanced = Ruleset(
         name: "Enhanced",
-        summary: "Veterancy - fog-of-war-aware wayfinding",
+        summary: "Veterancy - fog-aware wayfinding - aggressive AI",
         veterancyEnabled: true,
         fogAwarePathfinding: true,
+        enhancedEnemyAI: true,
         spawnsInitialTeams: true
     )
 

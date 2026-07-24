@@ -40,6 +40,11 @@ func tickAI() {
     guard let world = session.world else { return }
     session.aiTickCounter += 1
 
+    // The enhanced (non-classic) layer — rally raids, attack waves, escalation,
+    // tactics, free-form building, the production timeout — is a ruleset toggle.
+    // Classic campaign AI is trigger/teamtype-driven only (see GameRules.swift).
+    let enhancedAI = session.rules.enhancedEnemyAI
+
     // Tick AI production every tick (queues advance by 1 per tick)
     tickAIProduction()
 
@@ -47,16 +52,18 @@ func tickAI() {
     tickAIStructureProduction()
 
     // AI attack coordination every 30 ticks
-    if session.aiTickCounter % 30 == 0 {
+    if enhancedAI && session.aiTickCounter % 30 == 0 {
         tickAIAttackWaves(world: world)
         tickAIDamagedRetreat(world: world)
     }
 
     // AI tactical behaviors (recon, hit-and-run, flanking, harassment)
-    tickAITactics()
+    if enhancedAI {
+        tickAITactics()
+    }
 
     // AI building priority evaluation every 60 ticks (~4 seconds)
-    if session.aiTickCounter % 60 == 0 {
+    if enhancedAI && session.aiTickCounter % 60 == 0 {
         tickAIBuilding()
         tickAIHarvesterManagement()
     }
@@ -122,9 +129,11 @@ func tickAI() {
     }
 
     // Rally idle enemy units toward player base at difficulty-scaled interval
-    let rallyInterval = aiRallyInterval()
-    if session.aiTickCounter % rallyInterval == 0 {
-        rallyEnemyUnits(world: world)
+    if enhancedAI {
+        let rallyInterval = aiRallyInterval()
+        if session.aiTickCounter % rallyInterval == 0 {
+            rallyEnemyUnits(world: world)
+        }
     }
 
     // Faithful team formation (Gap #6): a regular former on a 90-tick cadence
@@ -136,7 +145,7 @@ func tickAI() {
     }
 
     // Escalation: after 5 minutes, send all idle units to hunt
-    if session.aiTickCounter == 15 * 60 * 5 {
+    if enhancedAI && session.aiTickCounter == 15 * 60 * 5 {
         escalateAI(world: world)
     }
 }
@@ -258,10 +267,11 @@ func tickAIProduction() {
         guard let state = session.houseStates[house] else { continue }
         // Skip player and neutral houses
         if house == world.playerHouse || house == .neutral { continue }
-        // Must have production enabled (via beginProduction trigger or auto-enable after delay)
+        // Must have production enabled via the Production trigger — classic
+        // production starts ONLY that way (HOUSE.CPP:1892 IsStarted). The
+        // 3-minute auto-enable timeout is an enhanced-only safety net.
         if !state.productionEnabled {
-            // Auto-enable production after 3 minutes if not triggered
-            if session.aiTickCounter > 15 * 60 * 3 {
+            if session.rules.enhancedEnemyAI && session.aiTickCounter > 15 * 60 * 3 {
                 state.productionEnabled = true
                 print("AI: Auto-enabled production for \(house.rawValue) after timeout")
             } else {
@@ -386,7 +396,11 @@ func decideUnitBuild(
         return plan
     }
 
-    // Priority 3: Build combat vehicles from the faction pool
+    // Priority 3: Build combat vehicles from the faction pool. Enhanced-only:
+    // classic campaign production has faithful build-nothing semantics when no
+    // team template demands anything (HOUSE.CPP:3195-3204 seeds the multiplayer
+    // counter pool only for GAME_NORMAL=false; campaigns seed zero).
+    guard session.rules.enhancedEnemyAI else { return .none }
     let isNod = (houseToHousesType(house) == .bad)
 
     // Build pool based on faction
@@ -459,6 +473,8 @@ func decideInfantryBuild(
         }
     }
 
+    // Personality-pool fallback is enhanced-only (see decideUnitBuild Priority 3).
+    guard session.rules.enhancedEnemyAI else { return .none }
     let isNod = (houseToHousesType(house) == .bad)
 
     var pool: [(name: String, weight: Int)] = []
