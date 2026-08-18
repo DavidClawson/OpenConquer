@@ -1,0 +1,71 @@
+name: Bug report
+description: Something crashes, renders wrong, or behaves incorrectly.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing. If the issue is "this doesn't match the original 1995 game,"
+        use the **Parity gap** template instead — and check
+        [`docs/PARITY.md`](https://github.com/DavidClawson/OpenConquer/blob/main/docs/PARITY.md)
+        first, since it may already be a known approximation.
+
+        **Never attach game assets** (`.MIX`, `.SHP`, `.AUD`, `.VQA`, `.PAL`, or art
+        extracted from the Remastered Collection). Screenshots of gameplay are fine.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: |
+        Please include the mission and, if you can, a headless repro — it makes the bug
+        reproducible without your assets or your save.
+      placeholder: |
+        1. Start SCG05EA
+        2. Build a Weapons Factory, order the harvester to the north field
+        3. ~2 minutes in, the harvester stops
+
+        Headless repro (if applicable):
+        ./.build/debug/TiberianDawnMax --headless SCG05EA 2000
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: mission
+    attributes:
+      label: Mission / scenario
+      placeholder: SCG05EA, or "main menu", or "any"
+  - type: dropdown
+    id: ruleset
+    attributes:
+      label: Ruleset
+      options:
+        - Classic1995 (default)
+        - Enhanced
+        - Not sure / not applicable
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      value: |
+        - macOS version:
+        - Swift version (`swift --version`):
+        - SDL2 version (`brew info sdl2`):
+        - Commit / branch:
+      render: markdown
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console output / crash log
+      description: Paste the relevant output. Trim it — the interesting part, not the whole run.
+      render: shell

@@ -1,0 +1,43 @@
+name: Parity gap
+description: Something behaves differently from the original 1995 Tiberian Dawn.
+labels: ["parity"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Parity reports are the most valuable issues this project gets — but check
+        [`docs/PARITY.md`](https://github.com/DavidClawson/OpenConquer/blob/main/docs/PARITY.md)
+        first. Many differences are already documented as known approximations (🟡) or
+        gaps (⬜), and a few are *deliberate* (the `enhanced` ruleset, modern presentation).
+
+        Parity is measured against the **`Classic1995`** ruleset only.
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What the original does vs. what OpenConquer does
+      placeholder: |
+        Original: splash damage halves with each SpreadFactor step away from impact.
+        OpenConquer: damage falls off linearly, so wide-spread warheads hurt too much at range.
+    validations:
+      required: true
+  - type: textarea
+    id: reference
+    attributes:
+      label: Reference (if you have it)
+      description: |
+        A file and line in EA's released C++ (`../CnC_Tiberian_Dawn/`) or Vanilla-Conquer
+        is the gold standard here. A description of the in-game behavior is fine too —
+        someone else can find the code.
+      placeholder: COMBAT.CPP:87-91 — `distance >>= whead->SpreadFactor; damage >>= distance;`
+  - type: textarea
+    id: evidence
+    attributes:
+      label: How you observed it
+      description: Mission, situation, and anything measurable (damage numbers, timings, unit counts).
+  - type: checkboxes
+    id: checked
+    attributes:
+      label: Before filing
+      options:
+        - label: I checked `docs/PARITY.md` and this isn't already listed (or it is, and I'm adding detail).
+        - label: I'm comparing against the `Classic1995` ruleset, not `Enhanced`.

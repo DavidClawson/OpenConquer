@@ -1,0 +1,35 @@
+name: Feature or enhancement
+description: Propose something new — a ruleset toggle, a QoL improvement, tooling.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check [`docs/ROADMAP.md`](https://github.com/DavidClawson/OpenConquer/blob/main/docs/ROADMAP.md)
+        first — it may already be sequenced, or explicitly out of scope (multiplayer,
+        Red Alert, bundling assets).
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you want, and why
+    validations:
+      required: true
+  - type: dropdown
+    id: classic
+    attributes:
+      label: Does this change simulation behavior?
+      description: |
+        Anything that changes the sim must not alter `Classic1995` — the canonical
+        ruleset is determinism-pinned. New behavior belongs behind a ruleset toggle
+        (default off), or in the `Enhanced` preset.
+      options:
+        - "No — UI, tooling, docs, or rendering only"
+        - "Yes — it should live behind a ruleset toggle / in Enhanced"
+        - "Yes — and I think it makes Classic1995 *more* faithful (file a Parity gap instead?)"
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered

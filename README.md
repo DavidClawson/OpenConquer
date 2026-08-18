@@ -107,6 +107,8 @@ The seeded RNG makes runs bit-for-bit reproducible, so a change that perturbs th
 
 Contributions are very welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md). A lot of the roadmap is *data* work (rules, missions, unit tables) that doesn't require deep Swift knowledge. Never commit game assets.
 
+[`docs/PARITY.md`](docs/PARITY.md) is the honest map of how close the simulation is to the original — what's verified, what's approximated, and what's missing. Several rows there are self-contained starting points.
+
 ## License
 
 **GNU General Public License v3.0** — see [`LICENSE`](LICENSE).

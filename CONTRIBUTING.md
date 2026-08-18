@@ -93,9 +93,12 @@ Before guessing at a behavior, grep the C++ for the relevant `Mission_*`, `LAND_
 
 ## Good places to start
 
-- **Data/rules** (no deep Swift needed): unit/structure stat tables, mission INI tuning, and — once the ruleset layer lands — classic-vs-enhanced toggle values.
+- **[`docs/PARITY.md`](docs/PARITY.md)** — the verified-vs-approximated checklist. Every 🟡 and ⬜ row is a known, scoped piece of work with the reference C++ already cited. A few are marked **[good first issue]**.
+- **Data/rules** (no deep Swift needed): unit/structure stat tables, mission INI tuning, classic-vs-enhanced toggle values.
 - **Missions:** authoring or fixing campaign scenarios and triggers.
 - **Bugs:** anything labeled `good first issue`.
+
+Filing counts too: a well-described **Parity gap** issue (what the original does, what we do, ideally a C++ line ref) is directly useful even if you never touch the Swift.
 
 ## Pull requests
 
@@ -103,3 +106,7 @@ Before guessing at a behavior, grep the C++ for the relevant `Mission_*`, `LAND_
 2. Keep changes focused; explain gameplay-affecting changes and any baseline updates.
 3. Run `swift build` and the relevant `--determinism` / `--test-*` checks locally before pushing.
 4. No assets, ever.
+
+The PR template walks through the checks. Two things reviewers always look for: whether
+the three `--determinism` digests moved (and if so, why, with `CLAUDE.md` updated), and
+whether any non-1995 behavior sits behind a ruleset toggle that is off in `Classic1995`.

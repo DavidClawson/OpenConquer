@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Asset extraction trouble
+    url: https://github.com/DavidClawson/OpenConquer#assets
+    about: install-assets.sh not finding your Remastered Collection? Read the Assets section first — most extraction problems are a wrong path.
+  - name: How the simulation is organized
+    url: https://github.com/DavidClawson/OpenConquer/blob/main/CLAUDE.md
+    about: Architecture guide — the session container, the fixed-tick loop, and the determinism contract.
+  - name: What's faithful vs. approximated
+    url: https://github.com/DavidClawson/OpenConquer/blob/main/docs/PARITY.md
+    about: The parity checklist. Check here before filing "this doesn't match the original" — it may already be a known, documented gap.

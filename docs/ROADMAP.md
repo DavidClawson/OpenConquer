@@ -9,7 +9,7 @@ The phases map to three overlapping goals: **(A)** play it & build new missions,
 The phases below are the taxonomy; these milestones are the *order of attack* as of July 2026:
 
 - **M1 — Full campaign fidelity** *(complete — July 2026)* — closed out Phase 2's fidelity track: `IsPrebuilt` production gating (#6C), campaign branching (map selection + GDI sabotage skip), the 28-mission verification sweep and its 8 fix classes (incl. two real determinism breaks), reinforcement fidelity (Edge= entry, TeamType mission lists, loaner rules, A10 hunt, limbo untargetability), the civ-evac win model (SCG11/12 winnable), and the enhanced-AI ruleset gate (`classic1995` = scripted, trigger/teamtype-driven AI only).
-- **M2 — Contributor onramp** — close out Phase 0 + start the parity doc: issue templates, `good first issue` labels, a `PARITY.md` verified-vs-approximated checklist, README screenshots.
+- **M2 — Contributor onramp** *(in progress)* — close out Phase 0 + start the parity doc: ~~issue templates~~ ✅, ~~`PARITY.md` verified-vs-approximated checklist~~ ✅, `good first issue` labels + starter issues, README screenshots.
 - **M3 — Linux port** — Phase 5: image-loading abstraction, data-dir abstraction, Linux CI leg.
 - **M4 — Polish & packaging** — Phase 4: HD sidebar meters, unsigned `.app` bundle.
 
@@ -27,7 +27,9 @@ Make it something a stranger can build, trust, and contribute to.
 - [x] **Publish:** repo public at `DavidClawson/OpenConquer`, GPLv3, topics/description set.
 - [x] **Streamlined asset installer** — `install-assets.sh` probes for a Remastered install, preflight-checks the containers, and runs every extraction step.
 - [x] **Synthetic (asset-free) test fixtures** — 13 `--test-*` logic/determinism tests build their world in code and run in CI on both Swift versions.
-- [ ] Issue templates, `good first issue` labels, screenshots/GIFs in the README (screenshots: awaiting user PNGs in `docs/screenshots/`).
+- [x] **Issue + PR templates** — `.github/ISSUE_TEMPLATE/` (bug / parity gap / feature, each steering toward `PARITY.md` and the ruleset rules) and a PR template that gates on the determinism digests and the no-assets rule.
+- [ ] `good first issue` labels + seeded starter issues (candidates are the **[good first issue]** rows in [`PARITY.md`](PARITY.md)).
+- [ ] Screenshots/GIFs in the README (awaiting PNGs in `docs/screenshots/`).
 
 ## Phase 1 — Ruleset layer  *(mostly done)*  → Goals C, A, B
 
@@ -73,7 +75,7 @@ below are tracked as Wave A (landed) and Wave B (remaining).
 ## Phase 3 — Parity hardening  → Goal C  *(ongoing)*
 
 - [ ] Drive unit/structure/weapon/economy tables from the original data with cited C++ line refs.
-- [ ] A **parity checklist** doc: what's verified vs. approximated.
+- [x] A **parity checklist** doc: what's verified vs. approximated — [`PARITY.md`](PARITY.md), covering determinism, data tables, combat, movement, economy, production, fog, triggers/scenarios, AI, superweapons, save/load, and the deliberate `enhanced` deviations.
 - [ ] Tighten combat, harvesting, production, and AI feel against the reference.
 - [ ] (Deferred) A3 stage-2 speed-cost weighting in A* pathfinding.
 
