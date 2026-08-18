@@ -9,7 +9,7 @@ The phases map to three overlapping goals: **(A)** play it & build new missions,
 The phases below are the taxonomy; these milestones are the *order of attack* as of July 2026:
 
 - **M1 — Full campaign fidelity** *(complete — July 2026)* — closed out Phase 2's fidelity track: `IsPrebuilt` production gating (#6C), campaign branching (map selection + GDI sabotage skip), the 28-mission verification sweep and its 8 fix classes (incl. two real determinism breaks), reinforcement fidelity (Edge= entry, TeamType mission lists, loaner rules, A10 hunt, limbo untargetability), the civ-evac win model (SCG11/12 winnable), and the enhanced-AI ruleset gate (`classic1995` = scripted, trigger/teamtype-driven AI only).
-- **M2 — Contributor onramp** *(in progress)* — close out Phase 0 + start the parity doc: ~~issue templates~~ ✅, ~~`PARITY.md` verified-vs-approximated checklist~~ ✅, `good first issue` labels + starter issues, README screenshots.
+- **M2 — Contributor onramp** *(in progress — one item left)* — close out Phase 0 + start the parity doc: ~~issue templates~~ ✅, ~~`PARITY.md` verified-vs-approximated checklist~~ ✅, ~~labels + starter issues~~ ✅. Remaining: **README screenshots** (needs PNGs in `docs/screenshots/`).
 - **M3 — Linux port** — Phase 5: image-loading abstraction, data-dir abstraction, Linux CI leg.
 - **M4 — Polish & packaging** — Phase 4: HD sidebar meters, unsigned `.app` bundle.
 
@@ -28,7 +28,7 @@ Make it something a stranger can build, trust, and contribute to.
 - [x] **Streamlined asset installer** — `install-assets.sh` probes for a Remastered install, preflight-checks the containers, and runs every extraction step.
 - [x] **Synthetic (asset-free) test fixtures** — 13 `--test-*` logic/determinism tests build their world in code and run in CI on both Swift versions.
 - [x] **Issue + PR templates** — `.github/ISSUE_TEMPLATE/` (bug / parity gap / feature, each steering toward `PARITY.md` and the ruleset rules) and a PR template that gates on the determinism digests and the no-assets rule.
-- [ ] `good first issue` labels + seeded starter issues (candidates are the **[good first issue]** rows in [`PARITY.md`](PARITY.md)).
+- [x] **Labels + starter issues** — `parity` / `determinism` / `ruleset` / `rendering` labels, and 7 seeded issues (#1-#7) covering the open `PARITY.md` rows: HD sidebar meters, Stealth Tank cloaking, splash falloff, sell refund, multi-factory acceleration, the installment build model, and the data-table citation pass. Six are `good first issue`.
 - [ ] Screenshots/GIFs in the README (awaiting PNGs in `docs/screenshots/`).
 
 ## Phase 1 — Ruleset layer  *(mostly done)*  → Goals C, A, B

@@ -50,7 +50,7 @@ counted as parity gaps.
 | Warhead-vs-armor modifier matrix | 🟢 | `const.cpp` `Warheads[]` | |
 | House types | 🟢 | `hdata.cpp` | |
 | Per-template land types (what's rock/water/road) | ✅ | `CDATA.CPP` + `CELL.CPP` Recalc_Attributes | Auto-generated table (`TemplateLandData.swift`); pathfinding depends on it. |
-| Per-field C++ line citations in the tables | ⬜ | — | Headers cite the source file; individual values don't. Roadmap Phase 3. |
+| Per-field C++ line citations in the tables | ⬜ | — | Headers cite the source file; individual values don't. **[[#7](https://github.com/DavidClawson/OpenConquer/issues/7) — good first issue]** Roadmap Phase 3. |
 
 ## Combat
 
@@ -58,7 +58,7 @@ counted as parity gaps.
 |---|---|---|---|
 | Warhead modifier applied vs. target armor | 🟢 | `COMBAT.CPP` Modify_Damage | `modifyDamage` in `WeaponData.swift`. |
 | Minimum 1 damage floor | 🟢 | `COMBAT.CPP:69` | |
-| **Splash falloff curve** | 🟡 | `COMBAT.CPP:87-91` | Original: `distance >>= SpreadFactor; damage >>= distance` (halving per step, capped at 16). Ours: linear falloff over `SpreadFactor * 24`. Different splash shape. **[good first issue]** |
+| **Splash falloff curve** | 🟡 | `COMBAT.CPP:87-91` | Original: `distance >>= SpreadFactor; damage >>= distance` (halving per step, capped at 16). Ours: linear falloff over `SpreadFactor * 24`. Different splash shape. **[[#3](https://github.com/DavidClawson/OpenConquer/issues/3) — good first issue]** |
 | Rate of fire / range gating | 🟢 | `TECHNO.CPP` | Range in leptons from the weapon tables. |
 | Retaliation / return fire | 🟢 | `TECHNO.CPP` | Snap to the attacker when idle. |
 | Infantry fear & prone | 🟢 | `INFANTRY.CPP` fear model | Plus a first-contact reflex drop that the original doesn't have (avoids the stand-still-and-eat-a-burst window). |
@@ -66,7 +66,7 @@ counted as parity gaps.
 | Building damage states / half-health frames | 🟢 | `BUILDING.CPP:560-634` | `pickStructureFrame`. |
 | On-building fire animations are cosmetic | ✅ | — | They used to deal real damage and finish off crippled objects; fixed and pinned by the determinism baselines. |
 | Per-instance invulnerability (mission flag) | ✅ | `ObjectTypeClass::IsImmune` | `--test-flags`. |
-| **Stealth Tank cloaking** | ⬜ | `TECHNO.CPP` cloak state | `isCloakable` is parsed into the unit table but nothing in the sim or renderer uses it — STNK is permanently visible. **[good first issue]** |
+| **Stealth Tank cloaking** | ⬜ | `TECHNO.CPP` cloak state | `isCloakable` is parsed into the unit table but nothing in the sim or renderer uses it — STNK is permanently visible. **[[#2](https://github.com/DavidClawson/OpenConquer/issues/2)]** |
 
 ## Movement & pathfinding
 
@@ -90,7 +90,7 @@ counted as parity gaps.
 | Silo fill-level frames | 🟢 | `pickStructureFrame` | SILO frames 0-4 / damaged 5-9. |
 | Harvesters idle at the refinery when storage is full | 🟢 | — | Was: pointless shuttling. |
 | Power production/drain and the low-power state | 🟢 | `HOUSE.CPP` power | Drives the sidebar meter and build rate. |
-| Building sell refund | 🟡 | `BUILDING.CPP` sell | Flat 50% of cost. The original refunds based on the building's *current* health-scaled value. |
+| Building sell refund | 🟡 | `BUILDING.CPP` sell | Flat 50% of cost. The original refunds based on the building's *current* health-scaled value. **[[#4](https://github.com/DavidClawson/OpenConquer/issues/4) — good first issue]** |
 | Repair bay (FIX) heals a vehicle on the pad | ✅ | — | `--test-repair`. |
 | Building repair (wrench) cost/rate | 🟢 | `BUILDING.CPP` repair | |
 
@@ -99,10 +99,10 @@ counted as parity gaps.
 | Item | Status | Reference | Notes |
 |---|---|---|---|
 | Prerequisites, build level, house ownability | 🟢 | `bdata/udata` tables | |
-| Low power halves build rate | 🟡 | `FACTORY.CPP::AI` | Ours: skip every other tick. Original: staged rate table. |
-| **Build time formula** | 🟡 | `FACTORY.CPP` | Ours: `max(30, cost/5)` ticks, flat. Original: a 54-step (`STEP_COUNT`) staged model with per-tick installment payments (`Cost_Per_Tick`). |
-| **Multi-factory acceleration** | ⬜ | `FACTORY.CPP:245-263` | The original speeds a human player's production by the number of same-type factories owned. Not implemented. **[good first issue]** |
-| **Installment payment** (charged per tick, refund on cancel = what you paid) | ⬜ | `FACTORY.CPP:696-707` | We charge the full cost up front and refund it on cancel. |
+| Low power halves build rate | 🟡 | `FACTORY.CPP::AI` | Ours: skip every other tick. Original: staged rate table. Folded into [#6](https://github.com/DavidClawson/OpenConquer/issues/6). |
+| **Build time formula** | 🟡 | `FACTORY.CPP` | Ours: `max(30, cost/5)` ticks, flat. Original: a 54-step (`STEP_COUNT`) staged model with per-tick installment payments (`Cost_Per_Tick`). [#6](https://github.com/DavidClawson/OpenConquer/issues/6). |
+| **Multi-factory acceleration** | ⬜ | `FACTORY.CPP:245-263` | The original speeds a human player's production by the number of same-type factories owned. Not implemented. **[[#5](https://github.com/DavidClawson/OpenConquer/issues/5) — good first issue]** |
+| **Installment payment** (charged per tick, refund on cancel = what you paid) | ⬜ | `FACTORY.CPP:696-707` | We charge the full cost up front and refund it on cancel. [#6](https://github.com/DavidClawson/OpenConquer/issues/6). |
 | MCV deploys into a Construction Yard | 🟢 | `UNIT.CPP` deploy | Footprint/blocking checks before deploying. |
 | Build-area adjacency rules | 🟢 | `BUILDING.CPP` | |
 
@@ -180,7 +180,7 @@ presentation*. Listed for completeness.
 | Classic SHP rendering | 🟢 | |
 | Remastered HD sprite rendering | 🟢 | Extracted from the user's own Remastered install. |
 | HD cursors | ✅ | 57 families / 456 frames, with hotspots; falls back to procedural shapes. |
-| HD sidebar power/progress meters | ⬜ | Art extracted to `ui/sidebar/`, not yet wired. Roadmap Phase 4. |
+| HD sidebar power/progress meters | ⬜ | Art extracted to `ui/sidebar/`, not yet wired. **[[#1](https://github.com/DavidClawson/OpenConquer/issues/1) — good first issue]** Roadmap Phase 4. |
 | Arbitrary window size / zoom | 🟢 | Deliberate deviation from the fixed 640×400. |
 | Audio (classic AUD + remastered masters) | 🟢 | |
 | Smudges render under buildings/units | ✅ | |
@@ -207,6 +207,9 @@ Multiplayer / netcode · Red Alert and later titles · bundling any game asset �
 original save-file compatibility · replay compatibility with the C++ RNG stream.
 
 ## Contributing to this document
+
+Open issues are linked from the rows they belong to; the ones tagged **good first
+issue** are self-contained and carry the reference C++ in the issue body.
 
 If you fix a 🟡 or ⬜ row, move it up **and add the evidence** — a `--test-*` harness
 entry, or a determinism baseline it now pins. A row only reaches ✅ when something
