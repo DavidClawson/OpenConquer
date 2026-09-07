@@ -19,10 +19,21 @@ swift build            # or:  swift run
 
 - Requires SDL2: `brew install sdl2` (wired via the `CSDL2` system-library target).
 - Target: macOS 13+. Toolchain: swift-tools 5.9.
-- **Asset location** is `~/Library/Application Support/Vanilla-Conquer/vanillatd`,
-  overridable with `OPENCONQUER_DATA_DIR` (`main.swift`). The override is also how
-  you exercise the no-assets path — `homeDirectoryForCurrentUser` reads the passwd
-  database, so setting `HOME` does not move it.
+- **Asset location** is `~/Library/Application Support/Vanilla-Conquer/vanillatd`.
+  Two overrides, in precedence order (`main.swift`): `OPENCONQUER_DATA_DIR`, then the
+  `TDMax.dataDir` user default (`defaults write org.openconquer.OpenConquer
+  TDMax.dataDir <path>`). The user default exists because LaunchServices does not pass
+  the environment to a Finder-launched app, so the env var alone is useless to the
+  `.app`. The override is also how you exercise the no-assets path —
+  `homeDirectoryForCurrentUser` reads the passwd database, so setting `HOME` does not
+  move it: `OPENCONQUER_DATA_DIR=/tmp/empty swift run`.
+- **`UI/SetupScreen.swift`** renders when `assetManager.mixManager.totalEntries == 0`
+  (wired at the bottom of `main.swift`, just before the main loop). It must stay
+  asset-free — SDL primitives and the built-in 5x7 font only — because it is what a
+  first launch shows before anything is extracted, and a Finder-launched app has no
+  stdout to print diagnostics to. Its RETRY re-runs discovery in place. Adding
+  punctuation to `TextRenderer`'s glyph table was part of this: unknown characters
+  render as a blank advance, so a path with `.` or `~` used to read as a hole.
 - **`tools/make-app.sh`** vendors the SDL dylibs into `Contents/Frameworks`,
   rewrites their load paths to `@rpath`, ad-hoc signs (required on Apple Silicon
   after `install_name_tool` edits), and smoke-tests the bundle with

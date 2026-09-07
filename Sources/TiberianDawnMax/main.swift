@@ -4,17 +4,28 @@ import Foundation
 // MARK: - Game Data
 
 /// Where the user's own extracted assets live. `install-assets.sh` writes to the
-/// default location; `OPENCONQUER_DATA_DIR` overrides it, which lets assets sit
-/// on an external drive and lets the missing-assets path be tested against an
-/// empty directory (`homeDirectoryForCurrentUser` reads the passwd database, so
-/// overriding `HOME` does not move it).
+/// default location; two overrides let them live elsewhere (an external drive,
+/// say), and let the missing-assets path be tested against an empty directory —
+/// `homeDirectoryForCurrentUser` reads the passwd database, so overriding `HOME`
+/// does not move it.
+///
+/// Precedence: `OPENCONQUER_DATA_DIR` > the `TDMax.dataDir` default > built-in.
+/// The env var is the convenient one from a terminal, but LaunchServices does not
+/// pass the environment to a Finder-launched app, so a bundled `.app` needs the
+/// user default instead:
+///
+///     defaults write org.openconquer.OpenConquer TDMax.dataDir /Volumes/Disk/cnc
 ///
 /// No assets are ever bundled with the app — see README "Assets".
 let dataPath: URL = {
-    if let override = ProcessInfo.processInfo.environment["OPENCONQUER_DATA_DIR"],
-       !override.isEmpty {
-        return URL(fileURLWithPath: (override as NSString).expandingTildeInPath,
-                   isDirectory: true)
+    func expand(_ p: String) -> URL {
+        URL(fileURLWithPath: (p as NSString).expandingTildeInPath, isDirectory: true)
+    }
+    if let env = ProcessInfo.processInfo.environment["OPENCONQUER_DATA_DIR"], !env.isEmpty {
+        return expand(env)
+    }
+    if let stored = UserDefaults.standard.string(forKey: "TDMax.dataDir"), !stored.isEmpty {
+        return expand(stored)
     }
     return FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Vanilla-Conquer/vanillatd")
@@ -483,6 +494,15 @@ audioManager.initialize()
 audioManager.soundLibrary = SoundLibrary(assetManager: assetManager)
 
 var event = SDL_Event()
+
+// No MIX archives registered means no game data. Show the setup screen instead
+// of the main menu: launched from Finder there is no stdout, so the asset
+// manager's "NOT FOUND" output goes nowhere and the menu would render as a
+// black window with no explanation. SetupScreen draws with the built-in pixel
+// font, so it works with zero assets present.
+if assetManager.mixManager.totalEntries == 0 {
+    session.currentScreen = SetupScreen()
+}
 
 // MARK: - Main Loop
 

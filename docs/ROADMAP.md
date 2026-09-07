@@ -86,7 +86,8 @@ below are tracked as Wave A (landed) and Wave B (remaining).
 - [ ] Options UI polish; classic-vs-HD art toggle.
 - [~] Friendlier packaging.
   - [x] **`.app` bundle** — `tools/make-app.sh` produces `dist/OpenConquer.app`: SDL dylibs vendored into the bundle with `@rpath` load paths, generated icon (`tools/make_icon.py`, drawn procedurally — no game art), `Info.plist`, ad-hoc signature, and a smoke test that runs the bundled binary's asset-free self-test. Runs on a Mac with no Homebrew and no Swift toolchain. `OPENCONQUER_DATA_DIR` overrides the asset location.
-  - [ ] **First-run experience** — with no assets installed the app opens a *blank window*; the "NOT FOUND" diagnostics go to stdout, which a Finder-launched app doesn't have. Needs an in-app screen (the built-in 5x7 pixel font needs no assets) explaining what's missing and where to get it.
+  - [x] **First-run experience** — `UI/SetupScreen.swift` replaces the blank window with a setup screen when no MIX archives load: what's missing, the exact path checked (flagged when it came from an override), the extraction command, and a RETRY that re-runs discovery in place. Asset-free by construction — SDL primitives and the built-in pixel font, whose glyph table gained the punctuation needed to render a path.
+  - [x] **Disk image** — `make-app.sh --dmg` builds the drag-to-Applications image (~2.5 MB) with a READ ME covering the right-click-to-open step and the no-assets policy.
   - [ ] Notarized build (needs a paid Apple Developer account); until then first launch needs right-click → Open.
 
 ## Phase 5 — Cross-platform (Linux)  → Goal B

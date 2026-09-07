@@ -16,6 +16,7 @@
 #   ./tools/make-app.sh                 # build release + package to dist/
 #   ./tools/make-app.sh --no-build      # package whatever is in .build/release
 #   ./tools/make-app.sh --zip           # also produce dist/OpenConquer.zip
+#   ./tools/make-app.sh --dmg           # also produce dist/OpenConquer.dmg
 #   ./tools/make-app.sh --out DIR       # output somewhere other than dist/
 #
 set -euo pipefail
@@ -29,11 +30,13 @@ BINARY_NAME="TiberianDawnMax"     # SwiftPM target name (internal codename)
 OUT_DIR="$REPO_ROOT/dist"
 DO_BUILD=1
 DO_ZIP=0
+DO_DMG=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --no-build) DO_BUILD=0; shift ;;
         --zip)      DO_ZIP=1; shift ;;
+        --dmg)      DO_DMG=1; shift ;;
         --out)      OUT_DIR="$2"; shift 2 ;;
         -h|--help)  sed -n '2,22p' "$0"; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
@@ -275,6 +278,41 @@ else
     warn "the bundled binary did not pass --test-synthetic. Output:"
     tail -20 "$SMOKE_LOG" >&2
     exit 1
+fi
+
+if [[ $DO_DMG -eq 1 ]]; then
+    say "Building disk image"
+    DMG_STAGE="$(mktemp -d -t openconquer-dmg)"
+    cp -R "$APP" "$DMG_STAGE/"
+    # The drag-to-install convention: the app beside a shortcut to /Applications.
+    ln -s /Applications "$DMG_STAGE/Applications"
+    # A plain-text nudge, since a styled background would mean scripting Finder.
+    cat > "$DMG_STAGE/READ ME FIRST.txt" <<'DMGREADME'
+OpenConquer
+===========
+
+Drag OpenConquer to the Applications folder beside it, then launch it.
+
+FIRST LAUNCH: the app is ad-hoc signed rather than notarized (notarization
+needs a paid Apple Developer account), so macOS will refuse the first launch
+from a double-click. Right-click the app and choose Open, then confirm. You
+only have to do this once.
+
+GAME DATA: OpenConquer contains no game assets and never will. You supply
+them from your own copy of the Command & Conquer Remastered Collection --
+the app's setup screen tells you how, and the README covers it in full:
+
+    https://github.com/DavidClawson/OpenConquer#assets
+
+OpenConquer is an unofficial fan project, licensed GPLv3. It is not
+affiliated with, endorsed by, or sponsored by Electronic Arts. "Command &
+Conquer" and "Tiberian Dawn" are trademarks of Electronic Arts Inc.
+DMGREADME
+    rm -f "$OUT_DIR/$APP_NAME.dmg"
+    hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_STAGE" \
+        -ov -format UDZO -quiet "$OUT_DIR/$APP_NAME.dmg"
+    rm -rf "$DMG_STAGE"
+    echo "    $OUT_DIR/$APP_NAME.dmg ($(du -h "$OUT_DIR/$APP_NAME.dmg" | cut -f1 | tr -d ' '))"
 fi
 
 if [[ $DO_ZIP -eq 1 ]]; then

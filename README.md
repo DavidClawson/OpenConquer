@@ -95,7 +95,8 @@ swift build          # or: swift run
 
 ```bash
 ./tools/make-app.sh          # -> dist/OpenConquer.app
-./tools/make-app.sh --zip    # also dist/OpenConquer.zip, for handing to someone
+./tools/make-app.sh --dmg    # also dist/OpenConquer.dmg (drag-to-Applications)
+./tools/make-app.sh --zip    # also dist/OpenConquer.zip
 ```
 
 This packages the release binary as a real macOS `.app` — Dock icon, app name, no
@@ -104,8 +105,23 @@ so the result runs on a Mac **without Homebrew or a Swift toolchain installed**,
 smoke-tests the bundle before declaring success.
 
 It still bundles **no game data** — assets stay in `~/Library/Application Support/`
-where `install-assets.sh` puts them, and are read from there at runtime. Point the app
-somewhere else (an external drive, say) with `OPENCONQUER_DATA_DIR=/path/to/assets`.
+where `install-assets.sh` puts them, and are read from there at runtime. Launch it
+before extracting anything and you get a **setup screen** naming the path it checked
+and the command to run; extract in another window, hit RETRY, and it picks them up
+without a relaunch.
+
+To keep assets somewhere else (an external drive, say):
+
+```bash
+defaults write org.openconquer.OpenConquer TDMax.dataDir /Volumes/Disk/cnc   # the .app
+OPENCONQUER_DATA_DIR=/Volumes/Disk/cnc swift run                             # from a terminal
+```
+
+The environment variable is the convenient one from a terminal, but macOS does not pass
+the environment to a Finder-launched app, so the bundle needs the `defaults` form.
+
+`--dmg` produces the conventional drag-to-Applications disk image (~2.5 MB) instead of
+a bare zip.
 
 The bundle is **ad-hoc signed, not notarized**, so the first launch on someone else's
 Mac needs a right-click → Open. Notarization needs a paid Apple Developer account
