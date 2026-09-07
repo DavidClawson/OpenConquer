@@ -3,8 +3,22 @@ import Foundation
 
 // MARK: - Game Data
 
-let dataPath = FileManager.default.homeDirectoryForCurrentUser
-    .appendingPathComponent("Library/Application Support/Vanilla-Conquer/vanillatd")
+/// Where the user's own extracted assets live. `install-assets.sh` writes to the
+/// default location; `OPENCONQUER_DATA_DIR` overrides it, which lets assets sit
+/// on an external drive and lets the missing-assets path be tested against an
+/// empty directory (`homeDirectoryForCurrentUser` reads the passwd database, so
+/// overriding `HOME` does not move it).
+///
+/// No assets are ever bundled with the app — see README "Assets".
+let dataPath: URL = {
+    if let override = ProcessInfo.processInfo.environment["OPENCONQUER_DATA_DIR"],
+       !override.isEmpty {
+        return URL(fileURLWithPath: (override as NSString).expandingTildeInPath,
+                   isDirectory: true)
+    }
+    return FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Application Support/Vanilla-Conquer/vanillatd")
+}()
 
 let assetManager = AssetManager(dataPath: dataPath)
 

@@ -91,6 +91,26 @@ swift build          # or: swift run
 ./TiberianDawnMax.command   # convenience wrapper (runs `swift run`)
 ```
 
+### Build a double-clickable app
+
+```bash
+./tools/make-app.sh          # -> dist/OpenConquer.app
+./tools/make-app.sh --zip    # also dist/OpenConquer.zip, for handing to someone
+```
+
+This packages the release binary as a real macOS `.app` — Dock icon, app name, no
+terminal. It vendors the SDL dylibs into the bundle and rewrites their load paths,
+so the result runs on a Mac **without Homebrew or a Swift toolchain installed**, then
+smoke-tests the bundle before declaring success.
+
+It still bundles **no game data** — assets stay in `~/Library/Application Support/`
+where `install-assets.sh` puts them, and are read from there at runtime. Point the app
+somewhere else (an external drive, say) with `OPENCONQUER_DATA_DIR=/path/to/assets`.
+
+The bundle is **ad-hoc signed, not notarized**, so the first launch on someone else's
+Mac needs a right-click → Open. Notarization needs a paid Apple Developer account
+(see [`docs/ROADMAP.md`](docs/ROADMAP.md) Phase 4).
+
 ## Headless test harness
 
 The simulation runs without a window/renderer/audio, which powers a deterministic regression suite (see [`CONTRIBUTING.md`](CONTRIBUTING.md)):

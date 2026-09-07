@@ -14,10 +14,24 @@ alongside this repo as reference (see "Reference sources" below).
 ```bash
 swift build            # or:  swift run
 ./TiberianDawnMax.command   # wrapper that runs `swift run`
+./tools/make-app.sh         # package dist/OpenConquer.app (double-clickable)
 ```
 
 - Requires SDL2: `brew install sdl2` (wired via the `CSDL2` system-library target).
 - Target: macOS 13+. Toolchain: swift-tools 5.9.
+- **Asset location** is `~/Library/Application Support/Vanilla-Conquer/vanillatd`,
+  overridable with `OPENCONQUER_DATA_DIR` (`main.swift`). The override is also how
+  you exercise the no-assets path — `homeDirectoryForCurrentUser` reads the passwd
+  database, so setting `HOME` does not move it.
+- **`tools/make-app.sh`** vendors the SDL dylibs into `Contents/Frameworks`,
+  rewrites their load paths to `@rpath`, ad-hoc signs (required on Apple Silicon
+  after `install_name_tool` edits), and smoke-tests the bundle with
+  `--test-synthetic`. Two traps it handles, both of which cost real time to
+  diagnose: `brew install sdl2` now installs **sdl2-compat**, which `dlopen`s
+  libSDL3 at runtime where `otool` cannot see it; and brew's lib dirs are symlink
+  chains into `../Cellar`, so a link copied with `cp -a` dangles inside the bundle —
+  sdl2-compat then fails to find SDL3 and raises a **modal NSAlert from a library
+  initializer**, hanging the process forever with no output. Use `cp -L`.
 
 ### Headless harness (no window/render/audio)
 

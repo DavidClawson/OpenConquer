@@ -84,7 +84,10 @@ below are tracked as Wave A (landed) and Wave B (remaining).
 - [x] HD cursors wired in (`Rendering/GameCursorHD.swift`).
 - [ ] Wire the extracted HD **sidebar power/progress meters** (art already extracted to `ui/sidebar/`).
 - [ ] Options UI polish; classic-vs-HD art toggle.
-- [ ] Friendlier packaging: an unsigned `.app` to start; notarized build later (needs an Apple Developer account).
+- [~] Friendlier packaging.
+  - [x] **`.app` bundle** — `tools/make-app.sh` produces `dist/OpenConquer.app`: SDL dylibs vendored into the bundle with `@rpath` load paths, generated icon (`tools/make_icon.py`, drawn procedurally — no game art), `Info.plist`, ad-hoc signature, and a smoke test that runs the bundled binary's asset-free self-test. Runs on a Mac with no Homebrew and no Swift toolchain. `OPENCONQUER_DATA_DIR` overrides the asset location.
+  - [ ] **First-run experience** — with no assets installed the app opens a *blank window*; the "NOT FOUND" diagnostics go to stdout, which a Finder-launched app doesn't have. Needs an in-app screen (the built-in 5x7 pixel font needs no assets) explaining what's missing and where to get it.
+  - [ ] Notarized build (needs a paid Apple Developer account); until then first launch needs right-click → Open.
 
 ## Phase 5 — Cross-platform (Linux)  → Goal B
 
