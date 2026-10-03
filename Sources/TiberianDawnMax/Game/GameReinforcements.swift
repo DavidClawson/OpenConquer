@@ -806,6 +806,7 @@ func tickReinforcements() {
             let stillFlying = transport.flyToward()
             if !stillFlying {
                 // Off map — remove transport
+                transport.leftMap = true
                 transport.strength = 0
                 completedIndices.append(index)
             }
@@ -813,6 +814,7 @@ func tickReinforcements() {
             // Also remove if well past map edge
             if let bounds = world.mapBounds {
                 if transport.worldX < Double(bounds.x * 24) - 48.0 {
+                    transport.leftMap = true
                     transport.strength = 0
                     if !completedIndices.contains(index) {
                         completedIndices.append(index)

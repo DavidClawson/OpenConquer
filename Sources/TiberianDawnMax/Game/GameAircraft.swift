@@ -476,11 +476,13 @@ extension GameObject {
                 }
                 p.triggerName = nil
                 p.mustSurvive = false
+                p.leftMap = true
                 p.strength = 0
             }
             passengers.removeAll()
             triggerName = nil
             mustSurvive = false
+            leftMap = true
             strength = 0
         }
     }

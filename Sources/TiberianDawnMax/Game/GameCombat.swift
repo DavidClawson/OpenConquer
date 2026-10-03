@@ -655,6 +655,7 @@ func removeDeadObjects() {
     for obj in world.objects where obj.strength <= 0 {
         guard obj.house == world.playerHouse else { continue }
         guard obj.mission != .selling && obj.mission != .deconstruction else { continue }  // Selling is voluntary, not a loss
+        guard !obj.leftMap else { continue }  // drove/flew off the map (loaner, evacuation): not a loss
         switch obj.kind {
         case .unit, .infantry:
             session.speakEVA(.unitLost, cooldownTicks: 45)

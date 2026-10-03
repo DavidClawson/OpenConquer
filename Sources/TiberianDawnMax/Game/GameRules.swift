@@ -64,27 +64,36 @@ struct Ruleset {
     /// single branch point: the InitNum loop in `initGameWorld` (GameInit.swift).
     var spawnsInitialTeams: Bool
 
+    /// Whether explored ground fogs over again once no unit sees it (enemies
+    /// there hidden). FALSE is faithful to 1995: TD has only the shroud — a
+    /// cell revealed by Map.Sight_From stays revealed for the rest of the
+    /// mission, units in it included; re-growing fog came with Red Alert.
+    /// Read at the single branch point: the demote step in `updateFog`.
+    var fogRegrowth: Bool
+
     // Future tunables slot in here (crush behavior, build adjacency, economy
     // constants, …), each read at a single branch point in the simulation.
 
     /// The authentic 1995 experience. Canonical, determinism-pinned baseline.
     static let classic1995 = Ruleset(
         name: "Classic (1995)",
-        summary: "No veterancy - classic wayfinding - scripted AI",
+        summary: "No veterancy - classic wayfinding - scripted AI - shroud only",
         veterancyEnabled: false,
         fogAwarePathfinding: false,
         enhancedEnemyAI: false,
-        spawnsInitialTeams: false
+        spawnsInitialTeams: false,
+        fogRegrowth: false
     )
 
     /// Classic plus modern gameplay enhancements.
     static let enhanced = Ruleset(
         name: "Enhanced",
-        summary: "Veterancy - fog-aware wayfinding - aggressive AI",
+        summary: "Veterancy - fog-aware wayfinding - aggressive AI - fog of war",
         veterancyEnabled: true,
         fogAwarePathfinding: true,
         enhancedEnemyAI: true,
-        spawnsInitialTeams: true
+        spawnsInitialTeams: true,
+        fogRegrowth: true
     )
 
     /// All built-in presets, in display order.

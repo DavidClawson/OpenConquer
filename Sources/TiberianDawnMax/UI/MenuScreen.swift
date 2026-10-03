@@ -1253,9 +1253,10 @@ class PlayingScreen: MenuScreen {
             renderState.gameCameraY = min(maxCamY, renderState.gameCameraY + speed)
         }
 
-        // Clamp camera after pan (in case maxCam < minCam when viewport > map)
-        renderState.gameCameraX = max(minCamX, min(maxCamX, renderState.gameCameraX))
-        renderState.gameCameraY = max(minCamY, min(maxCamY, renderState.gameCameraY))
+        // Clamp after the pan. clampGameCamera() centers an axis where the map
+        // is smaller than the viewport; a plain min/max here pinned small maps
+        // to the top-left corner every frame.
+        clampGameCamera()
     }
 }
 

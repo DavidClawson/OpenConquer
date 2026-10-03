@@ -354,8 +354,11 @@ func renderGame(_ renderer: OpaquePointer?) {
         }
     }
 
-    // Sort mobile objects by Y for proper depth ordering
-    mobileObjects.sort { $0.worldY < $1.worldY }
+    // Sort mobile objects by Y for proper depth ordering. A hovercraft sorts
+    // two cells "higher" so the units stepping off its deck (northward) draw
+    // over it, as the original's Sort_Y does for the LST (UNIT.CPP).
+    func depthY(_ obj: GameObject) -> Double { obj.isHovercraft ? obj.worldY - 48 : obj.worldY }
+    mobileObjects.sort { depthY($0) < depthY($1) }
 
     // Pass 1: Render all building bibs FIRST so they never overlap building sprites
     for obj in structures {
@@ -901,6 +904,14 @@ func renderGame(_ renderer: OpaquePointer?) {
         if rightX < vw && stripH > 0 {
             var r = SDL_Rect(x: rightX, y: stripTop, w: vw - rightX, h: stripH)
             SDL_RenderFillRect(renderer, &r)
+        }
+
+        // A thin steel frame just outside the playable area, so a small map
+        // centered in a large window reads as bounded rather than unexplored.
+        SDL_SetRenderDrawColor(renderer, 70, 74, 78, 255)
+        for inset: Int32 in 1...2 {
+            var frame = SDL_Rect(x: bx - inset, y: by - inset, w: bw + inset * 2, h: bh + inset * 2)
+            SDL_RenderDrawRect(renderer, &frame)
         }
     }
 

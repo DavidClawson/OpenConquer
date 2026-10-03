@@ -210,9 +210,12 @@ private func applyCrateEffect(_ crate: GameCrate, collector: GameObject) {
         print("Crate: \(collector.typeName) picked up firepower crate")
 
     case .revealMap:
+        // Lifts the shroud. With fog regrowth the revealed ground is fogged
+        // until seen; without it (classic) revealed means visible.
+        let revealed: FogLevel = session.rules.fogRegrowth ? .explored : .visible
         for i in 0..<4096 {
             if world.map.fogState[i] == .unexplored {
-                world.map.fogState[i] = .explored
+                world.map.fogState[i] = revealed
             }
         }
         if isPlayer {

@@ -22,10 +22,14 @@ func updateFog() {
     guard let world = session.world else { return }
     let map = world.map
 
-    // Demote all visible cells to explored
-    for i in 0..<4096 {
-        if map.fogState[i] == .visible {
-            map.fogState[i] = .explored
+    // Fog regrowth: demote visible cells to explored, to be re-lit below by
+    // whatever still sees them. Classic TD has no regrowth — revealed stays
+    // visible (`Ruleset.fogRegrowth`).
+    if session.rules.fogRegrowth {
+        for i in 0..<4096 {
+            if map.fogState[i] == .visible {
+                map.fogState[i] = .explored
+            }
         }
     }
 

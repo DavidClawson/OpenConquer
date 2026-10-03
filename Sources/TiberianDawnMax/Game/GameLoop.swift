@@ -365,6 +365,7 @@ func gameTick() {
                cy < bounds.y - 1 || cy > bounds.y + bounds.height {
                 // Gunboat: bounce at edges (handled by tickGunboatHunt), don't remove
                 if obj.isGunboat { continue }
+                obj.leftMap = true
                 obj.strength = 0
             }
         }
