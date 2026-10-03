@@ -323,6 +323,18 @@ class AudioManager: SimAudio {
         ))
     }
 
+    /// Play a non-positional UI sample by file name (e.g. "BEEPY6" for
+    /// BEEPY6.AUD). `volume` is the original's 0-255 Play_Sample /
+    /// Normalize_Sound level.
+    func playSample(_ name: String, volume: Int = 255) {
+        guard isInitialized, loadSound(name),
+              let samples = soundCache[name], let rate = soundSampleRates[name] else { return }
+        if activeSounds.count >= maxActiveSounds { activeSounds.removeFirst() }
+        activeSounds.append(ActiveSound(samples: samples, offset: 0,
+                                        volume: sfxVolume * masterVolume * Float(volume) / 255,
+                                        pan: 0, sourceSampleRate: rate))
+    }
+
     /// Play EVA speech (queued, one at a time)
     func speak(_ vox: VoxType) {
         guard isInitialized && vox != .none else { return }

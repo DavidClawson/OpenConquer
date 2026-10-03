@@ -90,7 +90,9 @@ CPS/WSA/PAL decoders — `Headless/GfxDiagnostics.swift`; `--test-vqa NAME...` /
 `Headless/VQADiagnostics.swift`; `--test-fonts` / `--dump-font NAME OUT.png "TEXT"
 [--colors]` for the CONQUER.ENG string table and .FNT fonts —
 `Headless/FontDiagnostics.swift`; `--play-movie NAME...` opens the window on the
-movie player, then the menu.) Implementation: `TiberianDawnMax/Headless/GameHeadless.swift`
+movie player, then the menu; `--test-map-select GDI|NOD ROW [E|W] OUTDIR` drives the
+animated map selection headlessly (snapshots + a scripted pick, `Headless/MapSelectionDiagnostics.swift`)
+and `--map-select GDI|NOD ROW [E|W]` opens the window on it.) Implementation: `TiberianDawnMax/Headless/GameHeadless.swift`
 (scenario-backed tools) and `OpenConquerCore/SelfTests/` (the ASSET-FREE self-tests).
 
 **`swift test`** runs every ASSET-FREE self-test above (incl. `--test-synthetic 500`,
@@ -228,6 +230,11 @@ When reimplementing a behavior, grep the C++ for the relevant `Mission_*`,
   user setting (Off/Pixels/Smooth/Enhanced) gates them; Enhanced runs Apple's
   low-latency super-resolution per frame (`Rendering/MovieFrameEnhancer.swift`,
   macOS 26+, Smooth elsewhere).
+- **Map selection:** `UI/MapSelectionScreen.swift` ports Map_Selection
+  (MAPSEL.CPP) as a list of steps run on a 60 Hz tick, with the original's
+  pages (PseudoSeenBuff/SysMemPage/TextPrintBuffer), XOR-onto-page WSA frames,
+  typed SCOREFNT text and the CLICK_*.CPS colour lookup. Its tables are in
+  `UI/MapSelectionData.swift`; where a choice leads is Core's `CampaignGraph`.
 - **Player commands:** input never edits the world. Clicks and keys become a
   `PlayerCommand` (`OpenConquerCore/Game/PlayerCommands.swift`) passed to
   `issue(_:)`; `gameTick` applies the queue first thing and appends each to

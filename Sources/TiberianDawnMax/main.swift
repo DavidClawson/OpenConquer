@@ -78,6 +78,9 @@ if let code = runVQADiagnosticsIfRequested() { exit(code) }
 // --test-fonts / --dump-font NAME OUT.png "TEXT" (Headless/FontDiagnostics.swift)
 if let code = runFontDiagnosticsIfRequested() { exit(code) }
 
+// --test-map-select GDI|NOD ROW [E|W] OUTDIR (Headless/MapSelectionDiagnostics.swift)
+if let code = runMapSelectionDiagnosticsIfRequested() { exit(code) }
+
 // Diagnostic: --dump-scenario <NAME>  prints map bounds, waypoints, etc.
 if let dumpIdx = CommandLine.arguments.firstIndex(of: "--dump-scenario"),
    dumpIdx + 1 < CommandLine.arguments.count {
