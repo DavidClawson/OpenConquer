@@ -114,6 +114,35 @@ package struct MIXFile {
     // MARK: - Westwood CRC Algorithm
     // Custom hash: for each 4-byte block, CRC = rotateLeft(CRC, 1) + block
 
+    /// The CRCs a MIX holds, read from its header alone — for telling archives
+    /// apart without loading a 500 MB MOVIES.MIX.
+    package static func entryCRCs(in url: URL) -> Set<Int32> {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return [] }
+        defer { try? handle.close() }
+        guard let head = try? handle.read(upToCount: 10), head.count == 10 else { return [] }
+        var pos = 0
+        let first = readInt16(head, at: &pos)
+        let second = readInt16(head, at: &pos)
+        let count: Int
+        if first == 0 {
+            guard second & 0x02 == 0 else { return [] }
+            count = Int(readInt16(head, at: &pos))
+            pos = 10
+        } else {
+            count = Int(first)
+            pos = 6
+        }
+        try? handle.seek(toOffset: UInt64(pos))
+        guard count > 0, let table = try? handle.read(upToCount: count * 12), table.count == count * 12 else { return [] }
+        var crcs = Set<Int32>()
+        var p = 0
+        for _ in 0..<count {
+            crcs.insert(readInt32(table, at: &p))
+            p += 8
+        }
+        return crcs
+    }
+
     package static func crc(for filename: String) -> Int32 {
         crcFromBytes(Array(filename.uppercased().utf8))
     }

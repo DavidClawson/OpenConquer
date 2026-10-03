@@ -22,6 +22,43 @@ package struct RemasteredInstall: Equatable {
                                      "CONFIG.MEG", "SFX3D.MEG", "SFX2D_EN-US.MEG", "MUSIC.MEG"]
 
     var classicDir: URL { dataDir.appendingPathComponent("CNCDATA/TIBERIAN_DAWN") }
+
+    /// The HD archives that aren't there.
+    package var missingHD: [String] {
+        RemasteredInstall.hdArchives.filter {
+            !FileManager.default.fileExists(atPath: dataDir.appendingPathComponent($0).path)
+        }
+    }
+}
+
+// MARK: - The original game's files
+
+/// A folder of the original game's archives: a 1995 CD (or its 2007 freeware
+/// release) copied to the Mac. Each disc is one side's campaign; the
+/// side-specific GENERAL.MIX says which, by holding that side's first mission.
+package struct OriginalDisc: Equatable {
+    package enum Side: String { case gdi, nod }
+    package let folder: URL
+    package let side: Side
+
+    /// `url` as a disc folder: CONQUER.MIX at its top and a MOVIES.MIX that
+    /// holds only one side's briefings (GENERAL.MIX has every mission on both
+    /// discs; the movies are what differ). Names match case-insensitively —
+    /// copied CDs often come out in lower case.
+    package static func resolve(_ url: URL) -> OriginalDisc? {
+        guard file(named: "CONQUER.MIX", in: url) != nil, file(named: "GENERAL.MIX", in: url) != nil,
+              let movies = file(named: "MOVIES.MIX", in: url) else { return nil }
+        let crcs = MIXFile.entryCRCs(in: movies)
+        if crcs.contains(MIXFile.crc(for: "GDI2.VQA")) { return OriginalDisc(folder: url, side: .gdi) }
+        if crcs.contains(MIXFile.crc(for: "NOD2.VQA")) { return OriginalDisc(folder: url, side: .nod) }
+        return nil
+    }
+
+    /// The file in `folder` whose name matches `name` ignoring case.
+    package static func file(named name: String, in folder: URL) -> URL? {
+        let items = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        return items.first { $0.lastPathComponent.uppercased() == name }
+    }
 }
 
 package enum RemasteredLocator {
@@ -102,6 +139,23 @@ package enum RemasteredLocator {
         return found.sorted { $0.hasHD && !$1.hasHD }
     }
 
+    /// Original game discs in the obvious places: mounted CDs or disc images,
+    /// and folders at the top of Downloads, Desktop and Documents.
+    package static func searchDiscs() -> [OriginalDisc] {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        var folders = subfolders(URL(fileURLWithPath: "/Volumes"))
+        for dir in ["Downloads", "Desktop", "Documents", "Games"] {
+            folders += subfolders(home.appendingPathComponent(dir))
+        }
+        var found: [OriginalDisc] = []
+        for folder in folders {
+            if let disc = OriginalDisc.resolve(folder), !found.contains(where: { $0.side == disc.side }) {
+                found.append(disc)
+            }
+        }
+        return found
+    }
+
     private static func subfolders(_ url: URL) -> [URL] {
         (try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey],
                                                       options: [.skipsHiddenFiles])) ?? []
@@ -123,6 +177,26 @@ package enum ClassicArchiveImport {
     /// One copy per side.
     package static let perSide = ["GENERAL.MIX", "SCORES.MIX", "MOVIES.MIX"]
 
+    /// (source, destination) for every archive a set of original discs has:
+    /// the shared ones from the first disc that has each, the side ones into
+    /// that disc's side folder.
+    package static func plan(from discs: [OriginalDisc], to dataDir: URL) -> [(URL, URL)] {
+        var plan: [(URL, URL)] = []
+        for name in shared {
+            if let src = discs.lazy.compactMap({ OriginalDisc.file(named: name, in: $0.folder) }).first {
+                plan.append((src, dataDir.appendingPathComponent(name)))
+            }
+        }
+        for disc in discs {
+            for name in perSide {
+                if let src = OriginalDisc.file(named: name, in: disc.folder) {
+                    plan.append((src, dataDir.appendingPathComponent(disc.side.rawValue + "/" + name)))
+                }
+            }
+        }
+        return plan
+    }
+
     /// (source, destination) for every archive, in copy order.
     package static func plan(from install: RemasteredInstall, to dataDir: URL) -> [(URL, URL)] {
         let cd1 = install.classicDir.appendingPathComponent("CD1")
@@ -143,14 +217,13 @@ package enum ClassicArchiveImport {
         }
     }
 
-    /// Copies the archives, skipping any already there at the same size.
+    /// Copies the archives in `plan`, skipping any already there at the same size.
     /// Each lands under a temporary name and is renamed into place, so a
     /// cancelled import never leaves a truncated archive. `progress` gets
     /// (bytes done, bytes total, archive name).
-    package static func run(from install: RemasteredInstall, to dataDir: URL,
+    package static func run(_ plan: [(URL, URL)], to dataDir: URL,
                             progress: (Int64, Int64, String) -> Void, isCancelled: () -> Bool) throws {
         let fm = FileManager.default
-        let plan = plan(from: install, to: dataDir)
         func size(_ url: URL) -> Int64 {
             ((try? fm.attributesOfItem(atPath: url.path))?[.size] as? NSNumber)?.int64Value ?? -1
         }
