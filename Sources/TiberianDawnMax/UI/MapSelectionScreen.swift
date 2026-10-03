@@ -17,11 +17,11 @@ import OpenConquerCore
 // timer ticks; here it is a list of steps run by a 60 Hz tick. Pages mirror
 // the original's: `page` = PseudoSeenBuff (what is shown, 320x200),
 // `sysPage` = SysMemPage (scratch, later the click map), `textLayer` =
-// TextPrintBuffer (index 0 transparent). The original's TextPrintBuffer is
-// 640x400 with every coordinate doubled, but SCOREFNT is a 6-pixel font laid
-// out on a 6-pixel grid, so it is kept here at 320x200 and pixel-doubled. The
-// shown image is `page` doubled with interpolation (Interpolate_2X_Scale)
-// under the text.
+// TextPrintBuffer (index 0 transparent). As in the Win95 build the text layer
+// is 640x400 with every coordinate doubled, printed in the hi-res score font
+// (ScoreFontPtr = 12GRNGRD.FNT, UPDATE.MIX); without it, the DOS SCOREFNT is
+// pixel-doubled instead. The shown image is `page` doubled with interpolation
+// (Interpolate_2X_Scale) under the text.
 //
 // The original loops until a valid country is clicked; there is no cancel.
 // Esc or Space fast-forwards the intro to the selection. Falls back to the
@@ -58,7 +58,7 @@ final class MapSelectionScreen: MenuScreen {
     private static let w = 320, h = 200, tw = 640, th = 400
     private var page = [UInt8](repeating: 0, count: w * h)
     private var sysPage = [UInt8](repeating: 0, count: w * h)
-    private var textLayer = [UInt8](repeating: 0, count: w * h)
+    private var textLayer = [UInt8](repeating: 0, count: tw * th)
     private var europe = [UInt8](repeating: 0, count: w * h)
     private var backPage = [UInt8](repeating: 0, count: 120 * 8)
 
@@ -124,7 +124,8 @@ final class MapSelectionScreen: MenuScreen {
         func wsa(_ n: String) -> WSAFile? { mixManager.retrieve(n).flatMap { try? WSAFile(data: $0) } }
         let last = gdi ? row == 14 : row == 12
         guard let strData = mixManager.retrieve("CONQUER.ENG"), let strings = StringTable(data: strData),
-              let fontData = mixManager.retrieve("SCOREFNT.FNT"), let font = WWFont(data: fontData),
+              let font = ClassicDialogArt.shared.scoreFont
+                ?? mixManager.retrieve("SCOREFNT.FNT").flatMap({ WWFont(data: $0) }),
               let grey = wsa("GREYERTH.WSA"), let grey2 = wsa("E-BWTOCL.WSA"),
               let earth = wsa(gdi ? "EARTH_E.WSA" : "EARTH_A.WSA"),
               let prog = wsa(gdi ? (last ? "BOSNIA.WSA" : "EUROPE.WSA") : (last ? "S_AFRICA.WSA" : "AFRICA.WSA")),
@@ -254,7 +255,7 @@ final class MapSelectionScreen: MenuScreen {
         // Second advance (508-540).
         run { [self] in
             page.fillRect(x1: xcoord, y1: 0, x2: xcoord + 6 * 16, y2: 8, color: Self.black, width: Self.w)
-            textLayer.fillRect(x1: xcoord, y1: 0, x2: xcoord + 6 * 16, y2: 8, color: Self.black, width: Self.w)
+            textFill(xcoord, 0, xcoord + 6 * 16, 8, Self.black)
             copyRect(from: sysPage, x: xcoord, y: 1, w: 120, h: 8, into: &backPage)
             if !last {
                 sample("TEXT2", 90)
@@ -272,7 +273,7 @@ final class MapSelectionScreen: MenuScreen {
         if !last { wait(85) }
         run { [self] in
             page.fillRect(x1: xcoord, y1: 12, x2: xcoord + 6 * 16, y2: 20, color: Self.black, width: Self.w)
-            textLayer.fillRect(x1: xcoord, y1: 12, x2: xcoord + 6 * 16, y2: 20, color: Self.black, width: Self.w)
+            textFill(xcoord, 12, xcoord + 6 * 16, 20, Self.black)
         }
 
         // "Locating coordinates of next mission" (547-555).
@@ -287,7 +288,7 @@ final class MapSelectionScreen: MenuScreen {
             run { [self] in
                 sysPage.fillRect(x1: 0, y1: 160, x2: 120, y2: 176, color: 0, width: Self.w)
                 page.fillRect(x1: 0, y1: 160, x2: 120, y2: 176, color: 0, width: Self.w)
-                textLayer.fillRect(x1: 0, y1: 160, x2: 120, y2: 176, color: Self.black, width: Self.w)
+                textFill(0, 160, 120, 176, Self.black)
             }
         }
 
@@ -320,7 +321,7 @@ final class MapSelectionScreen: MenuScreen {
             if !last {
                 sysPage.fillRect(x1: 0, y1: 160, x2: 120, y2: 176, color: 0, width: Self.w)
                 page.fillRect(x1: 0, y1: 160, x2: 120, y2: 176, color: 0, width: Self.w)
-                textLayer.fillRect(x1: 0, y1: 160, x2: 120, y2: 176, color: Self.black, width: Self.w)
+                textFill(0, 160, 120, 176, Self.black)
             }
             sysPage = clickCPS.pixels
             sample("TEXT2", 90)
@@ -342,9 +343,9 @@ final class MapSelectionScreen: MenuScreen {
             typeText(strings[Data_.enhancingImage], x: x, y: 10, remap: Self.otherGreenPal, perTick: 10)
         }
         if frame == 23 || frame == 35 {
-            textLayer.fillRect(x1: x, y1: 10, x2: x + width, y2: 22, color: Self.black, width: Self.w)
+            textFill(x, 10, x + width, 22, Self.black)
         } else if frame == 36 {
-            textLayer.fillRect(x1: x, y1: 10, x2: x + width, y2: 22, color: 0, width: Self.w)
+            textFill(x, 10, x + width, 22, 0)
         }
     }
 
@@ -381,8 +382,7 @@ final class MapSelectionScreen: MenuScreen {
             let cx = Data_.countryX[safe: xy] ?? 160, cy = Data_.countryY[safe: xy] ?? 100
             run { [self] in
                 page.fillRect(x1: attackX, y1: 160, x2: attackX + 17 * 6, y2: 178, color: Self.black, width: Self.w)
-                textLayer.fillRect(x1: attackX, y1: 160, x2: attackX + 17 * 6, y2: 178,
-                                   color: Self.black, width: Self.w)
+                textFill(attackX, 160, attackX + 17 * 6, 178, Self.black)
                 sysPage = europe
                 if let f = countryShapes?.frames[safe: shape] {
                     sysPage.drawShape(f, centerX: cx, centerY: cy, width: Self.w, height: Self.h)
@@ -396,8 +396,7 @@ final class MapSelectionScreen: MenuScreen {
             run { [self] in
                 if let darkPalette { setPalette(darkPalette) }
                 page.fillRect(x1: attackX, y1: 160, x2: attackX + 17 * 6, y2: 199, color: Self.black, width: Self.w)
-                textLayer.fillRect(x1: attackX, y1: 160, x2: attackX + 17 * 6, y2: 199,
-                                   color: Self.black, width: Self.w)
+                textFill(attackX, 160, attackX + 17 * 6, 199, Self.black)
                 animate(&progress, frame: progressWSA.frameCount - 1, onto: &page)
                 sysPage = page
             }
@@ -644,8 +643,30 @@ final class MapSelectionScreen: MenuScreen {
         dirty = true
     }
 
+    /// Print at 320x200 coordinates; the layer is 640x400 (TextPrintBuffer
+    /// coordinates are doubled at every call in the Win95 build).
     private func drawText(_ text: String, x: Int, y: Int, remap: [UInt8]) {
-        font.draw(text, into: &textLayer, pageWidth: Self.w, pageHeight: Self.h, x: x, y: y, remap: remap)
+        if font.height > 8 {
+            font.draw(text, into: &textLayer, pageWidth: Self.tw, pageHeight: Self.th, x: 2 * x, y: 2 * y, remap: remap)
+            return
+        }
+        // DOS SCOREFNT: draw at 320x200 into scratch, then pixel-double.
+        let gw = font.width(of: text) + 1, gh = font.height + 1
+        var glyph = [UInt8](repeating: 0, count: gw * gh)
+        font.draw(text, into: &glyph, pageWidth: gw, pageHeight: gh, x: 0, y: 0, remap: remap)
+        for gy in 0..<gh {
+            for gx in 0..<gw where glyph[gy * gw + gx] != 0 {
+                for d in 0..<4 {
+                    let tx = 2 * (x + gx) + (d & 1), ty = 2 * (y + gy) + (d >> 1)
+                    if tx >= 0, tx < Self.tw, ty >= 0, ty < Self.th { textLayer[ty * Self.tw + tx] = glyph[gy * gw + gx] }
+                }
+            }
+        }
+    }
+
+    /// TextPrintBuffer->Fill_Rect at 320x200 coordinates (inclusive, doubled).
+    private func textFill(_ x1: Int, _ y1: Int, _ x2: Int, _ y2: Int, _ color: UInt8) {
+        textLayer.fillRect(x1: 2 * x1, y1: 2 * y1, x2: 2 * x2, y2: 2 * y2, color: color, width: Self.tw)
     }
 
     // MARK: Palette
@@ -744,7 +765,7 @@ final class MapSelectionScreen: MenuScreen {
                             let sy = Y >> 1, sy2 = (Y & 1 == 1 && sy + 1 < h) ? sy + 1 : sy
                             for X in 0..<tw {
                                 let di = (Y * tw + X) * 4
-                                let t = txt[(Y >> 1) * w + (X >> 1)]
+                                let t = txt[Y * tw + X]
                                 if t != 0 {
                                     o[di] = pal[Int(t) * 3]; o[di + 1] = pal[Int(t) * 3 + 1]; o[di + 2] = pal[Int(t) * 3 + 2]
                                     continue

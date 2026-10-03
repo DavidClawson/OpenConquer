@@ -92,7 +92,9 @@ CPS/WSA/PAL decoders — `Headless/GfxDiagnostics.swift`; `--test-vqa NAME...` /
 `Headless/FontDiagnostics.swift`; `--play-movie NAME...` opens the window on the
 movie player, then the menu; `--test-map-select GDI|NOD ROW [E|W] OUTDIR` drives the
 animated map selection headlessly (snapshots + a scripted pick, `Headless/MapSelectionDiagnostics.swift`)
-and `--map-select GDI|NOD ROW [E|W]` opens the window on it.) Implementation: `TiberianDawnMax/Headless/GameHeadless.swift`
+and `--map-select GDI|NOD ROW [E|W]` opens the window on it; `--test-title OUTDIR`
+snapshots the title menus and drives the choose-your-side screen, `Headless/TitleDiagnostics.swift`;
+`--find-asset NAME...` prints which MIX archive holds each file.) Implementation: `TiberianDawnMax/Headless/GameHeadless.swift`
 (scenario-backed tools) and `OpenConquerCore/SelfTests/` (the ASSET-FREE self-tests).
 
 **`swift test`** runs every ASSET-FREE self-test above (incl. `--test-synthetic 500`,
@@ -233,8 +235,16 @@ When reimplementing a behavior, grep the C++ for the relevant `Mission_*`,
 - **Map selection:** `UI/MapSelectionScreen.swift` ports Map_Selection
   (MAPSEL.CPP) as a list of steps run on a 60 Hz tick, with the original's
   pages (PseudoSeenBuff/SysMemPage/TextPrintBuffer), XOR-onto-page WSA frames,
-  typed SCOREFNT text and the CLICK_*.CPS colour lookup. Its tables are in
-  `UI/MapSelectionData.swift`; where a choice leads is Core's `CampaignGraph`.
+  typed text (Win95's 12GRNGRD on a 640x400 layer) and the CLICK_*.CPS colour
+  lookup. Its tables are in `UI/MapSelectionData.swift`; where a choice leads
+  is Core's `CampaignGraph`.
+- **Classic front end:** `UI/TitleScreen.swift` (Select_Game/Main_Menu over
+  HTITLE.PCX) and `UI/ChooseSideScreen.swift` (Choose_Side, CHOOSE.WSA) draw
+  on `UI/ClassicPage.swift`, a 640x400 indexed page with ports of Draw_Box,
+  Dialog_Box, TextButtonClass and Simple_Text_Print. `makeMainMenu()` returns
+  the title, or the plain `ModernMainMenuScreen` without the art. The Win95
+  archives (CCLOCAL/UPDATE/UPDATA/UPDATEC.MIX) are searched first, in
+  Init_Game's order (`MIXFileManager.registerAll`).
 - **Player commands:** input never edits the world. Clicks and keys become a
   `PlayerCommand` (`OpenConquerCore/Game/PlayerCommands.swift`) passed to
   `issue(_:)`; `gameTick` applies the queue first thing and appends each to
