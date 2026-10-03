@@ -8,10 +8,22 @@
 
 ## Screenshots
 
-<!-- Add images to docs/screenshots/ with these names (see docs/screenshots/README.md). -->
-![In-game](docs/screenshots/gameplay.png)
-![Sidebar](docs/screenshots/sidebar.png)
-![Options — Classic vs Enhanced ruleset](docs/screenshots/options.png)
+*Illustrative captures of OpenConquer running on a locally installed copy of the game data — no game data is distributed with the project. How each was made: [`docs/screenshots/README.md`](docs/screenshots/README.md).*
+
+![GDI base with the classic 1995 sidebar](docs/screenshots/gameplay-classic.png)
+*A GDI base (mission 12) with the classic sidebar, Remastered HD sprites.*
+
+![The same base with the modern sidebar](docs/screenshots/gameplay-modern.png)
+*The same base with the modern sidebar and its HD power and build meters.*
+
+| | |
+|---|---|
+| ![Title screen](docs/screenshots/title.png) | ![Choose your side](docs/screenshots/choose-side.png) |
+| *The Win95 title screen and main menu, with our Options and Developer Tools in the classic style.* | *Choose your side, as in 1995.* |
+| ![Map selection](docs/screenshots/map-select.png) | ![Map selection statistics](docs/screenshots/map-select-stats.png) |
+| *The animated map selection between missions.* | *The chosen country's statistics.* |
+| ![Score screen](docs/screenshots/score.png) | ![Options](docs/screenshots/options.png) |
+| *The end-of-mission score screen.* | *Our settings in the classic dialog style.* |
 
 ---
 
@@ -34,7 +46,17 @@ See [`docs/VISION.md`](docs/VISION.md) and [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Status
 
-Early but very playable: GDI and Nod campaign missions, AI, pathfinding, fog of war, economy/harvesting, combat, superweapons, save/load, and both classic-SHP and remastered-HD rendering. Expect rough edges and missing features — this is a work in progress and contributions are welcome.
+Early but very playable: GDI and Nod campaign missions, AI, pathfinding, fog of war, economy/harvesting, combat, superweapons, save/load, and both classic-SHP and remastered-HD rendering.
+
+The campaign plays start to finish with the original's presentation, ported from EA's released source:
+
+- **Front end** — the Westwood logo, the Win95 title screen and main menu, and choose-your-side, with the classic Load Mission and Options dialogs.
+- **Movies** — the original cutscenes before and after each mission, decoded from your own `MOVIES.MIX`. An optional *Enhanced* mode upscales them live with Apple's low-latency super-resolution (macOS 26+).
+- **Between missions** — the end-of-mission score screen with its hall of fame, and the animated map selection where you pick the next territory.
+- **Endings** — both campaign endings, including Nod's satellite target selection.
+- **In the game** — construction animations for placed and deployed buildings, the original's build-list rules on the sidebar, the classic 1995 sidebar or a modern one with the Remastered HD meters, and the original repair wrench.
+
+Expect rough edges and missing features — see [`docs/PARITY.md`](docs/PARITY.md) for exactly what matches the original and what doesn't. This is a work in progress and contributions are welcome.
 
 ## Requirements
 
@@ -54,7 +76,7 @@ pip3 install Pillow            # one-time: needed for HD sprite extraction
 ./install-assets.sh /path/to/CnCRemastered
 ```
 
-`install-assets.sh` is a guided installer that does the whole setup in one shot: it installs the classic MIX archives, then extracts the classic audio and all the remastered HD art (sprites, cursors, sidebar meters) and audio. Point it at your Remastered Collection install — either the folder that contains `Data/` or the `Data/` folder itself. If you omit the path it probes the usual macOS locations (Steam, `~/CnCRemastered`, `/Applications`, EA app).
+`install-assets.sh` is a guided installer that does the whole setup in one shot: it installs the classic MIX archives (including the Win95 release's archives with its hi-res fonts, title art and choose-your-side screen), then extracts the classic audio and all the remastered HD art (sprites, cursors, sidebar meters) and audio. Point it at your Remastered Collection install — either the folder that contains `Data/` or the `Data/` folder itself. If you omit the path it probes the usual macOS locations (Steam, `~/CnCRemastered`, `/Applications`, EA app).
 
 It's safe to re-run, and it never downloads or bundles game data — it only orchestrates the `tools/` extractors against **your** copy. Useful flags:
 
@@ -123,9 +145,10 @@ the environment to a Finder-launched app, so the bundle needs the `defaults` for
 `--dmg` produces the conventional drag-to-Applications disk image (~2.5 MB) instead of
 a bare zip.
 
-The bundle is **ad-hoc signed, not notarized**, so the first launch on someone else's
-Mac needs a right-click → Open. Notarization needs a paid Apple Developer account
-(see [`docs/ROADMAP.md`](docs/ROADMAP.md) Phase 4).
+The release DMG on GitHub is signed with a Developer ID and notarized by Apple, so it
+opens normally. A bundle you build yourself with `./tools/make-app.sh` (without
+`--sign`) is ad-hoc signed only, so its first launch on someone else's Mac needs a
+right-click → Open.
 
 ## Headless test harness
 
