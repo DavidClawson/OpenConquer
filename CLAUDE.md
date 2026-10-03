@@ -251,7 +251,7 @@ When reimplementing a behavior, grep the C++ for the relevant `Mission_*`,
 
 Key files to know: `Game/GameState.swift` (object model + Mission enum),
 `Game/GameLoop.swift` (tick + `moveOneStep`), `Game/GameMap.swift` (pathfinding +
-`buildPassabilityMap`), `Rendering/GameRenderer.swift` (`pickStructureFrame`),
+`buildPassabilityMap`), `Rendering/ObjectSpriteRenderer.swift` (`pickStructureFrame`),
 `Game/GameEconomy.swift` (harvesting).
 
 ## Conventions
@@ -276,8 +276,9 @@ Key files to know: `Game/GameState.swift` (object model + Mission enum),
   split it along its natural seam as part of that work. Keep new behavior in the
   topically-appropriate file rather than growing a catch-all. (Current largest
   files worth splitting on contact: `UI/MenuScreen.swift`,
-  `Rendering/GameRenderer.swift`, `Rendering/MapRenderer.swift`,
-  `Game/GameCampaign.swift`, `Game/GameSaveLoad.swift`, `Game/GameAI.swift`.)
+  `Rendering/MapRenderer.swift`, `Game/GameSaveLoad.swift`, `Game/GameAI.swift`,
+  `Game/GameMissions.swift`, `Game/GameReinforcements.swift`. `GameRenderer.swift`
+  is mostly the one ordered `renderGame` pass list; split it by pass, not by line.)
   Note `gameTick()` in `GameLoop.swift` is the one exception where source order
   is load-bearing (= RNG-consumption order) — extract phases there carefully and
   re-verify `--determinism` after each step; never reorder or fuse the per-object

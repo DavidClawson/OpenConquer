@@ -1339,7 +1339,7 @@ func clampGameCamera() {
     renderState.gameCameraY = max(minCamY, min(maxCamY, renderState.gameCameraY))
 }
 
-/// Minimap layout constants (must match renderGameMinimap in GameRenderer.swift)
+/// Minimap layout constants (must match renderGameMinimap in MinimapRenderer.swift)
 private func minimapRect() -> (x: Int32, y: Int32, size: Int32, cellSize: Int32, originX: Int32, originY: Int32) {
     minimapLayout()
 }
