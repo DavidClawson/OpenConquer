@@ -160,18 +160,86 @@ package func getOwnedBuildingTypes() -> Set<String> {
     return owned
 }
 
+// MARK: - What the player may build (HouseClass::Can_Build, HOUSE.CPP:449)
+//
+// An item is on the sidebar while the player owns a factory that makes its
+// kind — a barracks (PYLE or HAND) for infantry, a weapons factory or
+// airstrip for vehicles, a helipad for aircraft, a construction yard for
+// structures (BuildingClass::Update_Buildables adds it, StripClass::Recalc
+// drops it once no factory can build it, Who_Can_Build_Me) — and
+// HouseClass::Can_Build allows it: ownable by the player's side, every
+// prerequisite building owned (with the original's equivalences: a Hand of Nod
+// counts as a barracks, an advanced power plant as a power plant, and so on),
+// first available at or below the scenario's BuildLevel, and not excluded by
+// one of the original's campaign special cases. Not yet modelled: the Nod
+// mission 11 Stealth Tank rule (prerequisite = the mission objective
+// buildings).
+
+/// The player's ActiveBScan, with Can_Build's equivalency fixups.
+private func playerStructFlags(_ owned: Set<String>) -> StructFlag {
+    var flags = StructFlag.none
+    for name in owned {
+        if let st = StructType.from(iniName: name) { flags.insert(structTypeToFlag(st)) }
+    }
+    if flags.contains(.advancedPower) { flags.insert(.power) }
+    if flags.contains(.hand) { flags.insert(.barracks) }
+    if flags.contains(.obelisk) { flags.insert(.atower) }
+    if flags.contains(.temple) { flags.insert(.eye) }
+    if flags.contains(.airstrip) { flags.insert(.weap) }
+    if flags.contains(.sam) { flags.insert(.helipad) }
+    return flags
+}
+
+private enum BuildKind { case infantry(InfantryType), unit(UnitType), aircraft(AircraftType), structure(StructType) }
+
+/// Can_Build's legality test for the human player (HOUSE.CPP:449-606).
+private func playerCanBuild(_ kind: BuildKind, isBuildable: Bool, ownable: HouseFlag, pre: StructFlag,
+                            scenario: Int, gdi: Bool, flags: StructFlag) -> Bool {
+    guard isBuildable, ownable.contains(gdi ? .good : .bad) else { return false }
+    var level = session.scenarioBuildLevel
+    var scenario = scenario
+    switch kind {
+    case .infantry(.e3) where gdi && level < 7: return false        // no bazooka for GDI before #8
+    case .unit(.mlrs) where gdi && level < 9: return false          // MSAM from #9
+    case .unit(.mlrs) where !gdi: return false
+    case .unit(.apc) where !gdi: return false
+    case .structure(.temple), .structure(.obelisk): if gdi { return false }
+    case .structure(.eye): if !gdi { return false }
+    case .structure(.advancedPower) where !gdi && level >= 12: scenario = level  // Nod gets it at #12
+    case .structure(.helipad) where !gdi: return false
+    case .structure(.sandbagWall) where gdi && level < 8: return false
+    default: break
+    }
+    if gdi && level == 2 { level = 1 }  // GDI's second training mission feels like #1
+    return flags.isSuperset(of: pre) && scenario <= level
+}
+
 /// Get available units the player can build
 package func getAvailableUnits() -> [BuildableItem] {
     let owned = getOwnedBuildingTypes()
-    let faction = session.world?.playerHouse == .goodGuy ? "GDI" : "NOD"
-    let techLevel = session.scenarioBuildLevel
+    let gdi = session.world?.playerHouse != .badGuy
+    let flags = playerStructFlags(owned)
+    let hasBarracks = owned.contains("PYLE") || owned.contains("HAND")
+    let hasVehicleFactory = owned.contains("WEAP") || owned.contains("AFLD")
+    let hasHelipad = owned.contains("HPAD")
     var seen = Set<String>()
     var result: [BuildableItem] = []
-    for item in buildableUnits {
-        if item.buildLevel > techLevel { continue }  // Tech level restriction
-        if let prereq = item.prerequisite, !owned.contains(prereq) { continue }
-        if let f = item.faction, f != faction { continue }
-        if seen.contains(item.name) { continue }
+    for item in buildableUnits where !seen.contains(item.name) {
+        let name = item.name.uppercased()
+        let ok: Bool
+        if let d = infantryTypeDataTable.values.first(where: { $0.iniName.uppercased() == name }) {
+            ok = hasBarracks && playerCanBuild(.infantry(d.type), isBuildable: d.isBuildable, ownable: d.ownable,
+                                               pre: d.prerequisite, scenario: d.scenario, gdi: gdi, flags: flags)
+        } else if let d = unitTypeDataTable.values.first(where: { $0.iniName.uppercased() == name }) {
+            ok = hasVehicleFactory && playerCanBuild(.unit(d.type), isBuildable: d.isBuildable, ownable: d.ownable,
+                                                     pre: d.prerequisite, scenario: d.scenario, gdi: gdi, flags: flags)
+        } else if let d = aircraftTypeDataTable.values.first(where: { $0.iniName.uppercased() == name }) {
+            ok = hasHelipad && playerCanBuild(.aircraft(d.type), isBuildable: d.isBuildable, ownable: d.ownable,
+                                              pre: d.prerequisite, scenario: d.scenario, gdi: gdi, flags: flags)
+        } else {
+            ok = false
+        }
+        guard ok else { continue }
         seen.insert(item.name)
         result.append(item)
     }
@@ -181,17 +249,16 @@ package func getAvailableUnits() -> [BuildableItem] {
 /// Get available structures the player can build
 package func getAvailableStructures() -> [BuildableStructure] {
     let owned = getOwnedBuildingTypes()
-    let faction = session.world?.playerHouse == .goodGuy ? "GDI" : "NOD"
-    let techLevel = session.scenarioBuildLevel
-    // Need a construction yard to build structures
-    if !owned.contains("FACT") { return [] }
-    var result: [BuildableStructure] = []
-    for item in buildableStructures {
-        if item.buildLevel > techLevel { continue }  // Tech level restriction
-        if let f = item.faction, f != faction { continue }
-        result.append(item)
+    guard owned.contains("FACT") else { return [] }  // only a construction yard builds structures
+    let gdi = session.world?.playerHouse != .badGuy
+    let flags = playerStructFlags(owned)
+    return buildableStructures.filter { item in
+        let name = item.name.uppercased()
+        guard let d = buildingTypeDataTable.values.first(where: { $0.iniName.uppercased() == name }),
+              let st = StructType.from(iniName: name) else { return false }
+        return playerCanBuild(.structure(st), isBuildable: d.isBuildable, ownable: d.ownable,
+                              pre: d.prerequisite, scenario: d.scenario, gdi: gdi, flags: flags)
     }
-    return result
 }
 
 // MARK: - Production Tick
