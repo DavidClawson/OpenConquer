@@ -46,7 +46,11 @@ REQUIRED_MEGS=(
 #   CD1 = GDI disc (shared data + GDI briefings/scores)
 #   CD2 = Nod disc (Nod briefings/scores)
 # (md5 confirms CD1==CD3 GDI-side, CD2 is the Nod side.)
-CLASSIC_BASE_MIX=(CONQUER.MIX DESERT.MIX TEMPERAT.MIX WINTER.MIX LOCAL.MIX SOUNDS.MIX SPEECH.MIX)
+# UPDATEC.MIX holds the hi-res (640x400) UI art — the classic sidebar, radar
+# frame, buttons and build clock — and TEMPICNH/DESEICNH/WINTICNH.MIX the
+# per-theater hi-res build cameos (<NAME>ICNH.TEM etc.).
+CLASSIC_BASE_MIX=(CONQUER.MIX DESERT.MIX TEMPERAT.MIX WINTER.MIX LOCAL.MIX SOUNDS.MIX SPEECH.MIX
+                  UPDATEC.MIX TEMPICNH.MIX DESEICNH.MIX WINTICNH.MIX)
 CLASSIC_SIDE_MIX=(GENERAL.MIX SCORES.MIX MOVIES.MIX)
 
 DRY_RUN=false

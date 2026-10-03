@@ -71,7 +71,7 @@ If you prefer to run the steps yourself, there are two asset sources:
 
 1. **Classic game data (MIX archives)** — the original sprites, maps, audio, and scenarios. The engine reads these from
    `~/Library/Application Support/Vanilla-Conquer/vanillatd/`.
-   (The classic `.MIX` files from the Remastered Collection's `CNCDATA/TIBERIAN_DAWN/CD1` (GDI/shared) and `CD2` (Nod) go here — the shared archives in the root, the side-specific `GENERAL.MIX`/`SCORES.MIX`/`MOVIES.MIX` in `gdi/` and `nod/`.)
+   (The classic `.MIX` files from the Remastered Collection's `CNCDATA/TIBERIAN_DAWN/CD1` (GDI/shared) and `CD2` (Nod) go here — the shared archives in the root (including `UPDATEC.MIX` and `TEMPICNH`/`DESEICNH`/`WINTICNH.MIX`, the hi-res UI art and build cameos for the classic sidebar), the side-specific `GENERAL.MIX`/`SCORES.MIX`/`MOVIES.MIX` in `gdi/` and `nod/`.)
 
 2. **Remastered HD art & audio (optional but recommended)** — extracted from the Remastered Collection's `.MEG` archives into `…/vanillatd/extracted/`. With the Remastered install downloaded to `~/CnCRemastered/Data`:
 

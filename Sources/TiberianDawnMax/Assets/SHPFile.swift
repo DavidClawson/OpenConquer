@@ -24,14 +24,15 @@ struct SHPFile {
         let kfFrames = Int(readLE16(data, 0))
         let kfWidth = Int(readLE16(data, 6))
         let kfHeight = Int(readLE16(data, 8))
-        let kfLargest = Int(readLE16(data, 10))
 
         // Heuristic: if width and height are reasonable and the data size
         // is consistent with keyframe format, use it
         let kfExpectedMinSize = 14 + kfFrames * 8  // header + offset table
-        let isKeyFrame = kfWidth > 0 && kfWidth <= 320
-            && kfHeight > 0 && kfHeight <= 200
-            && kfLargest > 0
+        // Bounds cover the hi-res (640x400) UI art in UPDATEC.MIX: HSIDE2 and
+        // HPWRBAR are 492px tall, and a keyframe-only file (no XOR deltas,
+        // e.g. HSIDE1) stores 0 as its largest-delta size.
+        let isKeyFrame = kfWidth > 0 && kfWidth <= 640
+            && kfHeight > 0 && kfHeight <= 512
             && kfFrames > 0 && kfFrames < 1000
             && data.count >= kfExpectedMinSize
 
