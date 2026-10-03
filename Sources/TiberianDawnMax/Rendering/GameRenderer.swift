@@ -926,11 +926,13 @@ func renderGame(_ renderer: OpaquePointer?) {
     // Remove clip rect for minimap and sidebar
     SDL_RenderSetClipRect(renderer, nil)
 
-    // === Minimap === (position adjusted for sidebar)
-    renderGameMinimap(renderer, world: world)
-
-    // === Sidebar ===
-    renderSidebar(renderer)
+    // === Minimap + Sidebar === (the classic sidebar draws the minimap in its radar)
+    if classicSidebarActive {
+        renderClassicSidebar(renderer)
+    } else {
+        renderGameMinimap(renderer, world: world)
+        renderSidebar(renderer)
+    }
 
     // === HUD ===
     let gameViewportCenter = (renderState.windowWidth - sidebarWidth) / 2
@@ -1399,11 +1401,11 @@ func playerRadarOnline(_ world: GameWorld) -> Bool {
 }
 
 func renderGameMinimap(_ renderer: OpaquePointer?, world: GameWorld) {
-    let minimapCellSize: Int32 = 2
-    let minimapSize: Int32 = 64 * minimapCellSize
-    let minimapPad: Int32 = 10
-    let minimapX = renderState.windowWidth - sidebarWidth - minimapSize - minimapPad
-    let minimapY = renderState.windowHeight - minimapSize - minimapPad
+    let layout = minimapLayout()
+    let minimapCellSize = layout.cellSize
+    let minimapSize = layout.size
+    let wellX = layout.x
+    let wellY = layout.y
     let mapSize = 64
     let tileSize = 24
 
@@ -1420,20 +1422,20 @@ func renderGameMinimap(_ renderer: OpaquePointer?, world: GameWorld) {
         // Render disabled minimap: dark background with static noise
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 180)
-        var minimapBg = SDL_Rect(x: minimapX - 2, y: minimapY - 2, w: minimapSize + 4, h: minimapSize + 4)
+        var minimapBg = SDL_Rect(x: wellX - 2, y: wellY - 2, w: minimapSize + 4, h: minimapSize + 4)
         SDL_RenderFillRect(renderer, &minimapBg)
 
         // Static noise dots
         SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255)
-        var fillRect = SDL_Rect(x: minimapX, y: minimapY, w: minimapSize, h: minimapSize)
+        var fillRect = SDL_Rect(x: wellX, y: wellY, w: minimapSize, h: minimapSize)
         SDL_RenderFillRect(renderer, &fillRect)
 
         // Random static dots for visual noise effect (use tick count as seed variation)
         let tick = world.tickCount
         for i in stride(from: 0, to: Int(minimapSize * minimapSize) / 8, by: 1) {
             let hash = (i &* 2654435761 &+ tick &* 31) & 0x7FFFFFFF
-            let px = minimapX + Int32(hash % Int(minimapSize))
-            let py = minimapY + Int32((hash / Int(minimapSize)) % Int(minimapSize))
+            let px = wellX + Int32(hash % Int(minimapSize))
+            let py = wellY + Int32((hash / Int(minimapSize)) % Int(minimapSize))
             let brightness = UInt8(40 + (hash / Int(minimapSize * minimapSize)) % 40)
             SDL_SetRenderDrawColor(renderer, brightness, brightness, brightness, 255)
             var dot = SDL_Rect(x: px, y: py, w: 1, h: 1)
@@ -1441,8 +1443,8 @@ func renderGameMinimap(_ renderer: OpaquePointer?, world: GameWorld) {
         }
 
         drawText(renderer, "LOW POWER",
-                 centerX: minimapX + minimapSize / 2,
-                 centerY: minimapY + minimapSize / 2,
+                 centerX: wellX + minimapSize / 2,
+                 centerY: wellY + minimapSize / 2,
                  color: .red, scale: 1)
         return
     }
@@ -1463,8 +1465,16 @@ func renderGameMinimap(_ renderer: OpaquePointer?, world: GameWorld) {
     // Background
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 180)
-    var minimapBg = SDL_Rect(x: minimapX - 2, y: minimapY - 2, w: minimapSize + 4, h: minimapSize + 4)
+    var minimapBg = SDL_Rect(x: wellX - 2, y: wellY - 2, w: minimapSize + 4, h: minimapSize + 4)
     SDL_RenderFillRect(renderer, &minimapBg)
+
+    // Map cells, units and the camera box are placed from the map origin and
+    // clipped to the well (the classic radar centers a fitted map in it).
+    let minimapX = layout.originX
+    let minimapY = layout.originY
+    var well = SDL_Rect(x: wellX, y: wellY, w: minimapSize, h: minimapSize)
+    SDL_RenderSetClipRect(renderer, &well)
+    defer { SDL_RenderSetClipRect(renderer, nil) }
 
     // Draw terrain cells
     for cellY in 0..<mapSize {
@@ -1547,7 +1557,7 @@ func renderGameMinimap(_ renderer: OpaquePointer?, world: GameWorld) {
     }
 
     // Darken outside map bounds
-    if let bounds = world.mapBounds {
+    if !classicSidebarActive, let bounds = world.mapBounds {
         let mbx = minimapX + Int32(bounds.x) * minimapCellSize
         let mby = minimapY + Int32(bounds.y) * minimapCellSize
         let mbw = Int32(bounds.width) * minimapCellSize

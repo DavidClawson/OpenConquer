@@ -111,6 +111,40 @@ func makeControlSchemeButtons() -> [Button] {
     }
 }
 
+/// Side-by-side Classic / Modern sidebar toggle, below the controls row.
+func makeSidebarStyleButtons() -> [Button] {
+    let bw: Int32 = 200
+    let bh: Int32 = 44
+    let gap: Int32 = 20
+    let styles = SidebarStyle.allCases
+    let totalW = bw * Int32(styles.count) + gap * Int32(styles.count - 1)
+    let startX = renderState.windowWidth / 2 - totalW / 2
+    let y = rulesetDescriptionY() + 240
+
+    return styles.enumerated().map { i, style in
+        Button(label: style.rawValue, x: startX + Int32(i) * (bw + gap), y: y, w: bw, h: bh) {
+            UserSettings.sidebarStyle = style
+        }
+    }
+}
+
+/// 2x / 3x classic sidebar width, below the sidebar style row.
+func makeSidebarSizeButtons() -> [Button] {
+    let bw: Int32 = 90
+    let bh: Int32 = 36
+    let gap: Int32 = 20
+    let sizes = SidebarSize.allCases
+    let totalW = bw * Int32(sizes.count) + gap * Int32(sizes.count - 1)
+    let startX = renderState.windowWidth / 2 - totalW / 2
+    let y = rulesetDescriptionY() + 340
+
+    return sizes.enumerated().map { i, size in
+        Button(label: size.rawValue, x: startX + Int32(i) * (bw + gap), y: y, w: bw, h: bh) {
+            UserSettings.sidebarSize = size
+        }
+    }
+}
+
 func makeDifficultyButtons() -> [Button] {
     let bw: Int32 = 200
     let bh: Int32 = 44

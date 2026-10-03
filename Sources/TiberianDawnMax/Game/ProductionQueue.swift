@@ -10,7 +10,7 @@ class ProductionQueue {
 
     /// Advance production by one tick. Returns true when the item completes.
     func tick(hasPower: Bool, worldTickCount: Int) -> Bool {
-        guard var current = item else { return false }
+        guard var current = item, !isOnHold else { return false }
         if current.progress >= current.totalTicks { return false }
 
         // Low power slows production: skip every other tick (doubles build time)

@@ -128,6 +128,23 @@ class OptionsScreen: MenuScreen {
         }
         drawText(renderer, scheme.summary, centerX: renderState.windowWidth / 2, centerY: descY + 160, color: .gray, scale: 1)
 
+        drawText(renderer, "Sidebar", centerX: renderState.windowWidth / 2, centerY: descY + 210, color: .green, scale: 2)
+        let style = UserSettings.sidebarStyle
+        for btn in makeSidebarStyleButtons() {
+            let selected = btn.label == style.rawValue
+            btn.draw(renderer, highlighted: selected || btn.contains(input.mouseX, input.mouseY))
+        }
+        let styleNote = style == .classic && !ClassicSidebarArt.shared.isAvailable
+            ? "Classic needs UPDATEC.MIX (run install-assets.sh) - using Modern."
+            : style.summary
+        drawText(renderer, styleNote, centerX: renderState.windowWidth / 2, centerY: descY + 310, color: .gray, scale: 1)
+        if style == .classic {
+            for btn in makeSidebarSizeButtons() {
+                let selected = btn.label == UserSettings.sidebarSize.rawValue
+                btn.draw(renderer, highlighted: selected || btn.contains(input.mouseX, input.mouseY))
+            }
+        }
+
         drawText(renderer, "Esc: Back", centerX: renderState.windowWidth / 2, centerY: renderState.windowHeight - 40, color: .gray, scale: 1)
     }
 
@@ -139,7 +156,8 @@ class OptionsScreen: MenuScreen {
 
     func handleMouseDown(_ x: Int32, _ y: Int32, button: UInt8) {
         guard button == UInt8(SDL_BUTTON_LEFT) else { return }
-        for btn in makeRulesetButtons() + makeControlSchemeButtons() {
+        let sizeButtons = UserSettings.sidebarStyle == .classic ? makeSidebarSizeButtons() : []
+        for btn in makeRulesetButtons() + makeControlSchemeButtons() + makeSidebarStyleButtons() + sizeButtons {
             if btn.contains(input.mouseX, input.mouseY) {
                 btn.action()
                 break
@@ -1031,6 +1049,18 @@ class PlayingScreen: MenuScreen {
             return
         }
 
+        // Classic sidebar: the radar (minimap) sits inside it; everything else
+        // in the column is its buttons and build strips, for either button.
+        if classicSidebarActive && x >= renderState.windowWidth - sidebarWidth {
+            if button == UInt8(SDL_BUTTON_LEFT) && isInMinimap(x, y) {
+                input.isDraggingMinimap = true
+                handleMinimapClick(x, y)
+            } else {
+                handleClassicSidebarMouseDown(x, y, button: button)
+            }
+            return
+        }
+
         if button == UInt8(SDL_BUTTON_LEFT) {
             if x >= renderState.windowWidth - sidebarWidth {
                 if handleSuperWeaponClick(x, y) {
@@ -1384,13 +1414,8 @@ func clampGameCamera() {
 }
 
 /// Minimap layout constants (must match renderGameMinimap in GameRenderer.swift)
-private func minimapRect() -> (x: Int32, y: Int32, size: Int32, cellSize: Int32) {
-    let cellSize: Int32 = 2
-    let size: Int32 = 64 * cellSize
-    let pad: Int32 = 10
-    let x = renderState.windowWidth - sidebarWidth - size - pad
-    let y = renderState.windowHeight - size - pad
-    return (x, y, size, cellSize)
+private func minimapRect() -> (x: Int32, y: Int32, size: Int32, cellSize: Int32, originX: Int32, originY: Int32) {
+    minimapLayout()
 }
 
 /// Convert a screen-space click on the minimap to world coordinates and center camera there
@@ -1398,8 +1423,8 @@ private func handleMinimapClick(_ screenX: Int32, _ screenY: Int32) {
     let mm = minimapRect()
     let tileSize = 24.0
     // Convert minimap pixel to cell coordinate
-    let cellX = Double(screenX - mm.x) / Double(mm.cellSize)
-    let cellY = Double(screenY - mm.y) / Double(mm.cellSize)
+    let cellX = Double(screenX - mm.originX) / Double(mm.cellSize)
+    let cellY = Double(screenY - mm.originY) / Double(mm.cellSize)
     // Convert cell to world pixel
     let worldX = cellX * tileSize
     let worldY = cellY * tileSize

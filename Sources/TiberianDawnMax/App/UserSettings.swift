@@ -22,8 +22,46 @@ enum ControlScheme: String, CaseIterable {
     }
 }
 
+/// Which sidebar to draw.
+enum SidebarStyle: String, CaseIterable {
+    /// The original hi-res sidebar from UPDATEC.MIX (falls back to Modern if
+    /// that art isn't installed).
+    case classic = "Classic"
+    /// The procedural tabbed list.
+    case modern = "Modern"
+
+    var summary: String {
+        switch self {
+        case .classic: return "The 1995 sidebar: radar, two build strips, power bar."
+        case .modern:  return "A single tabbed build list with unit details."
+        }
+    }
+}
+
+/// Width of the classic sidebar column: its 160 hi-res columns at 2x or 3x.
+enum SidebarSize: String, CaseIterable {
+    case standard = "2x"
+    case large = "3x"
+
+    var scale: Int32 { self == .standard ? 2 : 3 }
+}
+
 enum UserSettings {
     private static let controlSchemeKey = "TDMax.controlScheme"
+    private static let sidebarStyleKey = "TDMax.sidebarStyle"
+    private static let sidebarSizeKey = "TDMax.sidebarSize"
+
+    /// Defaults to 2x (320px wide). Cached like `sidebarStyle`.
+    static var sidebarSize: SidebarSize = UserDefaults.standard.string(forKey: sidebarSizeKey)
+        .flatMap(SidebarSize.init(rawValue:)) ?? .standard {
+        didSet { UserDefaults.standard.set(sidebarSize.rawValue, forKey: sidebarSizeKey) }
+    }
+
+    /// Defaults to `.classic`. Cached: the sidebar width reads it many times a frame.
+    static var sidebarStyle: SidebarStyle = UserDefaults.standard.string(forKey: sidebarStyleKey)
+        .flatMap(SidebarStyle.init(rawValue:)) ?? .classic {
+        didSet { UserDefaults.standard.set(sidebarStyle.rawValue, forKey: sidebarStyleKey) }
+    }
 
     /// Defaults to `.classic` on first launch.
     static var controlScheme: ControlScheme {

@@ -3,7 +3,11 @@ import Foundation
 
 // MARK: - Sidebar Constants
 
-let sidebarWidth: Int32 = 160
+/// Width of the sidebar column in window pixels: the classic sidebar's 160
+/// hi-res columns at its scale, or the modern sidebar's fixed 160.
+var sidebarWidth: Int32 {
+    classicSidebarActive ? classicSidebarLogicalWidth * classicSidebarScale : 160
+}
 let unitInfoPanelHeight: Int32 = 110
 
 // MARK: - Sidebar Rendering

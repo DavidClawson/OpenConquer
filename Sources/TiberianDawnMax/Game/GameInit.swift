@@ -76,6 +76,7 @@ func resolveStrength(typeName: String, kind: ObjectKind, scenarioStrength: Int) 
 // MARK: - Game World Initialization
 
 func initGameWorld(scenario: ScenarioData, scenarioName: String) {
+    resetClassicSidebarState()
     let world = GameWorld()
     world.theater = scenario.theater
     world.mapBounds = scenario.mapBounds
