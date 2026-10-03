@@ -36,35 +36,20 @@ jobs:
       - name: Build (release)
         run: swift build -c release
 
-      # Asset-free logic tests. These self-tests build a GameWorld() in code and
-      # never call loadScenario, so they run with ZERO committed assets: on a
-      # fresh runner the data dir simply doesn't exist, AssetManager.initialize()
-      # catches the missing-dir error and continues with 0 MIX files, and each
-      # test drives the real sim and exits non-zero on failure. They print MIX
-      # "NOT FOUND" / "Error loading MIX files" noise — that's expected here; CI
-      # keys on the exit code, not stderr.
+      # Asset-free logic tests. The self-tests in Sources/OpenConquerCore/SelfTests
+      # build their GameWorld in code and never call loadScenario, so they run with
+      # ZERO committed assets. `swift test` runs each one as an XCTest case
+      # (Tests/OpenConquerCoreTests), including the --test-synthetic determinism
+      # net on a scenario fabricated in code.
       - name: Logic tests (asset-free)
-        run: |
-          ./.build/debug/TiberianDawnMax --test-harvester-economy
-          ./.build/debug/TiberianDawnMax --test-triggers-ex
-          ./.build/debug/TiberianDawnMax --test-two-event
-          ./.build/debug/TiberianDawnMax --test-regions
-          ./.build/debug/TiberianDawnMax --test-wingate
-          ./.build/debug/TiberianDawnMax --test-winlose
-          ./.build/debug/TiberianDawnMax --test-initteams
-          ./.build/debug/TiberianDawnMax --test-enemy-superweapon
-          ./.build/debug/TiberianDawnMax --test-eventparity
-          ./.build/debug/TiberianDawnMax --test-team-former
-          ./.build/debug/TiberianDawnMax --test-prebuilt
-          ./.build/debug/TiberianDawnMax --test-campaign-graph
-          ./.build/debug/TiberianDawnMax --test-reinforcements
-          ./.build/debug/TiberianDawnMax --test-civ-evac
-          ./.build/debug/TiberianDawnMax --test-heli-transport
-          ./.build/debug/TiberianDawnMax --test-ai-gating
-          ./.build/debug/TiberianDawnMax --test-original-targeting
-          ./.build/debug/TiberianDawnMax --test-command-replay
-          # Full-tick determinism net on a scenario fabricated in code (no MIX):
-          ./.build/debug/TiberianDawnMax --test-synthetic 500
+        run: swift test
+
+      # Smoke-test the app binary's self-test dispatch. On a fresh runner the data
+      # dir doesn't exist, so AssetManager.initialize() prints MIX "NOT FOUND" /
+      # "Error loading MIX files" noise and continues with 0 MIX files; that's
+      # expected. CI keys on the exit code, not stderr.
+      - name: App self-test smoke (asset-free)
+        run: ./.build/debug/TiberianDawnMax --test-synthetic 500
 
       # NOTE: the --determinism and the remaining --test-* suites load scenarios
       # from MIX, which require assets extracted from a user's own Remastered

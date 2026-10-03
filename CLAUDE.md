@@ -68,10 +68,11 @@ watching the game. Run the built binary directly:
 ./.build/debug/TiberianDawnMax --test-ai-gating                  # ASSET-FREE: enhanced enemy-AI layer OFF under classic1995 — runs in CI
 ./.build/debug/TiberianDawnMax --test-original-targeting         # ASSET-FREE: classic target acquisition, retaliation, base-attack rescue — runs in CI
 ./.build/debug/TiberianDawnMax --test-command-replay             # ASSET-FREE: orders queue, log, and replay exactly — runs in CI
+./.build/debug/TiberianDawnMax --test-harvester-economy          # ASSET-FREE: silo capacity frees up as credits are spent — runs in CI
+./.build/debug/TiberianDawnMax --test-triggers-ex                # ASSET-FREE: multiple actions per trigger ([TriggersEx]) — runs in CI
 ./.build/debug/TiberianDawnMax --ai-parity    <SCEN> <ticks>      # B3: assert the AI decide() phase is pure (no RNG/world mutation)
 ./.build/debug/TiberianDawnMax --ai-trace     <SCEN> <ticks>      # B3: print the per-house goal/decision stream each decide tick
 ./.build/debug/TiberianDawnMax --test-flags   <SCEN>             # Tier-1: per-instance invulnerable / must-survive flags
-./.build/debug/TiberianDawnMax --test-harvester-economy         # silo capacity frees up as credits are spent
 ./.build/debug/TiberianDawnMax --test-repair  <SCEN>            # a player vehicle drives to a FIX and heals
 ./.build/debug/TiberianDawnMax --test-crush   <SCEN>            # a tank squishes enemy infantry at a chokepoint
 ./.build/debug/TiberianDawnMax --test-fogpath <SCEN>           # player plans through unexplored, reroutes on discovery
@@ -82,7 +83,16 @@ watching the game. Run the built binary directly:
 e.g. `--headless SCG01EA 600` or `--determinism SCG01EA 2500`. The determinism
 check is the regression net for AI/pathfinding work: a change that perturbs the
 simulation shows up as a changed digest. (Other diagnostic flags: `--test-mix`,
-`--dump-scenario <NAME>`.) Implementation: `TiberianDawnMax/Headless/GameHeadless.swift`.
+`--dump-scenario <NAME>`.) Implementation: `TiberianDawnMax/Headless/GameHeadless.swift`
+(scenario-backed tools) and `OpenConquerCore/SelfTests/` (the ASSET-FREE self-tests).
+
+**`swift test`** runs every ASSET-FREE self-test above (incl. `--test-synthetic 500`,
+plus `--test-two-event` / `--test-regions`) as an XCTest case in
+`Tests/OpenConquerCoreTests`; this is what CI runs. The `--test-*` flags call the same
+Core functions. The tests share the `session` / `forcedGameSeed` / `gameRng` globals, so
+don't run them with `--parallel`. A new asset-free self-test goes in
+`OpenConquerCore/SelfTests/` as a `package func ... -> Int32` plus a test case; one that
+loads a scenario from MIX stays in `GameHeadless.swift` behind a CLI flag.
 
 - Note: the simulation is deterministic given a seed, both across separate
   processes and across two `initGameWorld` calls in one process (`initGameWorld`
@@ -236,7 +246,8 @@ When reimplementing a behavior, grep the C++ for the relevant `Mission_*`,
 | `TiberianDawnMax/Rendering/` | `GameRenderer` (in-game), `MapRenderer` (scenario/map view), effects, cursor, text, remastered sprites |
 | `TiberianDawnMax/UI/` | menus, sidebars (classic + modern), in-game input |
 | `TiberianDawnMax/Audio/` | audio engine, sound library, unit voices |
-| `TiberianDawnMax/Headless/` | headless harness and self-tests |
+| `OpenConquerCore/SelfTests/` | asset-free self-tests (run by `swift test` and the `--test-*` flags) |
+| `TiberianDawnMax/Headless/` | headless harness and scenario-backed self-tests |
 
 Key files to know: `Game/GameState.swift` (object model + Mission enum),
 `Game/GameLoop.swift` (tick + `moveOneStep`), `Game/GameMap.swift` (pathfinding +

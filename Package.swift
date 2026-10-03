@@ -23,5 +23,10 @@ let package = Package(
             name: "TiberianDawnMax",
             dependencies: ["CSDL2", "OpenConquerCore", "OpenConquerAssets"]
         ),
+        // Asset-free Core self-tests (`swift test`); no SDL needed.
+        .testTarget(
+            name: "OpenConquerCoreTests",
+            dependencies: ["OpenConquerCore"]
+        ),
     ]
 )
