@@ -650,6 +650,18 @@ while app.running {
     perf.endFrame()
 
     SDL_RenderPresent(renderer)
+    // The system pointer: the mission screen hides it and draws its own
+    // (GameCursor). Everywhere else it is shown, except over movies (the
+    // original hid the mouse during VQA playback) — otherwise leaving a
+    // mission for the score or map-selection screens left it hidden.
+    if !app.isPlaying {
+        let hide = app.currentScreen is MoviePlayerScreen
+        if hide != renderState.systemCursorHidden {
+            SDL_ShowCursor(hide ? SDL_DISABLE : SDL_ENABLE)
+            renderState.systemCursorHidden = hide
+        }
+    }
+
     if app.isPlaying {
         // In a mission: the original pacing. Edge-scroll speed and other
         // per-frame input steps are tuned to it.
