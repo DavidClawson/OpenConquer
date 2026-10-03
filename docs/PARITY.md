@@ -167,7 +167,7 @@ against the C++ was completed in July 2026 (see [`ROADMAP.md`](ROADMAP.md) Phase
 |---|---|---|---|
 | Full world serialization round-trip | 🟢 | — | `GameSaveLoad.swift`; objects, houses, triggers, teams, production. |
 | Campaign progression, variants, sabotage record | ✅ | `MAPSEL.CPP` | `--test-campaign-graph`. |
-| **Mission score screen formula** | 🟡 | `SCORE.CPP` | Ours approximates VC: `kills + buildings*2 + credits/100 - time penalty`. Not the original's leadership/economy/tech breakdown. |
+| **Mission score screen formula** | ✅ | `SCORE.CPP` | `ScoreResult` (Core/Game/GameScore.swift) ports leadership, efficiency and total with the original's fixed-point helpers, including its use of GDI's losses for both sides. The in-game end overlay still shows the older approximation (`MissionScore.totalScore`). |
 | Original `.SAV` file compatibility | ➖ | — | Never a goal; our format is our own. |
 
 ## Presentation

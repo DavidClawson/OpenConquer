@@ -94,6 +94,9 @@ movie player, then the menu; `--test-map-select GDI|NOD ROW [E|W] OUTDIR` drives
 animated map selection headlessly (snapshots + a scripted pick, `Headless/MapSelectionDiagnostics.swift`)
 and `--map-select GDI|NOD ROW [E|W]` opens the window on it; `--test-title OUTDIR`
 snapshots the title menus and drives the choose-your-side screen, `Headless/TitleDiagnostics.swift`;
+`--test-score GDI|NOD OUTDIR` runs the end-of-mission score screen on made-up stats (snapshots +
+contact sheet, types a hall-of-fame name into a scratch table, `Headless/ScoreDiagnostics.swift`) and
+`--score-screen GDI|NOD` opens the window on it;
 `--find-asset NAME...` prints which MIX archive holds each file.) Implementation: `TiberianDawnMax/Headless/GameHeadless.swift`
 (scenario-backed tools) and `OpenConquerCore/SelfTests/` (the ASSET-FREE self-tests).
 

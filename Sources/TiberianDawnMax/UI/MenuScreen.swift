@@ -835,15 +835,7 @@ class PlayingScreen: MenuScreen {
             if x >= btn.x && x < btn.x + btn.w && y >= btn.y && y < btn.y + btn.h {
                 switch btn.action {
                 case "continue":
-                    session.missionScore.elapsedTicks = session.world?.tickCount ?? 0
-                    session.campaign.handleWin()
-                    if session.campaignState.isComplete {
-                        app.currentScreen = makeMainMenu()
-                    } else {
-                        // Map selection between win and briefing — shown even
-                        // for a single choice, like the original (MAPSEL.CPP:268).
-                        app.currentScreen = MapSelectionScreen.make(choices: session.campaign.pendingChoices)
-                    }
+                    continueAfterWin()
                 case "replay", "retry":
                     // A restart replays the intro and action movies but not
                     // the briefing (Start_Scenario(name, false), SCENARIO.CPP:617).
@@ -917,12 +909,14 @@ class PlayingScreen: MenuScreen {
                 print("Quick loaded!")
             }
         } else if key == Int32(SDLK_RETURN.rawValue) || key == Int32(SDLK_SPACE.rawValue) {
+            // A loss has no score screen (Do_Lose, SCENARIO.CPP:544-620).
             if session.triggerWinState == .won {
-                session.missionScore.elapsedTicks = session.world?.tickCount ?? 0
-                app.currentScreen = ScoreScreen(won: true)
-            } else if session.triggerWinState == .lost {
-                session.missionScore.elapsedTicks = session.world?.tickCount ?? 0
-                app.currentScreen = ScoreScreen(won: false)
+                if session.campaignState.isActive {
+                    continueAfterWin()
+                } else {
+                    session.missionScore.elapsedTicks = session.world?.tickCount ?? 0
+                    app.currentScreen = ScoreScreen(won: true)
+                }
             }
         } else if key == Int32(SDLK_s.rawValue) {
             // Stop/halt selected units
@@ -1423,6 +1417,32 @@ private func isInMinimap(_ x: Int32, _ y: Int32) -> Bool {
 }
 
 // MARK: - Score Screen
+
+/// Do_Win after the win movie (SCENARIO.CPP:439-478): the score screen, then
+/// map selection. Each side's last mission goes to its ending with neither.
+func continueAfterWin() {
+    session.missionScore.elapsedTicks = session.world?.tickCount ?? 0
+    let state = session.campaignState
+    func next() {
+        session.campaign.handleWin()
+        if session.campaignState.isComplete {
+            app.currentScreen = makeMainMenu()
+        } else {
+            // Map selection between win and briefing — shown even for a
+            // single choice, like the original (MAPSEL.CPP:268).
+            app.currentScreen = MapSelectionScreen.make(choices: session.campaign.pendingChoices)
+        }
+    }
+    // Read the stats before handleWin() moves the campaign on.
+    if state.currentMission < state.maxMission,
+       let score = ScorePresentationScreen.make(inputs: ScorePresentationScreen.inputsFromSession(), then: next) {
+        app.currentScreen = score
+    } else {
+        next()
+    }
+}
+
+/// The plain stats screen, for wins outside the campaign.
 
 class ScoreScreen: MenuScreen {
     let won: Bool

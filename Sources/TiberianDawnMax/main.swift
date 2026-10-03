@@ -93,6 +93,9 @@ if let code = runTitleDiagnosticsIfRequested() { exit(code) }
 // --test-map-select GDI|NOD ROW [E|W] OUTDIR (Headless/MapSelectionDiagnostics.swift)
 if let code = runMapSelectionDiagnosticsIfRequested() { exit(code) }
 
+// --test-score GDI|NOD OUTDIR (Headless/ScoreDiagnostics.swift)
+if let code = runScoreDiagnosticsIfRequested() { exit(code) }
+
 // Diagnostic: --dump-scenario <NAME>  prints map bounds, waypoints, etc.
 if let dumpIdx = CommandLine.arguments.firstIndex(of: "--dump-scenario"),
    dumpIdx + 1 < CommandLine.arguments.count {
@@ -524,6 +527,13 @@ var event = SDL_Event()
 // font, so it works with zero assets present.
 if assetManager.mixManager.totalEntries == 0 {
     app.currentScreen = SetupScreen()
+}
+else if let i = CommandLine.arguments.firstIndex(of: "--score-screen") {
+    // Debug: --score-screen GDI|NOD opens the score screen on made-up stats.
+    let gdi = i + 1 >= CommandLine.arguments.count || CommandLine.arguments[i + 1].uppercased() != "NOD"
+    app.currentScreen = ScorePresentationScreen.make(inputs: sampleScoreInputs(gdi: gdi)) {
+        app.currentScreen = makeMainMenu()
+    } ?? makeMainMenu()
 }
 else if let i = CommandLine.arguments.firstIndex(of: "--play-movie") {
     // Debug: --play-movie NAME [NAME...] plays those movies, then the menu.
