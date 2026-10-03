@@ -75,7 +75,7 @@ func spawnProjectile(bulletType: BulletType, from attacker: GameObject,
         if died {
             target.spawnDeathEffects()
             if target.kind == .infantry {
-                audioManager.play(audioManager.infantryDeathScream(), worldX: target.worldX, worldY: target.worldY)
+                audioManager.play(audioManager.deathScream(for: target), worldX: target.worldX, worldY: target.worldY)
             } else {
                 audioManager.play(audioManager.explosionSound(warhead), worldX: target.worldX, worldY: target.worldY)
             }
@@ -182,7 +182,7 @@ func tickProjectiles() {
                 if died {
                     target.spawnDeathEffects()
                     if target.kind == .infantry {
-                        audioManager.play(audioManager.infantryDeathScream(), worldX: target.worldX, worldY: target.worldY)
+                        audioManager.play(audioManager.deathScream(for: target), worldX: target.worldX, worldY: target.worldY)
                     } else {
                         audioManager.play(audioManager.explosionSound(proj.warhead), worldX: target.worldX, worldY: target.worldY)
                     }

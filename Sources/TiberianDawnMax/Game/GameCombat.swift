@@ -147,6 +147,9 @@ extension GameObject {
             // Credit kill to attacker for veterancy
             if let aId = attackerId, let attacker = findObjectById(aId) {
                 attacker.killCount += 1
+                if attacker.isCommando, let world = session.world {
+                    noteCommandoKill(attacker, tick: world.tickCount)  // cosmetic quip only
+                }
             }
             // Emit destruction event
             if kind == .structure {
@@ -575,7 +578,7 @@ func applySplashDamage(at worldX: Double, worldY: Double, warhead: WarheadType,
         if died {
             obj.spawnDeathEffects()
             if obj.kind == .infantry {
-                audioManager.play(audioManager.infantryDeathScream(), worldX: obj.worldX, worldY: obj.worldY)
+                audioManager.play(audioManager.deathScream(for: obj), worldX: obj.worldX, worldY: obj.worldY)
             } else {
                 audioManager.play(audioManager.explosionSound(warhead), worldX: obj.worldX, worldY: obj.worldY)
             }

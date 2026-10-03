@@ -205,7 +205,7 @@ func handleGameLeftUp(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
         if let obj = nearest {
             obj.isSelected = !obj.isSelected || !shiftHeld
             if obj.isSelected && obj.house == world.playerHouse {
-                audioManager.play(audioManager.unitReportSound())
+                audioManager.play(audioManager.selectResponse(for: obj))
             }
         }
     }
@@ -349,7 +349,14 @@ func handleGameRightClick(_ x: Int32, _ y: Int32, shiftHeld: Bool = false) {
                 obj.mission = .attack
             }
         }
-        audioManager.play(audioManager.unitAcknowledgeSound())
+        // A commando ordered onto a building plants C4: "I've got a present for ya"
+        // (Vanilla Response_Sabotage). Otherwise the attack reply.
+        let attackers = selected.filter { $0.kind != .structure }
+        if enemy.kind == .structure && attackers.first?.isCommando == true {
+            audioManager.play(.ramboPresent)
+        } else {
+            audioManager.play(audioManager.attackResponse(for: attackers))
+        }
         return
     }
 
@@ -526,5 +533,5 @@ func handleGameRightClick(_ x: Int32, _ y: Int32, shiftHeld: Bool = false) {
             obj.groupMoveSpeed = groupSpeed
         }
     }
-    audioManager.play(audioManager.unitAcknowledgeSound())
+    audioManager.play(audioManager.moveResponse(for: movable))
 }

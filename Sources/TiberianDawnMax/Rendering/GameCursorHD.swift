@@ -89,6 +89,7 @@ private func hdCursorFamilyName(for cursor: CursorDef) -> String? {
     case cursorDeploy.startFrame:     return "ICON_DEPLOY"
     case cursorAttackMove.startFrame: return "ICON_MOVEMENT_FORCE"
     case cursorEnter.startFrame:      return "ICON_MOUNT_UNIT"
+    case cursorDemolitions.startFrame: return "ICON_C4_PLACEMENT"
     case cursorAreaGuard.startFrame:  return "ICON_MOVEMENT_ESCORT"
     case cursorRepair.startFrame:     return "ICON_REPAIR"
     case cursorReturn.startFrame:     return "ICON_MOVEMENT_COMMAND"

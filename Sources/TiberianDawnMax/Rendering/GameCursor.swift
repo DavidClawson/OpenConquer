@@ -19,6 +19,7 @@ let cursorCanAttack = CursorDef(startFrame: 18,  frameCount: 8,  hotX: 15, hotY:
 let cursorDeploy    = CursorDef(startFrame: 53,  frameCount: 9,  hotX: 15, hotY: 12)
 let cursorAttackMove = CursorDef(startFrame: 60,  frameCount: 1,  hotX: 15, hotY: 12)
 let cursorEnter     = CursorDef(startFrame: 119, frameCount: 3,  hotX: 15, hotY: 12)
+let cursorDemolitions = CursorDef(startFrame: 122, frameCount: 3, hotX: 15, hotY: 12)  // commando C4 timer (MOUSE_DEMOLITIONS)
 let cursorAreaGuard = CursorDef(startFrame: 153, frameCount: 1,  hotX: 15, hotY: 12)
 let cursorRepair    = CursorDef(startFrame: 200, frameCount: 12, hotX: 15, hotY: 12)
 let cursorReturn    = CursorDef(startFrame: 250, frameCount: 1,  hotX: 15, hotY: 12)  // harvester → refinery (green marching chevrons)
@@ -151,7 +152,7 @@ func renderGameCursor(_ renderer: OpaquePointer?, world: GameWorld) {
             if isHoveringMCV {
                 cursor = cursorDeploy
             } else if let enemy = findEnemyAtWorldPos(worldX: worldPos.worldX, worldY: worldPos.worldY) {
-                // Check if any selected unit is an engineer targeting an enemy building → capture cursor
+                // Engineer on an enemy building → capture; commando → C4 demolition
                 if enemy.kind == .structure {
                     var hasEngineer = false
                     for obj in selected {
@@ -162,7 +163,8 @@ func renderGameCursor(_ renderer: OpaquePointer?, world: GameWorld) {
                             break
                         }
                     }
-                    cursor = hasEngineer ? cursorEnter : cursorCanAttack
+                    let hasCommando = selected.contains { $0.isCommando && $0.house == world.playerHouse }
+                    cursor = hasEngineer ? cursorEnter : (hasCommando ? cursorDemolitions : cursorCanAttack)
                 } else {
                     cursor = cursorCanAttack
                 }

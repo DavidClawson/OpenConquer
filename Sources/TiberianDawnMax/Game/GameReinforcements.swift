@@ -126,6 +126,9 @@ extension GameObject {
         passenger.prevWorldX = passenger.worldX
         passenger.prevWorldY = passenger.worldY
         passenger.isInLimbo = false
+        if passenger.isCommando && passenger.house == world.playerHouse {
+            audioManager.play(.ramboRock, worldX: passenger.worldX, worldY: passenger.worldY)  // "Time to rock and roll"
+        }
 
         if typeName.uppercased() == "LST" {
             // Hovercraft beach landing: instead of materializing the unit on the

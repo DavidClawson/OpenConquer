@@ -28,6 +28,8 @@ func updateGame() {
         gameTick()
     }
 
+    tickCommandoQuips()
+
     // Compute interpolation factor for smooth rendering between ticks
     session.renderInterpolation = Double(session.tickAccumulator) / Double(tickDurationMs)
 }
@@ -482,7 +484,7 @@ extension GameObject {
                     if isCrusher && occupant.isCrushable && isEnemy(self, occupant) {
                         occupant.applyDamage(amount: occupant.strength + 1, attackerHouse: house)
                         occupant.spawnDeathEffects()
-                        audioManager.play(audioManager.infantryDeathScream(), worldX: occupant.worldX, worldY: occupant.worldY)
+                        audioManager.play(audioManager.deathScream(for: occupant), worldX: occupant.worldX, worldY: occupant.worldY)
                         session.campaign.trackKill(victimHouse: occupant.house, victimKind: occupant.kind)
                         getHouseState(occupant.house).unitsLost += 1
                         getHouseState(house).unitsKilled += 1
