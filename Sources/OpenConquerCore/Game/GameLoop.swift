@@ -21,6 +21,9 @@ package func gameTick() {
 
     world.tickCount += 1
 
+    // Player orders given since the last tick
+    applyPendingCommands(world: world)
+
     // Save previous positions for render interpolation
     for obj in world.objects {
         obj.prevWorldX = obj.worldX

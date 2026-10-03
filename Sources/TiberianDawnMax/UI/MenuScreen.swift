@@ -876,17 +876,7 @@ class PlayingScreen: MenuScreen {
         } else if key == Int32(SDLK_s.rawValue) {
             // Stop/halt selected units
             if let world = session.world {
-                for obj in world.selectedObjects() {
-                    if obj.kind == .structure { continue }
-                    if obj.house != world.playerHouse { continue }
-                    obj.mission = .guard_
-                    obj.moveTargetX = nil
-                    obj.moveTargetY = nil
-                    obj.attackTarget = nil
-                    obj.movePath = []
-                    obj.isAttackMoving = false
-                    obj.moveWaypoints = []
-                }
+                issue(.stop(units: world.selectedObjects().map(\.id)))
             }
         } else if key == Int32(SDLK_a.rawValue) {
             // Attack-move mode: press A, then click destination
@@ -897,50 +887,13 @@ class PlayingScreen: MenuScreen {
         } else if key == Int32(SDLK_x.rawValue) {
             // Scatter: each selected unit moves to a random nearby passable cell
             if let world = session.world {
-                for obj in world.selectedObjects() {
-                    if obj.kind == .structure { continue }
-                    if obj.house != world.playerHouse { continue }
-                    // Pick a random passable cell within 2-3 cells
-                    let scatterDist = 3
-                    var found = false
-                    for _ in 0..<8 {  // Try up to 8 random positions
-                        let nx = obj.cellX + Int.random(in: -scatterDist...scatterDist)
-                        let ny = obj.cellY + Int.random(in: -scatterDist...scatterDist)
-                        let clampedX = max(0, min(63, nx))
-                        let clampedY = max(0, min(63, ny))
-                        if clampedX == obj.cellX && clampedY == obj.cellY { continue }
-                        if isCellPassable(cellX: clampedX, cellY: clampedY, ignoring: obj, speedType: obj.cachedSpeedType) {
-                            obj.moveTargetX = Double(clampedX * 24) + 12.0
-                            obj.moveTargetY = Double(clampedY * 24) + 12.0
-                            obj.mission = .move
-                            obj.movePath = []
-                            obj.attackTarget = nil
-                            obj.isAttackMoving = false
-                            obj.moveWaypoints = []
-                            found = true
-                            break
-                        }
-                    }
-                    if !found {
-                        // Fallback: just stop in place
-                        obj.mission = .guard_
-                    }
-                }
+                issue(.scatter(units: world.selectedObjects().map(\.id)))
                 gameAudio.play(gameAudio.unitAcknowledgeSound())
             }
         } else if key == Int32(SDLK_g.rawValue) {
             // Guard mode: stand ground, attack enemies in range
             if let world = session.world {
-                for obj in world.selectedObjects() {
-                    if obj.kind == .structure { continue }
-                    if obj.house != world.playerHouse { continue }
-                    obj.mission = .guard_
-                    obj.moveTargetX = nil
-                    obj.moveTargetY = nil
-                    obj.movePath = []
-                    obj.isAttackMoving = false
-                    obj.moveWaypoints = []
-                }
+                issue(.guardPosition(units: world.selectedObjects().map(\.id)))
             }
         } else if key == Int32(SDLK_p.rawValue) {
             // Patrol mode: press P, then click to add waypoints, right-click/ESC to finalize
@@ -1097,37 +1050,8 @@ class PlayingScreen: MenuScreen {
                     let movable = world.selectedObjects().filter {
                         $0.kind != .structure && $0.house == world.playerHouse
                     }
-                    let count = movable.count
-
-                    // Squad speed matching for attack-move
-                    let groupSpeed: Double?
-                    if count >= 2 {
-                        let speeds = movable.map { $0.effectiveSpeed }
-                        let minSpd = speeds.min() ?? 0
-                        let maxSpd = speeds.max() ?? 0
-                        groupSpeed = (minSpd < maxSpd) ? minSpd : nil
-                    } else {
-                        groupSpeed = nil
-                    }
-
-                    let cols = max(1, Int(ceil(sqrt(Double(count)))))
-                    let spacing = 36.0
-                    for (i, obj) in movable.enumerated() {
-                        let row = i / cols
-                        let col = i % cols
-                        let offX = (Double(col) - Double(cols - 1) / 2.0) * spacing
-                        let offY = (Double(row) - Double(max(0, (count - 1) / cols)) / 2.0) * spacing
-                        let jX = Double.random(in: -6.0...6.0)
-                        let jY = Double.random(in: -6.0...6.0)
-                        obj.moveTargetX = max(12, min(64*24-12, worldPos.worldX + offX + jX))
-                        obj.moveTargetY = max(12, min(64*24-12, worldPos.worldY + offY + jY))
-                        obj.mission = .move
-                        obj.movePath = []
-                        obj.attackTarget = nil
-                        obj.isAttackMoving = true
-                        obj.moveWaypoints = []
-                        obj.groupMoveSpeed = groupSpeed
-                    }
+                    issue(.move(units: movable.map(\.id), to: MapPoint(x: worldPos.worldX, y: worldPos.worldY),
+                                queued: false, attackMove: true))
                     gameAudio.play(gameAudio.unitAcknowledgeSound())
                 }
             } else {

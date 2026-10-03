@@ -421,6 +421,10 @@ package class GameWorld {
 
     // Control groups (0-9), each can hold multiple object IDs
     package var controlGroups: [[Int]] = Array(repeating: [], count: 10)
+    /// Player orders waiting for the next tick, and every order applied so far
+    /// (Game/PlayerCommands.swift).
+    package var pendingCommands: [PlayerCommand] = []
+    package var commandLog: [LoggedCommand] = []
 
     // O(1) object lookup by ID — maintained by addObject/removeDeadObjects
     private var objectIndex: [Int: GameObject] = [:]

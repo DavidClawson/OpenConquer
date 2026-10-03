@@ -67,6 +67,7 @@ watching the game. Run the built binary directly:
 ./.build/debug/TiberianDawnMax --test-heli-transport             # ASSET-FREE: Chinook takeoff / single-speed flight / LZ slowdown / land / land-before-unload — runs in CI
 ./.build/debug/TiberianDawnMax --test-ai-gating                  # ASSET-FREE: enhanced enemy-AI layer OFF under classic1995 — runs in CI
 ./.build/debug/TiberianDawnMax --test-original-targeting         # ASSET-FREE: classic target acquisition, retaliation, base-attack rescue — runs in CI
+./.build/debug/TiberianDawnMax --test-command-replay             # ASSET-FREE: orders queue, log, and replay exactly — runs in CI
 ./.build/debug/TiberianDawnMax --ai-parity    <SCEN> <ticks>      # B3: assert the AI decide() phase is pure (no RNG/world mutation)
 ./.build/debug/TiberianDawnMax --ai-trace     <SCEN> <ticks>      # B3: print the per-house goal/decision stream each decide tick
 ./.build/debug/TiberianDawnMax --test-flags   <SCEN>             # Tier-1: per-instance invulnerable / must-survive flags
@@ -203,6 +204,12 @@ When reimplementing a behavior, grep the C++ for the relevant `Mission_*`,
   - `session.campaign` → mission progression
   App-only state (current screen, menus, frame clock) is `app: AppState`
   (`TiberianDawnMax/App/AppState.swift`); the sim never refers to it.
+- **Player commands:** input never edits the world. Clicks and keys become a
+  `PlayerCommand` (`OpenConquerCore/Game/PlayerCommands.swift`) passed to
+  `issue(_:)`; `gameTick` applies the queue first thing and appends each to
+  `world.commandLog` with its tick. Seed + log replays a game exactly
+  (`--test-command-replay`). New orders get a case there, not direct mutation
+  from UI code. UI-only state (selection, modes, placement cursor) stays in UI.
 - **Game objects** are a single `GameObject` **class** (reference type) in
   `Game/GameState.swift`. Behavior is attached via `extension GameObject` blocks
   spread across many files (missions, combat, economy, movement, animation).

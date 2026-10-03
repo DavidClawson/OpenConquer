@@ -239,8 +239,7 @@ func handleSidebarClick(_ x: Int32, _ y: Int32) {
         if clickIdx < available.count {
             let item = available[clickIdx]
             if session.unitBuildQueue.item == nil && session.sidebarCredits >= item.cost {
-                session.unitBuildQueue.start(typeName: item.name, cost: item.cost, buildTime: item.buildTicks)
-                session.sidebarCredits -= item.cost
+                issue(.startProduction(structure: false, type: item.name, cost: item.cost, buildTicks: item.buildTicks))
                 gameAudio.speak(.building)
             } else if session.sidebarCredits < item.cost {
                 gameAudio.speak(.noCash)
@@ -261,8 +260,7 @@ func handleSidebarClick(_ x: Int32, _ y: Int32) {
             }
 
             if session.structureBuildQueue.item == nil && session.sidebarCredits >= item.cost {
-                session.structureBuildQueue.start(typeName: item.name, cost: item.cost, buildTime: item.buildTicks)
-                session.sidebarCredits -= item.cost
+                issue(.startProduction(structure: true, type: item.name, cost: item.cost, buildTicks: item.buildTicks))
                 gameAudio.speak(.building)
             } else if session.sidebarCredits < item.cost {
                 gameAudio.speak(.noCash)
@@ -371,20 +369,13 @@ func handleRepairSellGameClick(worldX: Double, worldY: Double) -> Bool {
 
         if isWorldPosOnBuilding(worldX: worldX, worldY: worldY, building: obj) {
             if session.isRepairMode {
-                // Toggle repair on this building
-                if obj.isRepairing {
-                    obj.isRepairing = false
-                    obj.mission = .guard_
-                } else if obj.strength < obj.maxStrength {
-                    obj.isRepairing = true
-                    obj.mission = .repair
-                }
+                issue(.toggleRepair(building: obj.id))
                 // Stays in repair mode (classic: only right-click or the button
                 // ends it — DISPLAY.CPP Mouse_Right_Press / Repair_Mode_Control).
                 return true
             } else if session.isSellMode {
                 // Sell this building; sell mode stays on, same as repair.
-                obj.mission = .selling
+                issue(.sell(building: obj.id))
                 return true
             }
         }
@@ -517,7 +508,8 @@ func handleSuperWeaponClick(_ screenX: Int32, _ screenY: Int32) -> Bool {
 /// Handle game click when in super weapon targeting mode
 func handleSuperWeaponGameClick(worldX: Double, worldY: Double) -> Bool {
     guard let type = session.superWeaponTargeting else { return false }
-    deploySuperWeapon(type, worldX: worldX, worldY: worldY)
+    issue(.fireSuperWeapon(type, at: MapPoint(x: worldX, y: worldY)))
+    session.superWeaponTargeting = nil
     return true
 }
 

@@ -170,7 +170,7 @@ func handleGameLeftUp(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
            clicked.isMCV,
            clicked.house == world.playerHouse,
            clicked.mission != .unload {
-            clicked.mission = .unload
+            issue(.deploy(mcv: clicked.id))
             gameAudio.play(gameAudio.unitAcknowledgeSound())
             // Clear selection state
             input.selectionBoxStartX = nil
@@ -185,10 +185,7 @@ func handleGameLeftUp(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
         // ACTION_SELF). A Chinook lands first — see the .unload aircraft case.
         if let transport = ownTransport(atWorldX: worldPos.worldX, worldY: worldPos.worldY, world: world),
            transport.isSelected, transport.hasCargo, transport.mission != .unload {
-            transport.mission = .unload
-            transport.moveTargetX = nil
-            transport.moveTargetY = nil
-            transport.movePath = []
+            issue(.unload(transport: transport.id))
             gameAudio.play(gameAudio.unitAcknowledgeSound())
             input.selectionBoxStartX = nil
             input.selectionBoxStartY = nil
@@ -286,19 +283,8 @@ func handleGameRightClick(_ x: Int32, _ y: Int32, shiftHeld: Bool = false) {
     if session.isPatrolMode {
         // If we have waypoints, commit them to selected units
         if !session.patrolModeWaypoints.isEmpty {
-            for obj in world.selectedObjects() {
-                if obj.kind == .structure { continue }
-                if obj.house != world.playerHouse { continue }
-                obj.patrolWaypoints = session.patrolModeWaypoints
-                obj.patrolIndex = 0
-                obj.mission = .patrol
-                obj.moveTargetX = nil
-                obj.moveTargetY = nil
-                obj.movePath = []
-                obj.attackTarget = nil
-                obj.isAttackMoving = false
-                obj.moveWaypoints = []
-            }
+            issue(.patrol(units: world.selectedObjects().map(\.id),
+                          waypoints: session.patrolModeWaypoints.map { MapPoint(x: $0.x, y: $0.y) }))
             gameAudio.play(gameAudio.unitAcknowledgeSound())
         }
         session.isPatrolMode = false
@@ -315,40 +301,15 @@ func handleGameRightClick(_ x: Int32, _ y: Int32, shiftHeld: Bool = false) {
         $0.kind == .structure && isProductionStructure($0.typeName)
     }
     if allProductionBuildings {
-        for obj in playerSelected {
-            obj.rallyPointX = worldPos.worldX
-            obj.rallyPointY = worldPos.worldY
-        }
+        issue(.setRallyPoint(buildings: playerSelected.map(\.id),
+                             at: MapPoint(x: worldPos.worldX, y: worldPos.worldY)))
         gameAudio.play(gameAudio.unitAcknowledgeSound())
         return
     }
 
     // Check if right-clicking on an enemy → attack order
     if let enemy = findEnemyAtWorldPos(worldX: worldPos.worldX, worldY: worldPos.worldY) {
-        for obj in selected {
-            if obj.kind == .structure { continue }
-            obj.attackTarget = enemy.id
-            obj.movePath = []
-            obj.isAttackMoving = false
-            obj.moveWaypoints = []
-            obj.groupMoveSpeed = nil
-            // Special missions when targeting a building
-            if enemy.kind == .structure {
-                if obj.isCommando {
-                    // Commando targeting a building → sabotage mission (C4)
-                    obj.mission = .sabotage
-                } else if obj.kind == .infantry,
-                          let data = getInfantryTypeDataByName(obj.typeName.uppercased()),
-                          data.canCapture {
-                    // Engineer targeting an enemy building → capture mission
-                    obj.mission = .capture
-                } else {
-                    obj.mission = .attack
-                }
-            } else {
-                obj.mission = .attack
-            }
-        }
+        issue(.attack(units: selected.map(\.id), target: enemy.id))
         // A commando ordered onto a building plants C4: "I've got a present for ya"
         // (Vanilla Response_Sabotage). Otherwise the attack reply.
         let attackers = selected.filter { $0.kind != .structure }
@@ -365,22 +326,9 @@ func handleGameRightClick(_ x: Int32, _ y: Int32, shiftHeld: Bool = false) {
     // drives the civ-evac missions: a civilian entering a transport aircraft
     // makes it fly off the map (AIRCRAFT.CPP:2530-2542).
     if let transport = ownTransport(atWorldX: worldPos.worldX, worldY: worldPos.worldY, world: world) {
-        var ordered = false
-        var slots = transport.maxPassengers - transport.passengerCount
-        for obj in selected where obj.kind == .infantry && obj.house == world.playerHouse {
-            guard slots > 0 else { break }
-            obj.enterTransportID = transport.id
-            obj.mission = .enter
-            obj.attackTarget = nil
-            obj.isAttackMoving = false
-            obj.moveWaypoints = []
-            obj.movePath = []
-            obj.moveTargetX = nil
-            obj.moveTargetY = nil
-            slots -= 1
-            ordered = true
-        }
-        if ordered {
+        let boarders = selected.filter { $0.kind == .infantry && $0.house == world.playerHouse }
+        if !boarders.isEmpty && transport.passengerCount < transport.maxPassengers {
+            issue(.enter(units: boarders.map(\.id), transport: transport.id))
             gameAudio.play(gameAudio.unitAcknowledgeSound())
             return
         }
@@ -397,142 +345,26 @@ func handleGameRightClick(_ x: Int32, _ y: Int32, shiftHeld: Bool = false) {
     }) {
         let bType = building.typeName.uppercased()
         if bType == "PROC" {
-            var ordered = false
-            for obj in selected where obj.isHarvester && obj.house == world.playerHouse {
-                obj.preferredRefineryID = building.id
-                obj.harvesterForceDock = true
-                obj.mission = .harvest
-                obj.missionStatus = dockApproaching
-                obj.isTethered = false
-                obj.dockTimer = 0
-                obj.attackTarget = nil
-                obj.isAttackMoving = false
-                obj.moveWaypoints = []
-                obj.movePath = []
-                obj.moveTargetX = nil
-                obj.moveTargetY = nil
-                ordered = true
-            }
-            if ordered {
+            let harvesters = selected.filter { $0.isHarvester && $0.house == world.playerHouse }
+            if !harvesters.isEmpty {
+                issue(.dock(harvesters: harvesters.map(\.id), refinery: building.id))
                 gameAudio.play(gameAudio.unitAcknowledgeSound())
                 return
             }
         } else if bType == "FIX" {
-            var ordered = false
-            for obj in selected where obj.kind == .unit && obj.house == world.playerHouse && !obj.isAircraft {
-                obj.repairBuildingID = building.id
-                obj.mission = .enter
-                obj.attackTarget = nil
-                obj.isAttackMoving = false
-                obj.moveWaypoints = []
-                obj.movePath = []
-                obj.moveTargetX = nil
-                obj.moveTargetY = nil
-                ordered = true
-            }
-            if ordered {
+            let vehicles = selected.filter { $0.kind == .unit && $0.house == world.playerHouse && !$0.isAircraft }
+            if !vehicles.isEmpty {
+                issue(.repairAt(units: vehicles.map(\.id), bay: building.id))
                 gameAudio.play(gameAudio.unitAcknowledgeSound())
                 return
             }
         }
     }
 
-    // Formation spread: arrange targets in a grid so units don't pile up
+    // Move in formation (applied next tick; see applyGroupMove)
     let movable = selected.filter { $0.kind != .structure }
-    let count = movable.count
-
-    // Squad speed matching: compute minimum speed for mixed groups
-    let groupSpeed: Double?
-    if count >= 2 {
-        let speeds = movable.map { $0.effectiveSpeed }
-        let minSpeed = speeds.min() ?? 0
-        let maxSpeed = speeds.max() ?? 0
-        groupSpeed = (minSpeed < maxSpeed) ? minSpeed : nil
-    } else {
-        groupSpeed = nil
-    }
-    // Single unit: clear any previous group speed
-    if count == 1 {
-        movable[0].groupMoveSpeed = nil
-    }
-
-    let cols = max(1, Int(ceil(sqrt(Double(count)))))
-    let spacing = 36.0  // 1.5 cells apart to avoid stacking
-
-    for (i, obj) in movable.enumerated() {
-        let row = i / cols
-        let col = i % cols
-        let offsetX = (Double(col) - Double(cols - 1) / 2.0) * spacing
-        let offsetY = (Double(row) - Double(max(0, (count - 1) / cols)) / 2.0) * spacing
-        // Add small random jitter (±6px) so units don't converge to exact grid points
-        let jitterX = rndDouble(-6.0...6.0)
-        let jitterY = rndDouble(-6.0...6.0)
-
-        var tgtX = worldPos.worldX + offsetX + jitterX
-        var tgtY = worldPos.worldY + offsetY + jitterY
-
-        // Clamp targets to world bounds
-        tgtX = max(12, min(64 * 24 - 12, tgtX))
-        tgtY = max(12, min(64 * 24 - 12, tgtY))
-
-        // Validate target cell is passable for this unit's speed type
-        let tgtCellX = Int(tgtX) / 24
-        let tgtCellY = Int(tgtY) / 24
-        if !isCellPassable(cellX: tgtCellX, cellY: tgtCellY, ignoring: obj, speedType: obj.cachedSpeedType) {
-            // Find nearest passable cell
-            var bestX = tgtCellX, bestY = tgtCellY
-            var bestDist = Double.infinity
-            for dy in -3...3 {
-                for dx in -3...3 {
-                    let nx = tgtCellX + dx
-                    let ny = tgtCellY + dy
-                    if nx >= 0 && nx < 64 && ny >= 0 && ny < 64 {
-                        let passMap = passabilityMap(for: obj.cachedSpeedType)
-                        if passMap[ny * 64 + nx] {
-                            let dist = sqrt(Double(dx * dx + dy * dy))
-                            if dist < bestDist {
-                                bestDist = dist
-                                bestX = nx
-                                bestY = ny
-                            }
-                        }
-                    }
-                }
-            }
-            if bestDist == Double.infinity {
-                continue  // No passable cell nearby, skip this unit
-            }
-            tgtX = Double(bestX * 24) + 12.0
-            tgtY = Double(bestY * 24) + 12.0
-        }
-
-        if shiftHeld {
-            // Waypoint queuing: append to waypoint list
-            if obj.mission == .move && obj.moveTargetX != nil {
-                // Already moving — queue this as a waypoint
-                obj.moveWaypoints.append((x: tgtX, y: tgtY))
-            } else {
-                // Not moving yet — start moving to first point
-                obj.moveTargetX = tgtX
-                obj.moveTargetY = tgtY
-                obj.attackTarget = nil
-                obj.isAttackMoving = false
-                obj.mission = .move
-                obj.movePath = []
-            }
-            obj.groupMoveSpeed = groupSpeed
-        } else {
-            // Normal move: clear waypoints and set target directly
-            obj.moveTargetX = tgtX
-            obj.moveTargetY = tgtY
-            obj.attackTarget = nil
-            obj.isAttackMoving = false
-            obj.mission = .move
-            obj.movePath = []
-            obj.moveWaypoints = []
-            obj.groupMoveSpeed = groupSpeed
-        }
-    }
+    issue(.move(units: movable.map(\.id), to: MapPoint(x: worldPos.worldX, y: worldPos.worldY),
+                queued: shiftHeld, attackMove: false))
     gameAudio.play(gameAudio.moveResponse(for: movable))
 }
 
@@ -540,6 +372,7 @@ func handleGameRightClick(_ x: Int32, _ y: Int32, shiftHeld: Bool = false) {
 
 /// A placement click: convert the screen point to the cell under it.
 func handleStructurePlacement(_ x: Int32, _ y: Int32) {
+    guard let type = session.placementType else { return }
     let worldPos = gameScreenToWorld(x, y)
-    placeStructure(cellX: Int(worldPos.worldX) / 24, cellY: Int(worldPos.worldY) / 24)
+    issue(.placeStructure(type: type, cellX: Int(worldPos.worldX) / 24, cellY: Int(worldPos.worldY) / 24))
 }

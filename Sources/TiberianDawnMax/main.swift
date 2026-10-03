@@ -212,6 +212,11 @@ if CommandLine.arguments.contains("--test-heli-transport") {
     exit(headlessTestHeliTransportCommand())
 }
 
+// Command queue + replay self-test: --test-command-replay
+if CommandLine.arguments.contains("--test-command-replay") {
+    exit(headlessTestCommandReplayCommand())
+}
+
 // Classic target acquisition self-test: --test-original-targeting
 if CommandLine.arguments.contains("--test-original-targeting") {
     exit(headlessTestOriginalTargetingCommand())

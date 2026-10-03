@@ -319,10 +319,12 @@ package func spawnProducedUnit(_ typeName: String, world: GameWorld) {
 
 // MARK: - Structure Placement
 
-/// Place the pending structure with its top-left at the given cell, if the
+/// Place the finished structure with its top-left at the given cell, if the
 /// footprint is clear and touches one of the player's buildings.
-package func placeStructure(cellX: Int, cellY: Int) {
-    guard let world = session.world, let pType = session.placementType else { return }
+package func placeStructure(type pType: String, cellX: Int, cellY: Int) {
+    guard let world = session.world,
+          session.structureBuildQueue.item?.typeName == pType,
+          session.structureBuildQueue.isComplete else { return }
     let size = buildingSize(pType)
 
     // Check if area is passable

@@ -612,10 +612,10 @@ private func classicQueueAction(_ queue: ProductionQueue, name: String, cost: In
             session.placementType = nil
         }
         if !queue.isComplete && !queue.isOnHold {
-            queue.isOnHold = true
+            issue(.holdProduction(structure: isStructure))
             gameAudio.speak(.suspended)
         } else {
-            session.sidebarCredits += queue.cancel()  // full cost was paid up front
+            issue(.cancelProduction(structure: isStructure))  // refunds in full
             gameAudio.speak(.canceled)
         }
         return
@@ -626,7 +626,7 @@ private func classicQueueAction(_ queue: ProductionQueue, name: String, cost: In
             session.isPlacingStructure = true
             session.placementType = name
         } else if queue.isOnHold {
-            queue.isOnHold = false
+            issue(.resumeProduction(structure: isStructure))
             gameAudio.speak(.building)
         }
         return
@@ -639,7 +639,6 @@ private func classicQueueAction(_ queue: ProductionQueue, name: String, cost: In
         gameAudio.speak(.noCash)
         return
     }
-    queue.start(typeName: name, cost: cost, buildTime: buildTicks)
-    session.sidebarCredits -= cost
+    issue(.startProduction(structure: isStructure, type: name, cost: cost, buildTicks: buildTicks))
     gameAudio.speak(.building)
 }

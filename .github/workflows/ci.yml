@@ -62,6 +62,7 @@ jobs:
           ./.build/debug/TiberianDawnMax --test-heli-transport
           ./.build/debug/TiberianDawnMax --test-ai-gating
           ./.build/debug/TiberianDawnMax --test-original-targeting
+          ./.build/debug/TiberianDawnMax --test-command-replay
           # Full-tick determinism net on a scenario fabricated in code (no MIX):
           ./.build/debug/TiberianDawnMax --test-synthetic 500
 
