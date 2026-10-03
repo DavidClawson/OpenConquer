@@ -90,6 +90,9 @@ if let code = runFontDiagnosticsIfRequested() { exit(code) }
 // --test-title OUTDIR (Headless/TitleDiagnostics.swift)
 if let code = runTitleDiagnosticsIfRequested() { exit(code) }
 
+// --test-classic-menus OUTDIR (Headless/ClassicMenusDiagnostics.swift)
+if let code = runClassicMenusDiagnosticsIfRequested() { exit(code) }
+
 // --test-map-select GDI|NOD ROW [E|W] OUTDIR (Headless/MapSelectionDiagnostics.swift)
 if let code = runMapSelectionDiagnosticsIfRequested() { exit(code) }
 

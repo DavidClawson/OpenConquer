@@ -238,13 +238,14 @@ enum ClassicFont { case grad6, point6 }
 
 /// Draw_Box styles (BoxStyleEnum, DEFINES.H) with their ButtonColors entries.
 enum ClassicBoxStyle {
-    case greenDown, greenRaised, greenBorder
+    case greenDown, greenRaised, greenBox, greenBorder
 
     /// Filler (nil = BTEXTURE.SHP), shadow, highlight, corner.
     fileprivate var colors: (filler: UInt8?, shadow: UInt8, highlight: UInt8, corner: UInt8) {
         switch self {
         case .greenDown: return (nil, 14, 12, 13)
         case .greenRaised: return (nil, 12, 14, 13)
+        case .greenBox: return (ClassicColor.black, 14, 14, ClassicColor.black)
         case .greenBorder: return (ClassicColor.black, 14, 14, ClassicColor.black)
         }
     }
@@ -265,6 +266,8 @@ extension ClassicPage {
             }
         }
         switch style {
+        case .greenBox:
+            drawRect(x, y, x + w, y + h, c.highlight)
         case .greenBorder:
             drawRect(x + 1, y + 1, x + w - 1, y + h - 1, c.highlight)
         case .greenDown, .greenRaised:

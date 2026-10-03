@@ -380,6 +380,11 @@ class LoadMissionListScreen: MenuScreen {
 
     init(faction: String) {
         self.faction = faction
+        self.missions = Self.missions(faction: faction)
+    }
+
+    /// The installed scenarios for a side, in order ("SCG01EA", "SCG01EB", …).
+    static func missions(faction: String) -> [String] {
         let prefix = faction == "GDI" ? "SCG" : "SCB"
         let maxMission = faction == "GDI" ? 15 : 13
         var found: [String] = []
@@ -392,7 +397,7 @@ class LoadMissionListScreen: MenuScreen {
                 }
             }
         }
-        self.missions = found
+        return found
     }
 
     private let rowHeight: Int32 = 36
@@ -472,13 +477,13 @@ class LoadMissionListScreen: MenuScreen {
             if input.mouseX >= bx && input.mouseX < bx + bw &&
                input.mouseY >= iy && input.mouseY < iy + rowHeight {
                 let idx = scrollOffset + i
-                launchMission(missions[idx])
+                Self.launch(missions[idx])
                 return
             }
         }
     }
 
-    private func launchMission(_ scenName: String) {
+    static func launch(_ scenName: String) {
         // Set up campaign state for this mission
         let isMissionGDI = scenName.uppercased().hasPrefix("SCG")
         session.campaignState.currentFaction = isMissionGDI ? "GDI" : "NOD"

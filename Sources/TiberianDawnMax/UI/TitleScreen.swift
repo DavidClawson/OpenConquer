@@ -92,8 +92,8 @@ final class TitleScreen: MenuScreen {
         case .main:
             buttons = [
                 button(0, art.text(25, "Start New Game")) { [unowned self] in show(.difficulty) },
-                button(1, art.text(53, "Load Mission")) { app.currentScreen = LoadMissionFactionScreen() },
-                button(2, art.text(65, "Options")) { app.currentScreen = OptionsScreen() },
+                button(1, art.text(53, "Load Mission")) { app.currentScreen = ClassicLoadMissionScreen.make() },
+                button(2, art.text(65, "Options")) { app.currentScreen = ClassicOptionsScreen.make() },
                 button(3, art.text(26, "Intro & Sneak Peek")) { [unowned self] in playIntro() },
                 button(4, "Developer Tools") { [unowned self] in show(.tools) },
                 back(5, art.text(64, "Exit Game")) { [unowned self] in exitGame() },

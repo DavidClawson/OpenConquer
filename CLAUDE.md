@@ -97,6 +97,8 @@ snapshots the title menus and drives the choose-your-side screen, `Headless/Titl
 `--test-score GDI|NOD OUTDIR` runs the end-of-mission score screen on made-up stats (snapshots +
 contact sheet, types a hall-of-fame name into a scratch table, `Headless/ScoreDiagnostics.swift`) and
 `--score-screen GDI|NOD` opens the window on it;
+`--test-classic-menus OUTDIR` snapshots the classic Load Mission and Options dialogs,
+`Headless/ClassicMenusDiagnostics.swift`;
 `--find-asset NAME...` prints which MIX archive holds each file. `--ending GDI|NOD` opens the window on
 that side's campaign ending (finale movies, score screen, Nod's target pick; `UI/EndingScreens.swift`).) Implementation: `TiberianDawnMax/Headless/GameHeadless.swift`
 (scenario-backed tools) and `OpenConquerCore/SelfTests/` (the ASSET-FREE self-tests).
@@ -245,7 +247,10 @@ When reimplementing a behavior, grep the C++ for the relevant `Mission_*`,
 - **Classic front end:** `UI/TitleScreen.swift` (Select_Game/Main_Menu over
   HTITLE.PCX) and `UI/ChooseSideScreen.swift` (Choose_Side, CHOOSE.WSA) draw
   on `UI/ClassicPage.swift`, a 640x400 indexed page with ports of Draw_Box,
-  Dialog_Box, TextButtonClass and Simple_Text_Print. `makeMainMenu()` returns
+  Dialog_Box, TextButtonClass and Simple_Text_Print; `UI/ClassicWidgets.swift`
+  adds Draw_Caption, clipped/wrapped text and ListClass with its scroll bar,
+  used by `UI/ClassicLoadMissionScreen.swift` (LOADDLG.CPP) and
+  `UI/ClassicOptionsScreen.swift`. `makeMainMenu()` returns
   the title, or the plain `ModernMainMenuScreen` without the art. The Win95
   archives (CCLOCAL/UPDATE/UPDATA/UPDATEC.MIX) are searched first, in
   Init_Game's order (`MIXFileManager.registerAll`).
