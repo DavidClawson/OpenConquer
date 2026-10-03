@@ -581,7 +581,10 @@ else if let i = CommandLine.arguments.firstIndex(of: "--play-movie") {
 
 // MARK: - Main Loop
 
+let frameFrequency = Double(SDL_GetPerformanceFrequency())
+var frameStart = SDL_GetPerformanceCounter()
 while app.running {
+    frameStart = SDL_GetPerformanceCounter()
     perf.beginFrame()
 
     // Events
@@ -643,7 +646,18 @@ while app.running {
     perf.endFrame()
 
     SDL_RenderPresent(renderer)
-    SDL_Delay(16) // ~60fps
+    if app.isPlaying {
+        // In a mission: the original pacing. Edge-scroll speed and other
+        // per-frame input steps are tuned to it.
+        SDL_Delay(16)
+    } else {
+        // Menus, movies and the classic screens: a steady ~60 fps, sleeping
+        // only for what's left of the frame. The fixed 16 ms on top of the
+        // vsync wait gave uneven 30-40 fps, which showed as judder in their
+        // 20 fps animations.
+        let elapsedMs = Double(SDL_GetPerformanceCounter() - frameStart) * 1000 / frameFrequency
+        if elapsedMs < 15.5 { SDL_Delay(UInt32(15.5 - elapsedMs)) }
+    }
 }
 
 gameAudio.shutdown()

@@ -38,6 +38,9 @@ func runTitleDiagnosticsIfRequested() -> Int32? {
     save(choose.testSnapshot(), "05-choose-typing")
     choose.testAdvance(ticks: 150)
     save(choose.testSnapshot(), "06-choose")
+    let t0 = Date()
+    for _ in 0..<20 { _ = choose.testSnapshot() }
+    print(String(format: "choose compose: %.1f ms/frame", Date().timeIntervalSince(t0) * 1000 / 20))
     choose.testPick(.nod)
     var ticks = 0
     while !choose.testFinished && ticks < 600 {
