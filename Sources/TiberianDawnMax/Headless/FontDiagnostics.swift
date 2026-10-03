@@ -13,7 +13,7 @@ import UniformTypeIdentifiers
 //                                    render TEXT white-on-black, scaled 4x
 //                                    (--colors: false-colour every font colour)
 
-private let fontNames = ["SCOREFNT.FNT", "6POINT.FNT", "8POINT.FNT", "3POINT.FNT", "GRAD6FNT.FNT"]
+private let fontNames = ["SCOREFNT.FNT", "6POINT.FNT", "8POINT.FNT", "3POINT.FNT", "GRAD6FNT.FNT", "12GRNGRD.FNT", "12GREEN.FNT"]
 
 /// Runs the font diagnostic named on the command line, if any; nil otherwise.
 func runFontDiagnosticsIfRequested() -> Int32? {

@@ -9,7 +9,7 @@ import OpenConquerCore
 
 final class AppState {
     // MARK: - Menu / UI State
-    var currentScreen: MenuScreen = MainMenuScreen()
+    var currentScreen: MenuScreen = ModernMainMenuScreen()  // replaced at startup, once data is loaded
     var running: Bool = true
     var isPlaying: Bool { currentScreen is PlayingScreen }
     var selectedDifficulty: Difficulty = .normal

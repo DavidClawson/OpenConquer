@@ -28,12 +28,17 @@ final class MoviePlayerScreen: MenuScreen {
     /// Play `names` (those that exist, if movies are enabled), then call
     /// `completion`. Calls it straight away when there is nothing to play.
     static func play(_ names: [String], then completion: @escaping () -> Void) {
-        let playable = UserSettings.movieMode == .off ? [] : names.filter(movieExists)
+        let playable = names.filter(willPlay)
         if playable.isEmpty {
             completion()
         } else {
             app.currentScreen = MoviePlayerScreen(movies: playable, then: completion)
         }
+    }
+
+    /// Whether `play` would show this movie (Movies setting on, file present).
+    static func willPlay(_ name: String) -> Bool {
+        UserSettings.movieMode != .off && movieExists(name)
     }
 
     static func movieExists(_ name: String) -> Bool {

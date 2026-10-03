@@ -56,9 +56,10 @@ package struct WWFont {
         Int(char) < glyphCount ? Int(bytes[widthBlock + Int(char)]) : 0
     }
 
-    /// Sum of glyph widths (String_Pixel_Width for a single line).
-    package func width(of text: String) -> Int {
-        WWFont.codes(text).reduce(0) { $0 + width(of: $1) }
+    /// String_Pixel_Width for a single line: glyph widths plus FontXSpacing
+    /// after every character.
+    package func width(of text: String, xSpacing: Int = 0) -> Int {
+        WWFont.codes(text).reduce(0) { $0 + width(of: $1) + xSpacing }
     }
 
     /// Glyph placement for one character: blank rows above the bitmap
@@ -98,6 +99,7 @@ package struct WWFont {
     /// Draw `text` into an 8-bit indexed page. Each glyph pixel with font color c != 0 is written as `remap[c]`
     /// (remap has 16 entries, like Set_Font_Palette). Clipped to the page. Returns the x after the last glyph.
     /// If `fixedAdvance` is non-nil every character advances by that many pixels instead of its own width.
+    /// `xSpacing` is FontXSpacing, added to every advance (Simple_Text_Print sets it per font and shadow style).
     ///
     /// Like Buffer_Print, a pixel whose remapped colour is 0 is also left
     /// untouched (the blitter skips `if (color)`), so remap[c] = 0 hides colour c.
@@ -105,7 +107,7 @@ package struct WWFont {
     /// `x`, "\n" at column 0, each `height` rows down.
     @discardableResult
     package func draw(_ text: String, into page: inout [UInt8], pageWidth: Int, pageHeight: Int,
-                      x: Int, y: Int, remap: [UInt8], fixedAdvance: Int? = nil) -> Int {
+                      x: Int, y: Int, remap: [UInt8], fixedAdvance: Int? = nil, xSpacing: Int = 0) -> Int {
         var penX = x, penY = y
         for code in WWFont.codes(text) {
             if code == 0x0D || code == 0x0A {
@@ -114,7 +116,7 @@ package struct WWFont {
                 continue
             }
             guard Int(code) < glyphCount else {
-                if let fixedAdvance { penX += fixedAdvance }
+                if let fixedAdvance { penX += fixedAdvance + xSpacing }
                 continue
             }
             let w = Int(bytes[widthBlock + Int(code)])
@@ -135,7 +137,7 @@ package struct WWFont {
                     if out != 0 { page[py * pageWidth + px] = out }
                 }
             }
-            penX += fixedAdvance ?? w
+            penX += (fixedAdvance ?? w) + xSpacing
         }
         return penX
     }

@@ -172,7 +172,7 @@ func makeDifficultyButtons() -> [Button] {
     return Difficulty.allCases.enumerated().map { i, diff in
         Button(label: diff.rawValue, x: cx, y: startY + Int32(i) * 60, w: bw, h: bh) {
             app.selectedDifficulty = diff
-            app.currentScreen = FactionScreen()
+            ChooseSideScreen.begin(difficulty: diff)
         }
     }
 }
@@ -186,15 +186,20 @@ func makeFactionButtons() -> [Button] {
     let cy: Int32 = 250
 
     return [
-        Button(label: "GDI", x: startX, y: cy, w: bw, h: bh) {
-            app.selectedFaction = .gdi
-            app.currentScreen = LaunchingScreen(faction: .gdi, difficulty: app.selectedDifficulty)
-        },
-        Button(label: "NOD", x: startX + bw + gap, y: cy, w: bw, h: bh) {
-            app.selectedFaction = .nod
-            app.currentScreen = LaunchingScreen(faction: .nod, difficulty: app.selectedDifficulty)
-        },
+        Button(label: "GDI", x: startX, y: cy, w: bw, h: bh) { startCampaign(.gdi) },
+        Button(label: "NOD", x: startX + bw + gap, y: cy, w: bw, h: bh) { startCampaign(.nod) },
     ]
+}
+
+/// The plain picker's equivalent of Choose_Side's ending: the side's first
+/// movie (GDI1 / NOD1PRE), then the campaign.
+private func startCampaign(_ side: Faction) {
+    app.selectedFaction = side
+    let movie = side == .gdi ? "GDI1" : "NOD1PRE"
+    let briefed = MoviePlayerScreen.willPlay(movie)
+    MoviePlayerScreen.play([movie]) {
+        app.currentScreen = LaunchingScreen(faction: side, difficulty: app.selectedDifficulty, briefed: briefed)
+    }
 }
 
 func makeLoadMissionFactionButtons() -> [Button] {

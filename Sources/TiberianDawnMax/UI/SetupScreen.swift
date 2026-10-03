@@ -168,7 +168,7 @@ final class SetupScreen: MenuScreen {
         loadDataOverrides()
         initRemasteredSprites()
         gameAudio.soundLibrary = SoundLibrary(assetManager: assetManager)
-        app.currentScreen = MainMenuScreen()
+        app.currentScreen = makeMainMenu()
     }
 
     /// Break a long path across lines without a word-boundary assumption —

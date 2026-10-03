@@ -201,6 +201,7 @@ class AudioManager: SimAudio {
         var pan: Float  // -1.0 left, 0.0 center, 1.0 right
         var sourceSampleRate: Int
         var offsetFrac: Float = 0  // sub-sample resample phase carried across ticks
+        var handle: Int = 0        // playSample's handle; 0 = none
     }
 
     func initialize() {
@@ -326,13 +327,31 @@ class AudioManager: SimAudio {
     /// Play a non-positional UI sample by file name (e.g. "BEEPY6" for
     /// BEEPY6.AUD). `volume` is the original's 0-255 Play_Sample /
     /// Normalize_Sound level.
-    func playSample(_ name: String, volume: Int = 255) {
+    /// Returns a handle for isSamplePlaying / stopSample (Play_Sample's), or 0
+    /// if the sample isn't available.
+    @discardableResult
+    func playSample(_ name: String, volume: Int = 255) -> Int {
         guard isInitialized, loadSound(name),
-              let samples = soundCache[name], let rate = soundSampleRates[name] else { return }
+              let samples = soundCache[name], let rate = soundSampleRates[name] else { return 0 }
         if activeSounds.count >= maxActiveSounds { activeSounds.removeFirst() }
+        nextSampleHandle += 1
         activeSounds.append(ActiveSound(samples: samples, offset: 0,
                                         volume: sfxVolume * masterVolume * Float(volume) / 255,
-                                        pan: 0, sourceSampleRate: rate))
+                                        pan: 0, sourceSampleRate: rate, handle: nextSampleHandle))
+        return nextSampleHandle
+    }
+
+    private var nextSampleHandle = 0
+
+    /// Is_Sample_Playing for a playSample handle.
+    func isSamplePlaying(_ handle: Int) -> Bool {
+        handle != 0 && activeSounds.contains { $0.handle == handle }
+    }
+
+    /// Stop_Sample for a playSample handle.
+    func stopSample(_ handle: Int) {
+        guard handle != 0 else { return }
+        activeSounds.removeAll { $0.handle == handle }
     }
 
     /// Play EVA speech (queued, one at a time)

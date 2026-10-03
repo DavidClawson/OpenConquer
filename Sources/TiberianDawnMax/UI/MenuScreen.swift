@@ -26,7 +26,7 @@ extension MenuScreen {
 
 // MARK: - Main Menu Screen
 
-class MainMenuScreen: MenuScreen {
+class ModernMainMenuScreen: MenuScreen {
     private var musicStarted = false
 
     func render(_ renderer: OpaquePointer?) {
@@ -88,7 +88,7 @@ class DifficultyScreen: MenuScreen {
 
     func handleKeyDown(_ key: Int32) {
         if key == Int32(SDLK_ESCAPE.rawValue) {
-            app.currentScreen = MainMenuScreen()
+            app.currentScreen = makeMainMenu()
         }
     }
 
@@ -160,7 +160,7 @@ class OptionsScreen: MenuScreen {
 
     func handleKeyDown(_ key: Int32) {
         if key == Int32(SDLK_ESCAPE.rawValue) {
-            app.currentScreen = MainMenuScreen()
+            app.currentScreen = makeMainMenu()
         }
     }
 
@@ -217,10 +217,14 @@ class FactionScreen: MenuScreen {
 class LaunchingScreen: MenuScreen {
     let faction: Faction
     let difficulty: Difficulty
+    /// The side's first movie (GDI1 / NOD1PRE) has played — Choose_Side's
+    /// briefing, so the text briefing is skipped.
+    let briefed: Bool
 
-    init(faction: Faction, difficulty: Difficulty) {
+    init(faction: Faction, difficulty: Difficulty, briefed: Bool = false) {
         self.faction = faction
         self.difficulty = difficulty
+        self.briefed = briefed
     }
 
     func render(_ renderer: OpaquePointer?) {
@@ -236,8 +240,8 @@ class LaunchingScreen: MenuScreen {
         session.campaignState.carryOverCredits = 0
         session.campaignState.completedMissions.removeAll()
 
-        // Intro/briefing/action movies, then the mission briefing
-        showPreMissionMovies()
+        // Intro/briefing/action movies, then the mission
+        showPreMissionMovies(briefed: briefed)
     }
 
     func handleKeyDown(_ key: Int32) {
@@ -250,10 +254,34 @@ class LaunchingScreen: MenuScreen {
 // MARK: - Briefing Screen
 
 /// Start_Scenario's movies for the mission about to load (SCENARIO.CPP:94-104),
-/// then the briefing screen that launches it.
-func showPreMissionMovies() {
-    MoviePlayerScreen.play(session.campaign.preMissionMovies()) {
-        app.currentScreen = BriefingScreen()
+/// then the mission. The original went straight from the movies into the
+/// game; the text briefing screen is shown only when no briefing movie
+/// played (Movies off, the movie missing, or a mission without one).
+/// `briefed`: Choose_Side already played the side's briefing (GDI1 / NOD1PRE).
+func showPreMissionMovies(briefed: Bool = false) {
+    let movies = session.campaign.preMissionMovies()
+    let brief = session.campaign.movies(forScenario: session.campaignState.scenarioName)?.brief
+    let briefingPlays = briefed || brief.map { movies.contains($0) && MoviePlayerScreen.willPlay($0) } == true
+    MoviePlayerScreen.play(movies) {
+        if briefingPlays {
+            launchNextMission()
+        } else {
+            app.currentScreen = BriefingScreen()
+        }
+    }
+}
+
+/// Load the campaign's next mission and start playing it.
+func launchNextMission() {
+    if session.campaign.startNextMission() {
+        applyAutoFitCameraAndZoom()
+        app.lastTickTime = 0
+        app.tickAccumulator = 0
+        session.missionScore.reset()
+        session.triggerWinState = .playing
+        app.currentScreen = PlayingScreen()
+    } else {
+        app.currentScreen = makeMainMenu()
     }
 }
 
@@ -264,21 +292,11 @@ class BriefingScreen: MenuScreen {
 
     func handleKeyDown(_ key: Int32) {
         if key == Int32(SDLK_ESCAPE.rawValue) {
-            app.currentScreen = MainMenuScreen()
+            app.currentScreen = makeMainMenu()
             return
         }
         if key == Int32(SDLK_RETURN.rawValue) || key == Int32(SDLK_SPACE.rawValue) {
-            // Launch the mission
-            if session.campaign.startNextMission() {
-                applyAutoFitCameraAndZoom()
-                app.lastTickTime = 0
-                app.tickAccumulator = 0
-                session.missionScore.reset()
-                session.triggerWinState = .playing
-                app.currentScreen = PlayingScreen()
-            } else {
-                app.currentScreen = MainMenuScreen()
-            }
+            launchNextMission()
         }
     }
 }
@@ -299,7 +317,7 @@ class LoadMissionFactionScreen: MenuScreen {
 
     func handleKeyDown(_ key: Int32) {
         if key == Int32(SDLK_ESCAPE.rawValue) {
-            app.currentScreen = MainMenuScreen()
+            app.currentScreen = makeMainMenu()
         }
     }
 
@@ -486,7 +504,7 @@ class SoundTestScreen: MenuScreen {
 
     func handleKeyDown(_ key: Int32) {
         if key == Int32(SDLK_ESCAPE.rawValue) {
-            app.currentScreen = MainMenuScreen()
+            app.currentScreen = makeMainMenu()
             return
         }
         app.soundTest.handleKey(key)
@@ -516,7 +534,7 @@ class MapViewerScreen: MenuScreen {
 
     func handleKeyDown(_ key: Int32) {
         if key == Int32(SDLK_ESCAPE.rawValue) {
-            app.currentScreen = MainMenuScreen()
+            app.currentScreen = makeMainMenu()
             return
         }
         if key == Int32(SDLK_RIGHTBRACKET.rawValue) {
@@ -820,7 +838,7 @@ class PlayingScreen: MenuScreen {
                     session.missionScore.elapsedTicks = session.world?.tickCount ?? 0
                     session.campaign.handleWin()
                     if session.campaignState.isComplete {
-                        app.currentScreen = MainMenuScreen()
+                        app.currentScreen = makeMainMenu()
                     } else {
                         // Map selection between win and briefing — shown even
                         // for a single choice, like the original (MAPSEL.CPP:268).
@@ -839,7 +857,7 @@ class PlayingScreen: MenuScreen {
                         app.currentScreen = self
                     }
                 case "menu":
-                    app.currentScreen = MainMenuScreen()
+                    app.currentScreen = makeMainMenu()
                 default:
                     break
                 }
@@ -852,7 +870,7 @@ class PlayingScreen: MenuScreen {
         // When end screen is showing, block most input
         if showingEndScreen {
             if key == Int32(SDLK_ESCAPE.rawValue) {
-                app.currentScreen = MainMenuScreen()
+                app.currentScreen = makeMainMenu()
             }
             return
         }
@@ -1419,7 +1437,7 @@ class ScoreScreen: MenuScreen {
 
     func handleKeyDown(_ key: Int32) {
         if key == Int32(SDLK_ESCAPE.rawValue) {
-            app.currentScreen = MainMenuScreen()
+            app.currentScreen = makeMainMenu()
             return
         }
         if key == Int32(SDLK_n.rawValue) && won && session.campaignState.isActive {
@@ -1427,7 +1445,7 @@ class ScoreScreen: MenuScreen {
             if !session.campaignState.isComplete {
                 app.currentScreen = MapSelectionScreen.make(choices: session.campaign.pendingChoices)
             } else {
-                app.currentScreen = MainMenuScreen()
+                app.currentScreen = makeMainMenu()
             }
         } else if key == Int32(SDLK_r.rawValue) {
             session.campaign.restart()

@@ -790,7 +790,7 @@ class SpritePlaygroundScreen: MenuScreen {
 
     func handleKeyDown(_ key: Int32) {
         if key == Int32(SDLK_ESCAPE.rawValue) {
-            app.currentScreen = MainMenuScreen()
+            app.currentScreen = makeMainMenu()
             return
         }
         app.spritePlayground.handleKey(key)

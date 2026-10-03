@@ -87,6 +87,9 @@ if let code = runVQADiagnosticsIfRequested() { exit(code) }
 // --test-fonts / --dump-font NAME OUT.png "TEXT" (Headless/FontDiagnostics.swift)
 if let code = runFontDiagnosticsIfRequested() { exit(code) }
 
+// --test-title OUTDIR (Headless/TitleDiagnostics.swift)
+if let code = runTitleDiagnosticsIfRequested() { exit(code) }
+
 // --test-map-select GDI|NOD ROW [E|W] OUTDIR (Headless/MapSelectionDiagnostics.swift)
 if let code = runMapSelectionDiagnosticsIfRequested() { exit(code) }
 
@@ -525,10 +528,10 @@ if assetManager.mixManager.totalEntries == 0 {
 else if let i = CommandLine.arguments.firstIndex(of: "--play-movie") {
     // Debug: --play-movie NAME [NAME...] plays those movies, then the menu.
     let names = CommandLine.arguments[(i + 1)...].prefix { !$0.hasPrefix("--") }
-    MoviePlayerScreen.play(Array(names)) { app.currentScreen = MainMenuScreen() }
+    MoviePlayerScreen.play(Array(names)) { app.currentScreen = makeMainMenu(fadeIn: true) }
 } else {
     // The Westwood logo on startup (Play_Intro(true), INIT.CPP:1823).
-    MoviePlayerScreen.play(["LOGO"]) { app.currentScreen = MainMenuScreen() }
+    MoviePlayerScreen.play(["LOGO"]) { app.currentScreen = makeMainMenu(fadeIn: true) }
 }
 
 // MARK: - Main Loop

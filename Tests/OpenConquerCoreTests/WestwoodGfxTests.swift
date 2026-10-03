@@ -208,4 +208,24 @@ final class WestwoodGfxTests: XCTestCase {
         XCTAssertThrowsError(try WSAFile(bytes: Array(file.prefix(file.count - 3))))
         XCTAssertThrowsError(try WSAFile(bytes: Array(file.prefix(10))))
     }
+
+    /// 3x2 picture, stride 4: a run crossing the line end, a literal ≥ 0xC0
+    /// escaped as a run of 1, and the 8-bit trailing palette shifted to 6 bits.
+    func testPCXRunsAndPalette() throws {
+        var header = [UInt8](repeating: 0, count: 128)
+        header[0] = 10; header[1] = 5; header[2] = 1; header[3] = 8; header[65] = 1
+        header.replaceSubrange(8..<12, with: le16(2) + le16(1))   // xmax=2, ymax=1
+        header.replaceSubrange(66..<68, with: le16(4))
+        // Line 0: 7 7 7 [pad 7]; line 1: 7 7 (run of 6 crosses the line end), 0xC5, 1
+        let body: [UInt8] = [0xC6, 7, 0xC1, 0xC5, 1]
+        var palette = [UInt8](repeating: 0, count: 768)
+        palette[7 * 3] = 255; palette[7 * 3 + 1] = 128; palette[0xC5 * 3 + 2] = 4
+        let pcx = try PCXFile(bytes: header + body + [0x0C] + palette)
+        XCTAssertEqual(pcx.width, 3)
+        XCTAssertEqual(pcx.height, 2)
+        XCTAssertEqual(pcx.pixels, [7, 7, 7, 7, 7, 0xC5])
+        XCTAssertEqual(Array(pcx.palette!.raw6[21..<24]), [63, 32, 0])
+        XCTAssertEqual(pcx.palette!.raw6[0xC5 * 3 + 2], 1)
+        XCTAssertThrowsError(try PCXFile(bytes: header + [0xC6]))
+    }
 }
