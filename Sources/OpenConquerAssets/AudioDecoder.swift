@@ -23,6 +23,7 @@ package struct AUDChunkHeader {
 /// Decode a Westwood AUD file to raw PCM samples
 /// Returns (samples: [Int16], sampleRate: Int) or nil if not a valid AUD
 package func decodeAUD(_ data: Data) -> (samples: [Int16], sampleRate: Int)? {
+    let data = Data(data)  // rebase a MIX slice so indices start at 0
     // AUD header is 12 bytes (packed struct)
     guard data.count >= 12 else { return nil }
 
@@ -87,10 +88,15 @@ package func decodeAUD(_ data: Data) -> (samples: [Int16], sampleRate: Int)? {
         return (samples, Int(sampleRate))
     }
 
-    // IMA ADPCM (compression == 99) — chunk-based decode
+    // IMA ADPCM (compression == 99, SCOMP_SOS). One continuous stream cut
+    // into chunks: the codec is initialised once per sample (predictor 0,
+    // index 0, sosCODECInitStream) and its state carries across chunks —
+    // there is no per-chunk header. A chunk whose compressed size equals its
+    // output size is stored raw (soundio_common.cpp:323-345).
     if compression == 99 {
         var samples = [Int16]()
         var offset = headerSize
+        var state = IMAADPCMChannelState()
 
         while offset + 8 <= data.count {
             let compSize = Int(UInt16(data[offset]) | (UInt16(data[offset + 1]) << 8))
@@ -102,9 +108,24 @@ package func decodeAUD(_ data: Data) -> (samples: [Int16], sampleRate: Int)? {
             guard chunkId == 0x0000DEAF else { break }
             guard offset + compSize <= data.count else { break }
 
-            let chunkData = data.subdata(in: offset..<(offset + compSize))
-            let decoded = decodeIMAADPCM(chunkData, sampleCount: uncompSize)
-            samples.append(contentsOf: decoded)
+            let outSamples = uncompSize / 2  // 16-bit output
+            if compSize == uncompSize {
+                for i in 0..<outSamples {
+                    let o = offset + i * 2
+                    samples.append(Int16(bitPattern: UInt16(data[o]) | (UInt16(data[o + 1]) << 8)))
+                }
+            } else {
+                var produced = 0
+                for i in 0..<compSize where produced < outSamples {
+                    let byte = data[offset + i]
+                    samples.append(state.expand(Int(byte & 0x0F)))
+                    produced += 1
+                    if produced < outSamples {
+                        samples.append(state.expand(Int(byte >> 4)))
+                        produced += 1
+                    }
+                }
+            }
             offset += compSize
         }
 
@@ -231,55 +252,6 @@ package let imaStepTable: [Int] = [
     5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899,
     15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767
 ]
-
-package func decodeIMAADPCM(_ data: Data, sampleCount: Int) -> [Int16] {
-    var samples = [Int16]()
-    samples.reserveCapacity(sampleCount)
-
-    // Each IMA ADPCM chunk starts with a 4-byte header:
-    //   Int16: initial predictor value
-    //   Int16: initial step index (only low byte used)
-    // Matches Vanilla Conquer soscomp.cpp sosCODECDecompressData
-    guard data.count >= 4 else { return samples }
-
-    let initPredictor = Int16(bitPattern: UInt16(data[0]) | (UInt16(data[1]) << 8))
-    let initIndex = Int(UInt16(data[2]) | (UInt16(data[3]) << 8))
-
-    var predictor: Int32 = Int32(initPredictor)
-    var stepIndex: Int = max(0, min(88, initIndex))
-    var index = 4  // Skip past chunk header
-
-    // First sample is the predictor itself
-    samples.append(initPredictor)
-
-    while index < data.count && samples.count < sampleCount {
-        let byte = data[index]
-        index += 1
-
-        // Process low nibble, then high nibble
-        for shift in [0, 4] {
-            let nibble = Int((byte >> shift) & 0x0F)
-            let step = imaStepTable[stepIndex]
-
-            var diff = step >> 3
-            if nibble & 1 != 0 { diff += step >> 2 }
-            if nibble & 2 != 0 { diff += step >> 1 }
-            if nibble & 4 != 0 { diff += step }
-            if nibble & 8 != 0 { diff = -diff }
-
-            predictor += Int32(diff)
-            predictor = max(-32768, min(32767, predictor))
-            samples.append(Int16(predictor))
-
-            stepIndex += imaIndexTable[nibble]
-            stepIndex = max(0, min(88, stepIndex))
-
-            if samples.count >= sampleCount { break }
-        }
-    }
-
-    return samples
-}
 
 // MARK: - Westwood IMA ADPCM stream (VQA SND2)
 

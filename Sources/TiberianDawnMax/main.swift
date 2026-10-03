@@ -74,6 +74,25 @@ if let i = CommandLine.arguments.firstIndex(of: "--find-asset") {
     exit(0)
 }
 
+// --dump-aud NAME OUT.wav: decode an .AUD from the MIX archives to a WAV
+if let i = CommandLine.arguments.firstIndex(of: "--dump-aud"), i + 2 < CommandLine.arguments.count {
+    let name = CommandLine.arguments[i + 1]
+    guard let data = mixManager.retrieve(name), let (pcm, rate) = decodeAUD(data) else {
+        print("FAIL: cannot decode \(name)")
+        exit(1)
+    }
+    var wav = Data("RIFF".utf8)
+    func le32(_ v: Int) { withUnsafeBytes(of: UInt32(v).littleEndian) { wav.append(contentsOf: $0) } }
+    func le16(_ v: Int) { withUnsafeBytes(of: UInt16(v).littleEndian) { wav.append(contentsOf: $0) } }
+    le32(36 + pcm.count * 2); wav.append(contentsOf: Array("WAVEfmt ".utf8))
+    le32(16); le16(1); le16(1); le32(rate); le32(rate * 2); le16(2); le16(16)
+    wav.append(contentsOf: Array("data".utf8)); le32(pcm.count * 2)
+    pcm.withUnsafeBytes { wav.append(contentsOf: $0) }
+    try? wav.write(to: URL(fileURLWithPath: CommandLine.arguments[i + 2]))
+    print("\(name): \(pcm.count) samples at \(rate) Hz -> \(CommandLine.arguments[i + 2])")
+    exit(0)
+}
+
 // CPS/WSA/PAL decoders (Headless/GfxDiagnostics.swift): --test-gfx, --dump-gfx NAME OUTDIR [PAL]
 if CommandLine.arguments.contains("--test-gfx") { exit(runTestGfx()) }
 if let i = CommandLine.arguments.firstIndex(of: "--dump-gfx"), i + 2 < CommandLine.arguments.count {
