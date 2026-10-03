@@ -620,9 +620,7 @@ func renderGame(_ renderer: OpaquePointer?) {
               obj.strength > 0 && obj.isRepairing else { continue }
         let screenX = Int32(obj.worldX - Double(camX))
         let screenY = Int32(obj.worldY - Double(camY))
-        let size = buildingSize(obj.typeName)
-        let topY = screenY - Int32(size.h * 24) / 2
-        renderRepairWrench(renderer, cx: screenX, cy: topY - 8, tickCount: world.tickCount)
+        renderRepairWrench(renderer, cx: screenX, cy: screenY, tickCount: world.tickCount, house: obj.house)
     }
 
     // === Pass 5c: Rally points for selected production buildings ===

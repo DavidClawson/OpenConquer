@@ -92,3 +92,14 @@ func drawHDFillBar(_ renderer: OpaquePointer?, _ name: String, x: Int32, y: Int3
 func drawHDProgressBar(_ renderer: OpaquePointer?, x: Int32, y: Int32, w: Int32, h: Int32, fraction: Double) -> Bool {
     drawHDFillBar(renderer, "UI_TRAINQUEUEBAR_FILLED", x: x, y: y, w: w, h: h, fraction: fraction)
 }
+
+/// The Remastered repairing wrench (UI_REPAIRING, the HD SELECT.SHP frame 2),
+/// centred on (cx, cy) at the classic frame's 24-pixel width. False when the
+/// art isn't installed.
+func drawHDRepairWrench(_ renderer: OpaquePointer?, cx: Int32, cy: Int32) -> Bool {
+    guard let t = sidebarHDTexture(renderer, "UI_REPAIRING"), t.w > 0 else { return false }
+    let w: Int32 = 24, h = Int32((Double(t.h) * 24 / Double(t.w)).rounded())
+    var dst = SDL_Rect(x: cx - w / 2, y: cy - h / 2, w: w, h: h)
+    SDL_RenderCopy(renderer, t.texture, nil, &dst)
+    return true
+}

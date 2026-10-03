@@ -606,6 +606,19 @@ def extract_ui(data_dir, output_dir):
         img.save(os.path.join(side_dir, base + '.png'), 'PNG')
         side_manifest[base] = {'w': img.size[0], 'h': img.size[1]}
         print(f"  OK: {base:36s} {img.size[0]}x{img.size[1]}")
+    # The repairing-building wrench (the HD SELECT.SHP frame 2) is a TGA in
+    # the common MEG shared with Red Alert.
+    common_path = os.path.join(data_dir, 'TEXTURES_COMMON_SRGB.MEG')
+    if os.path.exists(common_path):
+        common = MEGFile(common_path)
+        raw = common.read_file('DATA\\ART\\TEXTURES\\SRGB\\COMMON\\UI\\UI_REPAIRING.TGA')
+        img = read_tga(raw) if raw else None
+        if img is not None:
+            img.save(os.path.join(side_dir, 'UI_REPAIRING.png'), 'PNG')
+            side_manifest['UI_REPAIRING'] = {'w': img.size[0], 'h': img.size[1]}
+            print(f"  OK: {'UI_REPAIRING':36s} {img.size[0]}x{img.size[1]}")
+        else:
+            print("  MISSING: UI_REPAIRING")
     with open(os.path.join(side_dir, 'sidebar.json'), 'w') as f:
         json.dump(side_manifest, f, indent=2, sort_keys=True)
 

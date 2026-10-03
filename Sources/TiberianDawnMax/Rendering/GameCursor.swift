@@ -574,35 +574,19 @@ private func drawCursorSuperWeapon(_ renderer: OpaquePointer?, mx: Int32, my: In
     SDL_RenderDrawLine(renderer, mx + sz, my + sz, mx + sz, my + sz - corner)
 }
 
-// MARK: - Spinning Wrench for Building Repair Indicator
+// MARK: - Repair wrench (BuildingClass::Draw_It, BUILDING.CPP:630-635)
 
-func renderRepairWrench(_ renderer: OpaquePointer?, cx: Int32, cy: Int32, tickCount: Int) {
-    let angle = Double(tickCount % 30) / 30.0 * 2.0 * Double.pi
-    let cosA = cos(angle)
-    let sinA = sin(angle)
-
-    let handleLen: Double = 6.0
-    let headLen: Double = 3.0
-    let perpX = -sinA
-    let perpY = cosA
-
-    let hx1 = Int32(Double(cx) + cosA * 1.0)
-    let hy1 = Int32(Double(cy) + sinA * 1.0)
-    let hx2 = Int32(Double(cx) + cosA * handleLen)
-    let hy2 = Int32(Double(cy) + sinA * handleLen)
-    let whx1 = Int32(Double(cx) + cosA * handleLen + perpX * headLen)
-    let why1 = Int32(Double(cy) + sinA * handleLen + perpY * headLen)
-    let whx2 = Int32(Double(cx) + cosA * handleLen - perpX * headLen)
-    let why2 = Int32(Double(cy) + sinA * handleLen - perpY * headLen)
-
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 160)
-    SDL_RenderDrawLine(renderer, hx1 + 1, hy1 + 1, hx2 + 1, hy2 + 1)
-    SDL_RenderDrawLine(renderer, whx1 + 1, why1 + 1, whx2 + 1, why2 + 1)
-
-    SDL_SetRenderDrawColor(renderer, 255, 200, 0, 255)
-    SDL_RenderDrawLine(renderer, hx1, hy1, hx2, hy2)
-    SDL_RenderDrawLine(renderer, hx1 + Int32(perpX), hy1 + Int32(perpY), hx2 + Int32(perpX), hy2 + Int32(perpY))
-    SDL_RenderDrawLine(renderer, whx1, why1, whx2, why2)
+/// The repairing-building overlay: SELECT.SHP's SELECT_WRENCH frame (2) —
+/// or its Remastered HD version — centred where the building itself is
+/// drawn (both use SHAPE_CENTER at Draw_It's x, y), blinking: BuildingClass::AI flips
+/// IsWrenchVisible every 15 game ticks while it repairs (BUILDING.CPP:1055).
+func renderRepairWrench(_ renderer: OpaquePointer?, cx: Int32, cy: Int32, tickCount: Int, house: House) {
+    guard (tickCount / 15) % 2 == 0 else { return }
+    if drawHDRepairWrench(renderer, cx: cx, cy: cy) { return }
+    guard let info = getObjectTexture(renderer, typeName: "SELECT", frame: 2, house: house) else { return }
+    var dst = SDL_Rect(x: cx - Int32(info.width) / 2, y: cy - Int32(info.height) / 2,
+                       w: Int32(info.width), h: Int32(info.height))
+    SDL_RenderCopy(renderer, info.texture, nil, &dst)
 }
 
 /// Render veterancy chevrons above a unit
