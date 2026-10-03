@@ -482,6 +482,7 @@ guard SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_AUDIO) == 0 else {
 // --test-sidebar SCEN TICKS OUTDIR (Headless/SidebarDiagnostics.swift): needs SDL, no window
 if let code = runSidebarDiagnosticsIfRequested() { exit(code) }
 if let code = runScreenshotIfRequested() { exit(code) }
+if let code = runSetupDiagnosticsIfRequested() { exit(code) }
 
 // Fog-aware ("advanced") wayfinding is now selected via the ruleset — the
 // player picks Classic vs Enhanced on the Options screen. Default is Classic
@@ -598,6 +599,12 @@ while app.running {
         switch eventType {
         case SDL_QUIT:
             app.running = false
+        case SDL_DROPFILE:
+            // A folder dragged onto the window: the setup screen's import source.
+            if let file = event.drop.file {
+                (app.currentScreen as? SetupScreen)?.handleDrop(String(cString: file))
+                SDL_free(file)
+            }
         case SDL_KEYDOWN:
             handleKeyDown(event.key.keysym.sym)
         case SDL_MOUSEMOTION:

@@ -121,6 +121,7 @@ final class TitleScreen: MenuScreen {
                     app.soundTest.initialize()
                     app.currentScreen = SoundTestScreen()
                 },
+                button(3, "Import Game Data") { app.currentScreen = SetupScreen(reimport: true) },
                 back(5, "Back") { [unowned self] in show(.main) },
             ]
             focus = 0

@@ -1,60 +1,63 @@
+import AppKit
 import CSDL2
 import Foundation
 import OpenConquerAssets
 import OpenConquerCore
 
-// MARK: - Setup / Missing-Assets Screen
+// MARK: - Setup: importing the game data
 
-/// Shown instead of the main menu when no game data could be loaded.
+/// Shown instead of the main menu when no game data could be loaded, and from
+/// the title's Developer Tools to import again. It finds the player's C&C
+/// Remastered Collection (or lets them pick or drop the folder), copies the
+/// classic archives and extracts the HD art and audio — what install-assets.sh
+/// does, with no terminal or Python.
 ///
-/// This screen must render with **zero assets**. It is what a first-time user
-/// sees when they double-click the app before extracting anything, and at that
-/// point there is no palette, no SHP, and no font in the MIX — so everything
-/// here is SDL primitives plus the built-in 5x7 pixel font (`TextRenderer`).
-///
-/// It exists because a Finder-launched app has no stdout: the "NOT FOUND"
-/// diagnostics the asset manager prints go nowhere, and without this screen a
-/// fresh install is just a black window with no explanation.
+/// This screen must render with **zero assets**: on a first launch there is no
+/// palette, SHP or font yet, so everything is SDL primitives plus the built-in
+/// 5x7 pixel font (`TextRenderer`). A Finder-launched app has no stdout, so
+/// every failure is said on screen.
 final class SetupScreen: MenuScreen {
+    private enum Phase {
+        /// Looking for an install, or waiting for the player to pick one.
+        case choose
+        case importing
+        case failed(String)
+    }
 
-    /// Set after a RETRY that still found nothing, so the screen can say so
-    /// rather than looking like the click did nothing.
-    private var retryFailed = false
+    private var phase: Phase = .choose
+    private var found: RemasteredInstall?
+    /// A note under the choice: why a picked folder was refused, etc.
+    private var note: String?
+    /// From the title's tools menu: Back instead of Quit, and the game data is
+    /// already there.
+    private let reimport: Bool
+    private var job: ImportJob?
+
+    /// What the failure screen says, if the import failed.
+    var failureMessage: String? {
+        if case .failed(let message) = phase { return message }
+        return nil
+    }
+
+    init(reimport: Bool = false) {
+        self.reimport = reimport
+        search()
+    }
+
+    private func search() {
+        found = RemasteredLocator.search().first
+        note = found == nil ? "COULDN'T FIND IT IN THE USUAL PLACES." : nil
+    }
 
     // MARK: Layout
 
-    /// Home-relative path, so the line fits and reads the way the README writes it.
-    private var displayPath: String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let full = dataPath.path
-        return full.hasPrefix(home) ? "~" + full.dropFirst(home.count) : full
-    }
+    private var bodyScale: Int32 { max(1, min(3, min(renderState.windowWidth / 640, renderState.windowHeight / 400))) }
 
-    /// True when the path came from an override rather than the built-in default —
-    /// worth saying out loud, since a typo'd override looks identical to "assets
-    /// were never installed".
-    private var isOverridden: Bool {
-        if !(ProcessInfo.processInfo.environment["OPENCONQUER_DATA_DIR"] ?? "").isEmpty {
-            return true
-        }
-        return !(UserDefaults.standard.string(forKey: "TDMax.dataDir") ?? "").isEmpty
-    }
-
-    /// Body text scale, so the screen stays legible from a 640-wide window up to
-    /// the 1920x1200 default without a fixed pixel layout.
-    private var bodyScale: Int32 {
-        max(1, min(3, renderState.windowWidth / 800))
-    }
-
-    /// One rendered line. The screen is laid out by measuring this list first,
-    /// then drawing it centred — the window is user-resizable, so nothing here
-    /// can assume a fixed height.
     private struct Line {
         let text: String
         let color: Color
         let scale: Int32
         let gapAfter: Int32
-        /// A horizontal rule rather than text.
         let rule: Bool
 
         init(_ text: String, _ color: Color, _ scale: Int32, gapAfter: Int32 = 0, rule: Bool = false) {
@@ -65,121 +68,237 @@ final class SetupScreen: MenuScreen {
         var height: Int32 { (rule ? 1 : 7 * scale) + gapAfter }
     }
 
+    private func display(_ url: URL) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return url.path.hasPrefix(home) ? "~" + url.path.dropFirst(home.count) : url.path
+    }
+
+    private func pathLines(_ url: URL, gapAfter: Int32) -> [Line] {
+        let b = bodyScale
+        var lines = wrap(display(url), width: 46).map { Line($0, .green, b, gapAfter: 3 * b) }
+        lines[lines.count - 1] = Line(lines[lines.count - 1].text, .green, b, gapAfter: gapAfter)
+        return lines
+    }
+
     private func makeLines() -> [Line] {
         let b = bodyScale
         var lines: [Line] = [
             Line("OPENCONQUER", .amber, b * 2, gapAfter: 10 * b),
             Line("", .darkGreen, 0, gapAfter: 12 * b, rule: true),
-            Line("NO GAME DATA FOUND", .red, b + 1, gapAfter: 16 * b),
-            Line(isOverridden ? "LOOKED IN (OVERRIDDEN PATH):" : "LOOKED IN:",
-                 .gray, b, gapAfter: 4 * b),
         ]
-        for line in wrap(displayPath, width: 46) {
-            lines.append(Line(line, .green, b, gapAfter: 3 * b))
-        }
-        lines[lines.count - 1] = Line(lines[lines.count - 1].text, .green, b, gapAfter: 14 * b)
-
-        lines += [
-            Line("OPENCONQUER SHIPS NO GAME ASSETS.", .white, b, gapAfter: 4 * b),
-            Line("YOU SUPPLY THEM FROM YOUR OWN COPY OF", .white, b, gapAfter: 4 * b),
-            Line("THE C&C REMASTERED COLLECTION.", .white, b, gapAfter: 16 * b),
-            Line("IN A TERMINAL, FROM THE SOURCE FOLDER:", .gray, b, gapAfter: 5 * b),
-            Line("./INSTALL-ASSETS.SH /PATH/TO/CNCREMASTERED", .amber, b, gapAfter: 14 * b),
-            Line("THEN PRESS RETRY - NO NEED TO RELAUNCH.", .gray, b, gapAfter: 4 * b),
-            Line("DETAILS: README > ASSETS", .gray, b, gapAfter: 0),
-        ]
-        if retryFailed {
-            lines.append(Line("STILL NOTHING THERE.", .red, b, gapAfter: 0))
+        switch phase {
+        case .choose:
+            lines += [
+                Line(reimport ? "IMPORT GAME DATA" : "GAME DATA NEEDED", reimport ? .amber : .red, b + 1, gapAfter: 14 * b),
+                Line("OPENCONQUER SHIPS NO GAME ASSETS. IT IMPORTS", .white, b, gapAfter: 4 * b),
+                Line("THEM FROM YOUR OWN COPY OF THE", .white, b, gapAfter: 4 * b),
+                Line("C&C REMASTERED COLLECTION.", .white, b, gapAfter: 16 * b),
+            ]
+            if let found {
+                lines.append(Line("FOUND IT:", .gray, b, gapAfter: 5 * b))
+                lines += pathLines(found.dataDir, gapAfter: 8 * b)
+                lines.append(Line(found.hasHD ? "WITH THE HD ART AND AUDIO." : "CLASSIC DATA ONLY - NO HD ART THERE.",
+                                  found.hasHD ? .gray : .amber, b, gapAfter: 14 * b))
+            } else {
+                lines += [
+                    Line("CHOOSE THE FOLDER IT'S INSTALLED IN,", .gray, b, gapAfter: 4 * b),
+                    Line("OR DRAG IT ONTO THIS WINDOW.", .gray, b, gapAfter: 14 * b),
+                ]
+            }
+            if let note {
+                lines.append(Line(note, .red, b, gapAfter: 0))
+            }
+        case .importing:
+            let p = job?.snapshot() ?? ImportJob.Snapshot()
+            lines += [
+                Line("IMPORTING", .amber, b + 1, gapAfter: 14 * b),
+                Line(p.stepTitle, .white, b, gapAfter: 6 * b),
+                Line(p.item.isEmpty ? " " : String(p.item.uppercased().suffix(46)), .gray, b, gapAfter: 40 * b),
+                Line("THIS TAKES A FEW MINUTES.", .gray, b, gapAfter: 0),
+            ]
+        case .failed(let message):
+            lines.append(Line("THE IMPORT DIDN'T FINISH", .red, b + 1, gapAfter: 14 * b))
+            for l in wrap(message.uppercased(), width: 46) {
+                lines.append(Line(l, .white, b, gapAfter: 4 * b))
+            }
         }
         return lines
     }
 
-    private var buttonMetrics: (w: Int32, h: Int32, gap: Int32) {
-        let b = bodyScale
-        return (w: 60 * b, h: 17 * b, gap: 12 * b)
-    }
+    /// Button labels are drawn at text scale 2 (12 px a character), whatever
+    /// the body scale.
+    private var buttonMetrics: (h: Int32, gap: Int32) { (h: 32, gap: 14) }
 
-    /// Buttons sit under the measured text block, not pinned to the window
-    /// bottom — otherwise they strand themselves half a screen away at 1200px tall.
     private func makeButtons() -> [Button] {
-        let cx = renderState.windowWidth / 2
+        let leave: Button.Action = reimport ? ("BACK", { app.currentScreen = makeMainMenu() })
+                                            : ("QUIT", { app.running = false })
+        var specs: [Button.Action]
+        switch phase {
+        case .choose:
+            specs = found != nil
+                ? [leave, ("OTHER FOLDER", { [weak self] in self?.chooseFolder() }),
+                   ("IMPORT", { [weak self] in self?.startImport() })]
+                : [leave, ("SEARCH AGAIN", { [weak self] in self?.search() }),
+                   ("CHOOSE FOLDER", { [weak self] in self?.chooseFolder() })]
+        case .importing:
+            specs = [("CANCEL", { [weak self] in self?.job?.cancel() })]
+        case .failed:
+            specs = [leave, ("TRY AGAIN", { [weak self] in self?.phase = .choose })]
+        }
         let m = buttonMetrics
+        let bw = Int32(specs.map(\.0.count).max() ?? 0) * 12 + 28
+        let totalW = Int32(specs.count) * bw + Int32(specs.count - 1) * m.gap
+        var x = renderState.windowWidth / 2 - totalW / 2
         let y = textBlockBottom() + 26 * bodyScale
-        return [
-            Button(label: "QUIT", x: cx - m.w - m.gap / 2, y: y, w: m.w, h: m.h) {
-                app.running = false
-            },
-            Button(label: "RETRY", x: cx + m.gap / 2, y: y, w: m.w, h: m.h) { [weak self] in
-                self?.retry()
-            },
-        ]
+        return specs.map { spec in
+            defer { x += bw + m.gap }
+            return Button(label: spec.0, x: x, y: y, w: bw, h: m.h, action: spec.1)
+        }
     }
 
     private func blockHeight() -> Int32 {
-        let m = buttonMetrics
-        return makeLines().reduce(0) { $0 + $1.height } + 26 * bodyScale + m.h
+        makeLines().reduce(0) { $0 + $1.height } + 26 * bodyScale + buttonMetrics.h
     }
 
-    private func textBlockTop() -> Int32 {
-        max(20, (renderState.windowHeight - blockHeight()) / 2)
-    }
+    private func textBlockTop() -> Int32 { max(20, (renderState.windowHeight - blockHeight()) / 2) }
 
-    private func textBlockBottom() -> Int32 {
-        textBlockTop() + makeLines().reduce(0) { $0 + $1.height }
-    }
+    private func textBlockBottom() -> Int32 { textBlockTop() + makeLines().reduce(0) { $0 + $1.height } }
 
     // MARK: Render
 
     func render(_ renderer: OpaquePointer?) {
+        pollJob()
         let cx = renderState.windowWidth / 2
         var y = textBlockTop()
-
-        for line in makeLines() {
+        let lines = makeLines()
+        for (i, line) in lines.enumerated() {
             if line.rule {
-                SDL_SetRenderDrawColor(renderer, Color.darkGreen.r, Color.darkGreen.g,
-                                       Color.darkGreen.b, 255)
+                SDL_SetRenderDrawColor(renderer, Color.darkGreen.r, Color.darkGreen.g, Color.darkGreen.b, 255)
                 let w = 130 * bodyScale
                 var rect = SDL_Rect(x: cx - w / 2, y: y, w: w, h: 1)
                 SDL_RenderFillRect(renderer, &rect)
             } else {
-                // drawText centres vertically on the y it is given.
-                drawText(renderer, line.text, centerX: cx,
-                         centerY: y + (7 * line.scale) / 2,
+                drawText(renderer, line.text, centerX: cx, centerY: y + (7 * line.scale) / 2,
                          color: line.color, scale: line.scale)
+            }
+            // The progress bar sits in the gap after the item line.
+            if case .importing = phase, i == lines.count - 2 {
+                drawProgressBar(renderer, top: y + 7 * line.scale + 14 * bodyScale)
             }
             y += line.height
         }
-
         for btn in makeButtons() {
             btn.draw(renderer, highlighted: btn.contains(input.mouseX, input.mouseY))
         }
     }
 
-    // MARK: Retry
+    private func drawProgressBar(_ renderer: OpaquePointer?, top: Int32) {
+        let b = bodyScale
+        let w = 220 * b, h = 8 * b
+        let x = renderState.windowWidth / 2 - w / 2
+        var frame = SDL_Rect(x: x, y: top, w: w, h: h)
+        SDL_SetRenderDrawColor(renderer, Color.green.r, Color.green.g, Color.green.b, 255)
+        SDL_RenderDrawRect(renderer, &frame)
+        let fraction = job?.snapshot().overall ?? 0
+        var fill = SDL_Rect(x: x + 2, y: top + 2, w: Int32(Double(w - 4) * min(1, max(0, fraction))), h: h - 4)
+        SDL_SetRenderDrawColor(renderer, Color.brightGreen.r, Color.brightGreen.g, Color.brightGreen.b, 255)
+        SDL_RenderFillRect(renderer, &fill)
+    }
 
-    /// Re-run asset discovery in place, so a user can extract assets in another
-    /// window and come back without relaunching.
-    private func retry() {
+    // MARK: Choosing
+
+    /// The macOS folder picker. SDL's window keeps running behind it.
+    private func chooseFolder() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose your C&C Remastered Collection"
+        panel.message = "Choose the Remastered Collection's install folder (the one containing Data)."
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.showsHiddenFiles = true
+        let response = panel.runModal()
+        NSApp.windows.first { $0.isVisible && !($0 is NSPanel) }?.makeKeyAndOrderFront(nil)
+        guard response == .OK, let url = panel.url else { return }
+        use(url)
+    }
+
+    /// A folder dropped on the window (SDL_DROPFILE).
+    func handleDrop(_ path: String) {
+        guard case .choose = phase else { return }
+        use(URL(fileURLWithPath: path))
+    }
+
+    private func use(_ url: URL) {
+        if let install = RemasteredLocator.resolve(url) {
+            found = install
+            note = nil
+        } else {
+            note = "THAT FOLDER ISN'T A REMASTERED COLLECTION."
+        }
+    }
+
+    // MARK: Importing
+
+    func startImport() {
+        guard let install = found else { return }
+        let missing = ClassicArchiveImport.missing(in: install)
+        guard missing.isEmpty else {
+            phase = .failed("Files missing from that install: " + missing.prefix(3).joined(separator: ", ")
+                            + ". Make sure the Remastered Collection is fully downloaded.")
+            return
+        }
+        let job = ImportJob(install: install, dataDir: dataPath)
+        self.job = job
+        phase = .importing
+        job.start()
+    }
+
+    private func pollJob() {
+        guard case .importing = phase, let job, let result = job.snapshot().result else { return }
+        self.job = nil
+        switch result {
+        case .success:
+            finish()
+        case .failure(let error):
+            if (error as? CocoaError)?.code == .userCancelled {
+                phase = .choose
+                note = "IMPORT CANCELLED."
+            } else {
+                phase = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    /// Replaces what happens after a successful import (the headless test).
+    var onImported: (() -> Void)?
+
+    /// Loads what was just imported and carries on as a normal launch would.
+    private func finish() {
+        if let onImported { return onImported() }
         assetManager.initialize()
         guard assetManager.mixManager.totalEntries > 0 else {
-            retryFailed = true
+            phase = .failed("The files were copied, but the game still can't read them from \(display(dataPath)).")
             return
         }
         loadDataOverrides()
         initRemasteredSprites()
         gameAudio.soundLibrary = SoundLibrary(assetManager: assetManager)
-        app.currentScreen = makeMainMenu()
+        MoviePlayerScreen.play(["LOGO"]) { app.currentScreen = makeMainMenu(fadeIn: true) }
     }
 
-    /// Break a long path across lines without a word-boundary assumption —
-    /// paths have no spaces to break on.
+    /// Break a long line at spaces where it can, mid-word (paths) where it can't.
     private func wrap(_ text: String, width: Int) -> [String] {
-        guard text.count > width else { return [text] }
         var out: [String] = []
         var rest = Substring(text)
         while rest.count > width {
-            out.append(String(rest.prefix(width)))
-            rest = rest.dropFirst(width)
+            let head = rest.prefix(width)
+            if let space = head.lastIndex(of: " "), space > head.startIndex {
+                out.append(String(rest[..<space]))
+                rest = rest[rest.index(after: space)...]
+            } else {
+                out.append(String(head))
+                rest = rest.dropFirst(width)
+            }
         }
         if !rest.isEmpty { out.append(String(rest)) }
         return out
@@ -188,10 +307,14 @@ final class SetupScreen: MenuScreen {
     // MARK: Input
 
     func handleKeyDown(_ key: Int32) {
-        if key == Int32(SDLK_ESCAPE.rawValue) || key == Int32(SDLK_q.rawValue) {
-            app.running = false
-        } else if key == Int32(SDLK_RETURN.rawValue) || key == Int32(SDLK_r.rawValue) {
-            retry()
+        switch key {
+        case Int32(SDLK_ESCAPE.rawValue):
+            if case .importing = phase { job?.cancel() } else if reimport { app.currentScreen = makeMainMenu() }
+            else { app.running = false }
+        case Int32(SDLK_RETURN.rawValue):
+            if case .choose = phase { found != nil ? startImport() : chooseFolder() }
+        default:
+            break
         }
     }
 
@@ -200,6 +323,80 @@ final class SetupScreen: MenuScreen {
         for btn in makeButtons() where btn.contains(x, y) {
             btn.action()
             return
+        }
+    }
+}
+
+extension Button {
+    typealias Action = (String, () -> Void)
+}
+
+// MARK: - The import, on a background thread
+
+/// Runs the copy and the extraction off the main thread; the screen polls a
+/// snapshot each frame.
+final class ImportJob {
+    struct Snapshot {
+        var stepTitle = "STARTING"
+        var item = ""
+        /// 0...1 across all the steps.
+        var overall = 0.0
+        var result: Result<Void, Error>?
+    }
+
+    private let install: RemasteredInstall
+    private let dataDir: URL
+    private let lock = NSLock()
+    private var state = Snapshot()
+    private var cancelled = false
+
+    /// Each step's share of the bar, roughly by how long it takes.
+    private static let weights: [(title: String, share: Double)] = [
+        ("COPYING THE CLASSIC GAME FILES", 0.25),
+        ("CONVERTING THE CLASSIC AUDIO", 0.10),
+        ("EXTRACTING THE HD UNITS AND BUILDINGS", 0.40),
+        ("EXTRACTING THE HD INTERFACE", 0.05),
+        ("EXTRACTING THE HD MUSIC AND SOUNDS", 0.20),
+    ]
+
+    init(install: RemasteredInstall, dataDir: URL) {
+        self.install = install
+        self.dataDir = dataDir
+    }
+
+    func snapshot() -> Snapshot { lock.withLock { state } }
+
+    func cancel() { lock.withLock { cancelled = true } }
+
+    private var isCancelled: Bool { lock.withLock { cancelled } }
+
+    private func report(step: Int, fraction: Double, item: String) {
+        let before = Self.weights.prefix(step).reduce(0) { $0 + $1.share }
+        lock.withLock {
+            state.stepTitle = Self.weights[step].title
+            state.item = item
+            state.overall = before + Self.weights[step].share * min(1, max(0, fraction))
+        }
+    }
+
+    func start() {
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            let result = Result<Void, Error> {
+                try ClassicArchiveImport.run(from: install, to: dataDir, progress: { done, total, name in
+                    self.report(step: 0, fraction: total > 0 ? Double(done) / Double(total) : 1, item: name)
+                }, isCancelled: { self.isCancelled })
+                try extractRemasteredAssets(remasteredData: install.dataDir, dataDir: dataDir, progress: { p in
+                    let step: Int
+                    switch p.step {
+                    case .classicAudio: step = 1
+                    case .hdSprites: step = 2
+                    case .hdUI: step = 3
+                    case .hdAudio: step = 4
+                    }
+                    self.report(step: step, fraction: p.total > 0 ? Double(p.done) / Double(p.total) : 1, item: p.item)
+                }, isCancelled: { self.isCancelled })
+            }
+            lock.withLock { state.result = result }
         }
     }
 }
