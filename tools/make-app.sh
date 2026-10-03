@@ -6,8 +6,9 @@
 # path, so it only runs on a machine with the same brew prefix. This script
 # turns it into a self-contained bundle: it copies the SDL dylibs the binary
 # actually needs into Contents/Frameworks, rewrites the load paths to @rpath,
-# and ad-hoc signs the result (required on Apple Silicon once a binary has been
-# modified).
+# and signs the result — ad-hoc by default (required on Apple Silicon once a
+# binary has been modified), or with a Developer ID for distribution, optionally
+# notarized and stapled.
 #
 # It bundles NO game data. Assets stay where install-assets.sh puts them, in
 # ~/Library/Application Support/, and the app reads them from there at runtime.
@@ -18,6 +19,14 @@
 #   ./tools/make-app.sh --zip           # also produce dist/OpenConquer.zip
 #   ./tools/make-app.sh --dmg           # also produce dist/OpenConquer.dmg
 #   ./tools/make-app.sh --out DIR       # output somewhere other than dist/
+#   ./tools/make-app.sh --sign ID       # sign with a Developer ID (hardened runtime);
+#                                       # ID is the identity name or SHA-1, e.g.
+#                                       # "Developer ID Application: Name (TEAMID)"
+#   ./tools/make-app.sh --sign ID --notarize PROFILE
+#                                       # also notarize the app and the DMG with
+#                                       # notarytool's keychain PROFILE (set up once:
+#                                       # xcrun notarytool store-credentials PROFILE ...)
+#                                       # and staple both; implies --dmg
 #
 set -euo pipefail
 
@@ -31,6 +40,8 @@ OUT_DIR="$REPO_ROOT/dist"
 DO_BUILD=1
 DO_ZIP=0
 DO_DMG=0
+SIGN_ID="${OPENCONQUER_SIGN_IDENTITY:-}"
+NOTARY_PROFILE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -38,10 +49,17 @@ while [[ $# -gt 0 ]]; do
         --zip)      DO_ZIP=1; shift ;;
         --dmg)      DO_DMG=1; shift ;;
         --out)      OUT_DIR="$2"; shift 2 ;;
-        -h|--help)  sed -n '2,22p' "$0"; exit 0 ;;
+        --sign)     SIGN_ID="$2"; shift 2 ;;
+        --notarize) NOTARY_PROFILE="$2"; DO_DMG=1; shift 2 ;;
+        -h|--help)  sed -n '2,31p' "$0"; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
+
+if [[ -n "$NOTARY_PROFILE" && -z "$SIGN_ID" ]]; then
+    echo "--notarize needs --sign: notarization requires a Developer ID signature" >&2
+    exit 2
+fi
 
 say() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m warning:\033[0m %s\n' "$*" >&2; }
@@ -57,6 +75,7 @@ BIN_SRC="$REPO_ROOT/.build/release/$BINARY_NAME"
 [[ -f "$BIN_SRC" ]] || { echo "no release binary at $BIN_SRC — run without --no-build" >&2; exit 1; }
 
 VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo "0.0.0")"
+VERSION="${VERSION#v}"   # tag v0.1.0 -> 0.1.0
 BUILD_REV="$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")"
 
 # ---------------------------------------------------------------- skeleton
@@ -219,19 +238,34 @@ PLIST
 
 # ---------------------------------------------------------------- sign
 #
-# Ad-hoc signature. Apple Silicon refuses to run a binary whose load commands
-# were edited unless it is re-signed, so this is required, not cosmetic. It is
-# NOT notarization — first launch still needs right-click > Open.
+# Without --sign: an ad-hoc signature. Apple Silicon refuses to run a binary
+# whose load commands were edited unless it is re-signed, so this is required,
+# not cosmetic — but it is not notarization, and the first launch on another
+# Mac needs right-click > Open.
+#
+# With --sign: a Developer ID signature with the hardened runtime and a secure
+# timestamp, dylibs first (inside-out), as notarization requires. The app needs
+# no entitlements: it doesn't JIT, load unsigned code or use the camera/mic.
 
-say "Ad-hoc signing"
+if [[ -n "$SIGN_ID" ]]; then
+    say "Signing with Developer ID: $SIGN_ID"
+    SIGN_ARGS=(--force --options runtime --timestamp --sign "$SIGN_ID")
+else
+    say "Ad-hoc signing"
+    SIGN_ARGS=(--force --sign - --timestamp=none)
+fi
 for lib in "$FRAMEWORKS"/*.dylib; do
     [[ -e "$lib" ]] || continue
     [[ -L "$lib" ]] && continue          # symlink alias — the target gets signed
-    codesign --force --sign - --timestamp=none "$lib" >/dev/null 2>&1 || \
+    codesign "${SIGN_ARGS[@]}" "$lib" >/dev/null 2>&1 || {
+        [[ -n "$SIGN_ID" ]] && { echo "could not sign $(basename "$lib")" >&2; exit 1; }
         warn "could not sign $(basename "$lib")"
+    }
 done
-codesign --force --sign - --timestamp=none "$APP" >/dev/null 2>&1 || \
+codesign "${SIGN_ARGS[@]}" "$APP" >/dev/null 2>&1 || {
+    [[ -n "$SIGN_ID" ]] && { codesign "${SIGN_ARGS[@]}" "$APP"; exit 1; }
     warn "could not sign the bundle"
+}
 
 # ---------------------------------------------------------------- verify
 
@@ -242,7 +276,11 @@ if otool -L "$APP/Contents/MacOS/$APP_NAME" | grep -qE '/opt/homebrew|/usr/local
 else
     echo "    no Homebrew paths remain in the executable"
 fi
-codesign --verify --verbose=1 "$APP" 2>&1 | sed 's/^/    /' || true
+if [[ -n "$SIGN_ID" ]]; then
+    codesign --verify --deep --strict --verbose=2 "$APP" 2>&1 | sed 's/^/    /'
+else
+    codesign --verify --verbose=1 "$APP" 2>&1 | sed 's/^/    /' || true
+fi
 echo "    bundled: $(ls "$FRAMEWORKS" | tr '\n' ' ')"
 
 # Dangling symlinks are the failure mode this script hit in development: brew's
@@ -280,6 +318,34 @@ else
     exit 1
 fi
 
+# Notarize: submit, wait for Apple's verdict, staple the ticket so Gatekeeper
+# can check it offline. The app goes first, so the copy inside the DMG is
+# stapled too; then the DMG itself.
+notarize() {
+    local file="$1"
+    say "Notarizing $(basename "$file") (this takes a few minutes)"
+    local log
+    log="$(mktemp -t openconquer-notary)"
+    if ! xcrun notarytool submit "$file" --keychain-profile "$NOTARY_PROFILE" --wait >"$log" 2>&1 \
+        || ! grep -q "status: Accepted" "$log"; then
+        cat "$log" >&2
+        local id
+        id="$(grep -m1 -E '^[[:space:]]*id:' "$log" | awk '{print $2}')"
+        [[ -n "$id" ]] && xcrun notarytool log "$id" --keychain-profile "$NOTARY_PROFILE" >&2 || true
+        echo "notarization of $(basename "$file") failed" >&2
+        exit 1
+    fi
+    rm -f "$log"
+}
+
+if [[ -n "$NOTARY_PROFILE" ]]; then
+    APP_ZIP="$(mktemp -d -t openconquer-notary-zip)/$APP_NAME.zip"
+    ditto -c -k --sequesterRsrc --keepParent "$APP" "$APP_ZIP"
+    notarize "$APP_ZIP"
+    rm -f "$APP_ZIP"
+    xcrun stapler staple "$APP" | sed 's/^/    /'
+fi
+
 if [[ $DO_DMG -eq 1 ]]; then
     say "Building disk image"
     DMG_STAGE="$(mktemp -d -t openconquer-dmg)"
@@ -293,11 +359,7 @@ OpenConquer
 
 Drag OpenConquer to the Applications folder beside it, then launch it.
 
-FIRST LAUNCH: the app is ad-hoc signed rather than notarized (notarization
-needs a paid Apple Developer account), so macOS will refuse the first launch
-from a double-click. Right-click the app and choose Open, then confirm. You
-only have to do this once.
-
+FIRST_LAUNCH_NOTE
 GAME DATA: OpenConquer contains no game assets and never will. You supply
 them from your own copy of the Command & Conquer Remastered Collection --
 the app's setup screen tells you how, and the README covers it in full:
@@ -308,10 +370,30 @@ OpenConquer is an unofficial fan project, licensed GPLv3. It is not
 affiliated with, endorsed by, or sponsored by Electronic Arts. "Command &
 Conquer" and "Tiberian Dawn" are trademarks of Electronic Arts Inc.
 DMGREADME
+    if [[ -n "$NOTARY_PROFILE" ]]; then
+        FIRST_LAUNCH="The app is signed and notarized by Apple, so it opens normally."
+    else
+        FIRST_LAUNCH="FIRST LAUNCH: this build is not notarized, so macOS will refuse the
+first launch from a double-click. Right-click the app and choose Open, then
+confirm. You only have to do this once."
+    fi
+    python3 - "$DMG_STAGE/READ ME FIRST.txt" "$FIRST_LAUNCH" <<'PY'
+import sys
+p, note = sys.argv[1], sys.argv[2]
+s = open(p).read().replace("FIRST_LAUNCH_NOTE\n", note + "\n\n")
+open(p, "w").write(s)
+PY
     rm -f "$OUT_DIR/$APP_NAME.dmg"
     hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_STAGE" \
         -ov -format UDZO -quiet "$OUT_DIR/$APP_NAME.dmg"
     rm -rf "$DMG_STAGE"
+    if [[ -n "$SIGN_ID" ]]; then
+        codesign --force --timestamp --sign "$SIGN_ID" "$OUT_DIR/$APP_NAME.dmg"
+    fi
+    if [[ -n "$NOTARY_PROFILE" ]]; then
+        notarize "$OUT_DIR/$APP_NAME.dmg"
+        xcrun stapler staple "$OUT_DIR/$APP_NAME.dmg" | sed 's/^/    /'
+    fi
     echo "    $OUT_DIR/$APP_NAME.dmg ($(du -h "$OUT_DIR/$APP_NAME.dmg" | cut -f1 | tr -d ' '))"
 fi
 
@@ -327,5 +409,12 @@ echo
 echo "  Try it:     open \"$APP\""
 echo "  Install it: drag it to /Applications"
 echo
-echo "  Because the bundle is ad-hoc signed rather than notarized, the first"
-echo "  launch on another Mac needs right-click > Open (once)."
+if [[ -n "$NOTARY_PROFILE" ]]; then
+    echo "  Signed, notarized and stapled: it opens normally on any Mac."
+elif [[ -n "$SIGN_ID" ]]; then
+    echo "  Developer ID signed but not notarized: Gatekeeper still blocks the"
+    echo "  first launch on another Mac. Add --notarize PROFILE to fix that."
+else
+    echo "  Because the bundle is ad-hoc signed rather than notarized, the first"
+    echo "  launch on another Mac needs right-click > Open (once)."
+fi
