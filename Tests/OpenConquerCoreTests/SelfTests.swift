@@ -35,6 +35,7 @@ final class SelfTests: XCTestCase {
 
     // Player commands
     func testCommandReplay() { XCTAssertEqual(headlessTestCommandReplayCommand(), 0) }
+    func testCommandOwnership() { XCTAssertEqual(headlessTestCommandOwnershipCommand(), 0) }
 
     // Determinism net (the tick count CI used for `--test-synthetic 500`)
     func testSynthetic() { XCTAssertEqual(headlessTestSyntheticCommand(ticks: 500), 0) }

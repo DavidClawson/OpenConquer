@@ -9,7 +9,10 @@ import Foundation
 // sim through the same door as the mouse.
 //
 // Commands carry object ids, not references, and are re-validated when they
-// apply: a unit may have died, or a factory finished, since the click.
+// apply: a unit may have died, or a factory finished, since the click. Each
+// is queued with the house that gave it (EventClass::ID, EVENT.H) and only
+// moves that house's objects — groundwork for more than one player
+// (docs/MULTIPLAYER.md).
 
 package struct MapPoint: Codable, Equatable {
     package var x: Double
@@ -57,16 +60,36 @@ package enum PlayerCommand: Codable, Equatable {
 }
 
 extension SpecialWeaponType: Codable {}
+extension House: Codable {}
 
-/// A command and the tick it took effect on.
-package struct LoggedCommand: Codable, Equatable {
-    package let tick: Int
+/// A command and the house that gave it, waiting for the next tick.
+package struct QueuedCommand: Equatable {
+    package let house: House
     package let command: PlayerCommand
+
+    package init(house: House, command: PlayerCommand) {
+        self.house = house
+        self.command = command
+    }
 }
 
-/// Queue a command for the next tick.
-package func issue(_ command: PlayerCommand) {
-    session.world?.pendingCommands.append(command)
+/// A command, the house that gave it, and the tick it took effect on.
+package struct LoggedCommand: Codable, Equatable {
+    package let tick: Int
+    package let house: House
+    package let command: PlayerCommand
+
+    package init(tick: Int, house: House, command: PlayerCommand) {
+        self.tick = tick
+        self.house = house
+        self.command = command
+    }
+}
+
+/// Queue a command for the next tick, from `house` — the player's by default.
+package func issue(_ command: PlayerCommand, as house: House? = nil) {
+    guard let world = session.world else { return }
+    world.pendingCommands.append(QueuedCommand(house: house ?? world.playerHouse, command: command))
 }
 
 /// Apply everything queued since the last tick, in order, and log it with the
@@ -75,19 +98,24 @@ func applyPendingCommands(world: GameWorld) {
     guard !world.pendingCommands.isEmpty else { return }
     let commands = world.pendingCommands
     world.pendingCommands = []
-    for command in commands {
-        world.commandLog.append(LoggedCommand(tick: world.tickCount, command: command))
-        apply(command, world: world)
+    for queued in commands {
+        world.commandLog.append(LoggedCommand(tick: world.tickCount, house: queued.house, command: queued.command))
+        apply(queued.command, from: queued.house, world: world)
     }
 }
 
-private func apply(_ command: PlayerCommand, world: GameWorld) {
-    // Only the player's own live objects take orders.
+private func apply(_ command: PlayerCommand, from house: House, world: GameWorld) {
+    // Only the issuing house's own live objects take orders (EventClass::
+    // Execute acts as Houses.Raw_Ptr(ID); its SELL checks the owner).
     func own(_ ids: [Int]) -> [GameObject] {
         ids.compactMap { world.findObject(id: $0) }
-            .filter { $0.house == world.playerHouse && $0.strength > 0 }
+            .filter { $0.house == house && $0.strength > 0 }
     }
     func ownOne(_ id: Int) -> GameObject? { own([id]).first }
+    // Production, placement and super weapons exist only for the player's
+    // house so far (session's build queues and credits; docs/MULTIPLAYER.md
+    // step 3), so another house's orders for them are dropped.
+    let isPlayer = house == world.playerHouse
 
     switch command {
     case .move(let ids, let to, let queued, let attackMove):
@@ -263,21 +291,25 @@ private func apply(_ command: PlayerCommand, world: GameWorld) {
         obj.mission = .selling
 
     case .startProduction(let structure, let type, let cost, let buildTicks):
+        guard isPlayer else { return }
         let queue = structure ? session.structureBuildQueue : session.unitBuildQueue
         guard queue.item == nil, session.sidebarCredits >= cost else { return }
         queue.start(typeName: type, cost: cost, buildTime: buildTicks)
         session.sidebarCredits -= cost
 
     case .holdProduction(let structure):
+        guard isPlayer else { return }
         let queue = structure ? session.structureBuildQueue : session.unitBuildQueue
         guard queue.item != nil, !queue.isComplete else { return }
         queue.isOnHold = true
 
     case .resumeProduction(let structure):
+        guard isPlayer else { return }
         let queue = structure ? session.structureBuildQueue : session.unitBuildQueue
         queue.isOnHold = false
 
     case .cancelProduction(let structure):
+        guard isPlayer else { return }
         let queue = structure ? session.structureBuildQueue : session.unitBuildQueue
         guard queue.item != nil else { return }
         session.sidebarCredits += queue.cancel()  // full cost was paid up front
@@ -287,9 +319,11 @@ private func apply(_ command: PlayerCommand, world: GameWorld) {
         }
 
     case .placeStructure(let type, let cellX, let cellY):
+        guard isPlayer else { return }
         placeStructure(type: type, cellX: cellX, cellY: cellY)
 
     case .fireSuperWeapon(let type, let at):
+        guard isPlayer else { return }
         deploySuperWeapon(type, worldX: at.x, worldY: at.y)
     }
 }

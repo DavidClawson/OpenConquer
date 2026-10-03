@@ -77,7 +77,7 @@ package func headlessTestCommandReplayCommand() -> Int32 {
     var next = 0
     for tick in 0..<ticks {
         while next < log.count && log[next].tick == replay.tickCount + 1 {
-            issue(log[next].command)
+            issue(log[next].command, as: log[next].house)
             next += 1
         }
         gameTick()

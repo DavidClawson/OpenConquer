@@ -423,7 +423,7 @@ package class GameWorld {
     package var controlGroups: [[Int]] = Array(repeating: [], count: 10)
     /// Player orders waiting for the next tick, and every order applied so far
     /// (Game/PlayerCommands.swift).
-    package var pendingCommands: [PlayerCommand] = []
+    package var pendingCommands: [QueuedCommand] = []
     package var commandLog: [LoggedCommand] = []
 
     // O(1) object lookup by ID — maintained by addObject/removeDeadObjects

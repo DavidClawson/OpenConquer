@@ -250,6 +250,9 @@ if CommandLine.arguments.contains("--test-heli-transport") {
 if CommandLine.arguments.contains("--test-command-replay") {
     exit(headlessTestCommandReplayCommand())
 }
+if CommandLine.arguments.contains("--test-command-ownership") {
+    exit(headlessTestCommandOwnershipCommand())
+}
 
 // Classic target acquisition self-test: --test-original-targeting
 if CommandLine.arguments.contains("--test-original-targeting") {
