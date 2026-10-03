@@ -159,12 +159,19 @@ package class MIXFileManager {
         print("MIX: Registered \(name) (\(mix.entries.count) files)")
     }
 
+    /// The Win95 release's override archives, searched before everything else
+    /// in the order Init_Game opens them (INIT.CPP:187-193; Vanilla Conquer adds
+    /// UPDATA.MIX after UPDATE.MIX): CCLOCAL.MIX's hi-res fonts and strings
+    /// shadow LOCAL.MIX, UPDATA.MIX's DARK_*.PAL shadow GENERAL.MIX's.
+    private static let overrideOrder = ["CCLOCAL.MIX", "UPDATE.MIX", "UPDATA.MIX", "UPDATEC.MIX"]
+
     package func registerAll(in directory: URL) throws {
         let fm = FileManager.default
         let contents = try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        let rank = { (url: URL) in Self.overrideOrder.firstIndex(of: url.lastPathComponent.uppercased()) ?? Self.overrideOrder.count }
         let mixURLs = contents
             .filter { $0.pathExtension.uppercased() == "MIX" }
-            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            .sorted { (rank($0), $0.lastPathComponent) < (rank($1), $1.lastPathComponent) }
 
         for url in mixURLs {
             do {

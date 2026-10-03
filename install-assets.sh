@@ -49,8 +49,11 @@ REQUIRED_MEGS=(
 # UPDATEC.MIX holds the hi-res (640x400) UI art — the classic sidebar, radar
 # frame, buttons and build clock — and TEMPICNH/DESEICNH/WINTICNH.MIX the
 # per-theater hi-res build cameos (<NAME>ICNH.TEM etc.).
+# CCLOCAL/UPDATE/UPDATA.MIX are the Win95 release's hi-res fonts, strings and
+# title art (HTITLE.PCX); TRANSIT.MIX the choose-your-side screen (CHOOSE.WSA).
 CLASSIC_BASE_MIX=(CONQUER.MIX DESERT.MIX TEMPERAT.MIX WINTER.MIX LOCAL.MIX SOUNDS.MIX SPEECH.MIX
-                  UPDATEC.MIX TEMPICNH.MIX DESEICNH.MIX WINTICNH.MIX)
+                  UPDATEC.MIX TEMPICNH.MIX DESEICNH.MIX WINTICNH.MIX
+                  CCLOCAL.MIX UPDATE.MIX UPDATA.MIX TRANSIT.MIX)
 CLASSIC_SIDE_MIX=(GENERAL.MIX SCORES.MIX MOVIES.MIX)
 
 DRY_RUN=false

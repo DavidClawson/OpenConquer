@@ -65,6 +65,15 @@ if CommandLine.arguments.contains("--test-mix") {
     exit(0)
 }
 
+// --find-asset NAME...: which MIX archive (if any) holds each file
+if let i = CommandLine.arguments.firstIndex(of: "--find-asset") {
+    for name in CommandLine.arguments[(i + 1)...] where !name.hasPrefix("--") {
+        let size = mixManager.retrieve(name).map { " (\($0.count) bytes)" } ?? ""
+        print("\(name.uppercased()): \(mixManager.locate(name) ?? "NOT FOUND")\(size)")
+    }
+    exit(0)
+}
+
 // CPS/WSA/PAL decoders (Headless/GfxDiagnostics.swift): --test-gfx, --dump-gfx NAME OUTDIR [PAL]
 if CommandLine.arguments.contains("--test-gfx") { exit(runTestGfx()) }
 if let i = CommandLine.arguments.firstIndex(of: "--dump-gfx"), i + 2 < CommandLine.arguments.count {
