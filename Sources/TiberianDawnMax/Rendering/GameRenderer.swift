@@ -347,7 +347,9 @@ func renderGame(_ renderer: OpaquePointer?) {
     for obj in world.objects {
         if obj.kind == .structure {
             structures.append(obj)
-        } else {
+        } else if !obj.isInLimbo {
+            // Limbo = aboard a transport (or otherwise off the board): not drawn
+            // at its own position. Hovercraft cargo is drawn on deck instead.
             mobileObjects.append(obj)
         }
     }
@@ -531,6 +533,11 @@ func renderGame(_ renderer: OpaquePointer?) {
             // BOAT special case: the hull sprite only visually differs for east vs west.
             // Use the east-facing body frame and flip horizontally when traveling west.
             let upperType = obj.typeName.uppercased()
+            if upperType == "LST" {
+                // "Special hovercraft shape is ALWAYS N/S" (UNIT.CPP Draw_It)
+                frameIdx = 0
+                bodyFlip = SDL_FLIP_NONE
+            }
             if upperType == "BOAT" {
                 // Always use the east-facing body frame (facingIdx 8 → bodyShape = 24)
                 let eastFacingIdx = 8
@@ -552,13 +559,14 @@ func renderGame(_ renderer: OpaquePointer?) {
                                           w: shadowW, h: shadowH)
                 SDL_RenderFillRect(renderer, &shadowRect)
 
-                // Draw aircraft elevated
-                let elevatedY = screenY - altOffset
+                // Draw aircraft elevated, with the classic hover bob at flight level
+                let elevatedY = screenY - altOffset + aircraftHoverJitter(obj)
                 if let info = getObjectTexture(renderer, typeName: obj.typeName, frame: frameIdx, house: obj.house) {
                     let drawX = screenX - Int32(info.width) / 2
                     let drawY = elevatedY - Int32(info.height) / 2
                     var dstRect = SDL_Rect(x: drawX, y: drawY, w: Int32(info.width), h: Int32(info.height))
                     SDL_RenderCopyEx(renderer, info.texture, nil, &dstRect, 0, nil, bodyFlip)
+                    renderAircraftRotors(renderer, obj, x: screenX, y: elevatedY)
                 } else {
                     // Procedural aircraft: diamond shape
                     let hc = obj.house.displayColor
@@ -584,6 +592,12 @@ func renderGame(_ renderer: OpaquePointer?) {
                    drawX + Int32(info.width) < 0 || drawY + Int32(info.height) < 0 { continue }
                 var dstRect = SDL_Rect(x: drawX, y: drawY, w: Int32(info.width), h: Int32(info.height))
                 SDL_RenderCopyEx(renderer, info.texture, nil, &dstRect, 0, nil, bodyFlip)
+                if obj.isAircraft {
+                    renderAircraftRotors(renderer, obj, x: screenX, y: screenY)  // parked: idle rotors
+                }
+                if obj.isHovercraft && obj.hasCargo {
+                    renderHovercraftDeck(renderer, obj, x: screenX, y: screenY)
+                }
 
                 // Render turret overlay for turreted units (frame 32 + turretFacing)
                 if obj.hasTurret {
@@ -1290,6 +1304,76 @@ func renderIonBeam(_ renderer: OpaquePointer?, camX: Int, camY: Int) {
     SDL_RenderFillRect(renderer, &flashRect)
 }
 
+// MARK: - Hovercraft Deck Cargo
+
+/// Draw the units riding an LST on its deck, facing north, at the
+/// StoppingCoordAbs spots they'll step off from — the "piggy back" draw in
+/// UnitClass::Draw_It. They stay limboed (and unselectable) until unloaded.
+func renderHovercraftDeck(_ renderer: OpaquePointer?, _ lst: GameObject, x: Int32, y: Int32) {
+    guard let world = session.world else { return }
+    for (i, id) in lst.passengers.enumerated() {
+        guard let unit = world.findObject(id: id), unit.strength > 0 else { continue }
+        let deck = hovercraftDeckOffsets[i % hovercraftDeckOffsets.count]
+        let cx = x + Int32(deck.dx), cy = y + Int32(deck.dy)
+        // Frame 0 = facing north: infantry's standing pose, a vehicle's body;
+        // a turreted vehicle's north turret follows its 32 body frames.
+        var frames = [0]
+        if unit.kind == .unit && unit.hasTurret { frames.append(32) }
+        for frame in frames {
+            guard let info = getObjectTexture(renderer, typeName: unit.typeName, frame: frame, house: unit.house) else { continue }
+            var dst = SDL_Rect(x: cx - Int32(info.width) / 2, y: cy - Int32(info.height) / 2,
+                               w: Int32(info.width), h: Int32(info.height))
+            SDL_RenderCopy(renderer, info.texture, nil, &dst)
+        }
+    }
+}
+
+// MARK: - Aircraft Rotors
+
+/// Classic hover bob for helicopters holding at flight level
+/// (AircraftClass::Draw_It `_jitter`). Cosmetic — draw-time only.
+func aircraftHoverJitter(_ obj: GameObject) -> Int32 {
+    guard obj.altitude == flightLevel, !obj.isFixedWing else { return 0 }
+    let table: [Int32] = [0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, -1, -1, -1, 0]
+    return table[(Int(SDL_GetTicks() / 66) + obj.id) % 16]
+}
+
+/// Draw LROTOR/RROTOR.SHP over a rotor-equipped aircraft, mirroring
+/// AircraftClass::Draw_It: airborne blades spin fast (frames 0-3, see-through);
+/// parked blades idle (frames 4-11). The Chinook has two rotors placed fore and
+/// aft along its heading, 8-10px out by facing (`_stretch`); others get one,
+/// centered. `y` is the drawn (altitude-adjusted) body center.
+func renderAircraftRotors(_ renderer: OpaquePointer?, _ obj: GameObject, x: Int32, y: Int32) {
+    guard let at = AircraftType.from(iniName: obj.typeName.uppercased()),
+          let data = aircraftTypeDataTable[at], data.isRotorEquipped else { return }
+
+    let stage = Int(SDL_GetTicks() / 66) + obj.id
+    let airborne = obj.altitude > 0
+    let frame = airborne ? stage % 4 : (stage % 8) + 4
+    let alpha: UInt8 = airborne ? 140 : 200
+
+    func blit(_ name: String, _ cx: Double, _ cy: Double) {
+        guard let info = getObjectTexture(renderer, typeName: name, frame: frame, house: obj.house) else { return }
+        SDL_SetTextureAlphaMod(info.texture, alpha)
+        var dst = SDL_Rect(x: Int32(cx.rounded()) - Int32(info.width) / 2,
+                           y: Int32(cy.rounded()) - 2 - Int32(info.height) / 2,
+                           w: Int32(info.width), h: Int32(info.height))
+        SDL_RenderCopy(renderer, info.texture, nil, &dst)
+        SDL_SetTextureAlphaMod(info.texture, 255)  // textures are cached and shared
+    }
+
+    if at == .transport {
+        let stretch: [Double] = [8, 9, 10, 9, 8, 9, 10, 9]
+        let d = stretch[((obj.facing + 16) & 0xFF) / 32]
+        let rad = Double(obj.facing) / 256.0 * 2.0 * .pi
+        let ux = sin(rad), uy = -cos(rad)  // 0 = north, clockwise
+        blit("RROTOR", Double(x) + ux * d, Double(y) + uy * d)  // front
+        blit("LROTOR", Double(x) - ux * d, Double(y) - uy * d)  // rear
+    } else {
+        blit("RROTOR", Double(x), Double(y))
+    }
+}
+
 // MARK: - Game Minimap
 
 /// Player owns a Communications Center (HQ) or Advanced Comm. Center (EYE).
@@ -1302,6 +1386,7 @@ func playerHasCommsCenter(_ world: GameWorld) -> Bool {
 func playerRadarOnline(_ world: GameWorld) -> Bool {
     playerHasCommsCenter(world) && !getHouseState(world.playerHouse).isLowPower
 }
+
 func renderGameMinimap(_ renderer: OpaquePointer?, world: GameWorld) {
     let minimapCellSize: Int32 = 2
     let minimapSize: Int32 = 64 * minimapCellSize
@@ -1426,7 +1511,7 @@ func renderGameMinimap(_ renderer: OpaquePointer?, world: GameWorld) {
 
     // Draw mobile units on minimap as bright dots (only if visible)
     for obj in world.objects {
-        if obj.kind == .structure { continue }
+        if obj.kind == .structure || obj.isInLimbo { continue }
         // Skip enemies on non-visible cells
         if obj.house != world.playerHouse && !isCellVisible(obj.cell) { continue }
         let px = minimapX + Int32(obj.worldX / Double(tileSize)) * minimapCellSize

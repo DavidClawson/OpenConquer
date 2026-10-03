@@ -187,6 +187,7 @@ class GameObject {
 
     // Cargo (VC CargoClass) — passengers carried by transports (APC, TRAN, C17)
     var passengers: [Int] = []      // Object IDs of loaded passengers
+    var unloadTether: [Int] = []    // Hovercraft: just-unloaded units it waits on before leaving
     var isALoaner: Bool = false     // Transport is a loaner (auto-removed after delivery)
 
     // Flags (VC TechnoClass/ObjectClass)

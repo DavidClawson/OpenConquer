@@ -508,6 +508,11 @@ private func doBeachReinforcement(teamType: TeamType, team: ActiveTeam?, isGunbo
             if beachCell != nil { break }
         }
 
+        // Prefer the classic beach column (straight, rock-free run from the
+        // off-map row); the heuristic scan above is only a fallback.
+        let classicBeach = beachLandingCell(bounds: bounds, world: world)
+        if let classic = classicBeach { beachCell = classic }
+
         // Fallback: if no beach found, use waypoint 25 or center of map
         let landingCell = beachCell ?? session.scenarioWaypoints[25]
             ?? ((bounds.y + bounds.height / 2) * 64 + bounds.x + bounds.width / 2)
@@ -544,6 +549,9 @@ private func doBeachReinforcement(teamType: TeamType, team: ActiveTeam?, isGunbo
                 if spawnCellY != bounds.y + bounds.height - 1 { break }
             }
         }
+        // Classic: enter from the off-map row below the beach column, facing
+        // north (REINF.CPP SOURCE_BEACH: XY_Cell(Cell_X(beach), MapCellY+MapCellHeight)).
+        if classicBeach != nil { spawnCellY = bounds.y + bounds.height }
         let spawnY = Double(spawnCellY * 24) + 12.0
         let spawnX = Double(landingCellX * 24) + 12.0
 
@@ -552,7 +560,7 @@ private func doBeachReinforcement(teamType: TeamType, team: ActiveTeam?, isGunbo
         var cargoObjects: [GameObject] = []
 
         for slot in teamType.classSlots {
-            for i in 0..<slot.desiredCount {
+            for _ in 0..<slot.desiredCount {
                 let kind = slot.kind
                 let speed = resolveSpeed(typeName: slot.typeName, kind: kind)
                 let hp = resolveStrength(typeName: slot.typeName, kind: kind, scenarioStrength: 256)
@@ -570,7 +578,7 @@ private func doBeachReinforcement(teamType: TeamType, team: ActiveTeam?, isGunbo
                     typeName: slot.typeName,
                     house: teamType.house,
                     kind: kind,
-                    worldX: spawnX + Double(i) * 12.0, worldY: spawnY,
+                    worldX: spawnX, worldY: spawnY,
                     facing: 0,  // DIR_N — facing north (toward beach)
                     strength: hp,
                     mission: .move,
@@ -846,9 +854,27 @@ extension GameObject {
             return
         }
 
+        // An airborne transport that isn't flying anywhere comes down to take
+        // the passenger aboard (RADIO_HELLO → the helicopter lands); boarding
+        // waits for touchdown.
+        if transport.isAircraft && transport.altitude > 0 {
+            if !transport.isLanding && !transport.isTakingOff && transport.moveTargetX == nil {
+                transport.isLanding = true
+            }
+        }
+        let landed = !transport.isAircraft || transport.altitude == 0
+
+        // Board from any adjacent cell, diagonals included (≤ 36px). A 20px
+        // reach only worked when pathing happened to stop right beside the
+        // transport's center — the Chinook is ~2 cells long, and its own cell
+        // is occupied, so the walker often parked just out of reach.
         let dx = transport.worldX - worldX
         let dy = transport.worldY - worldY
-        if sqrt(dx * dx + dy * dy) <= 20.0 {
+        let dist = sqrt(dx * dx + dy * dy)
+        if dist <= 36.0 && !landed {
+            return  // beside it — wait for it to set down
+        }
+        if dist <= 36.0 {
             enterTransportID = nil
             moveTargetX = nil
             moveTargetY = nil
@@ -958,5 +984,147 @@ func findAirstrip(house: House) -> GameObject? {
         $0.house == house &&
         $0.strength > 0 &&
         $0.typeName.uppercased() == "AFLD"
+    }
+}
+
+// MARK: - Hovercraft (LST) Beach Landing
+
+/// Where cargo rides on an LST's deck, relative to its center: StoppingCoordAbs
+/// (CONST.CPP) — the cell center, then the four quarter-cell spots. Unloaded
+/// units step off from the same spot they were drawn on.
+let hovercraftDeckOffsets: [(dx: Double, dy: Double)] = [
+    (0, 0), (-6, -6), (6, -6), (-6, 6), (6, 6),
+]
+
+/// Port of DisplayClass::Calculated_Cell(SOURCE_BEACH) (DISPLAY.CPP): a column
+/// qualifies when its off-map row and last map row are water, the run of
+/// water north from there is unbroken (a rock or unit ends the scan and the
+/// column is rejected), and it ends on beach/clear/road with the landing cell
+/// and the two cells inland free of units and terrain. Prefers columns whose
+/// neighbors also qualify, then takes the one ~3/4 through the list.
+func beachLandingCell(bounds: MapBounds, world: GameWorld) -> Int? {
+    func land(_ cell: Int) -> LandType {
+        guard cell >= 0 && cell < 4096 else { return .rock }
+        return cellLandType(templateType: mapCells[cell].templateType, iconIndex: mapCells[cell].iconIndex)
+    }
+    let terrainCells = Set(scenarioData?.terrain.map { $0.cell } ?? [])
+    func hasTechno(_ cell: Int) -> Bool { !(world.occupancy[cell]?.isEmpty ?? true) }
+    func blocked(_ cell: Int) -> Bool { hasTechno(cell) || terrainCells.contains(cell) }
+
+    var cells: [Int] = []
+    for x in 0..<bounds.width {
+        let col = bounds.x + x
+        let offRow = (bounds.y + bounds.height) * 64 + col
+        // The off-map row may not exist on a map touching the 64-cell edge;
+        // treat it as water then (it's the sea the LST comes from).
+        if offRow < 4096 && land(offRow) != .water { continue }
+        if land(offRow - 64) != .water { continue }
+        var newCell = offRow
+        for y in stride(from: bounds.height, through: 0, by: -1) {
+            newCell = (bounds.y + y) * 64 + col
+            if newCell >= 4096 { continue }
+            if hasTechno(newCell) || land(newCell) != .water { break }
+        }
+        let l = land(newCell)
+        if (l == .beach || l == .clear || l == .road) && !blocked(newCell)
+            && !blocked(newCell - 64) && !blocked(newCell - 128) {
+            cells.append(newCell)
+        }
+    }
+
+    var alternate: [Int] = []
+    if cells.count >= 3 {
+        for i in 1..<(cells.count - 1)
+        where cells[i - 1] % 64 + 1 == cells[i] % 64 && cells[i + 1] % 64 - 1 == cells[i] % 64 {
+            alternate.append(cells[i])
+        }
+    }
+    func pick(_ list: [Int]) -> Int { list.count < 4 ? list[list.count - 1] : list[list.count - list.count / 4] }
+    guard var cell = !alternate.isEmpty ? pick(alternate) : (!cells.isEmpty ? pick(cells) : nil) else {
+        return nil
+    }
+    if scenarioData?.theater == .desert { cell += 64 }
+    return cell
+}
+
+extension GameObject {
+
+    var isHovercraft: Bool { typeName.uppercased() == "LST" }
+
+    /// Hovercraft MISSION_UNLOAD (UNIT.CPP Mission_Unload UNIT_HOVER,
+    /// Unload_Hovercraft_Process, DriveClass::Exit_Map): sail straight up the
+    /// beach column, put everyone ashore at once, wait for them to clear the
+    /// deck, then back off the south edge — the loaner cleanup deletes it there.
+    func tickHovercraftUnload() {
+        guard let world = session.world else { return }
+        let bounds = world.mapBounds ?? MapBounds(x: 0, y: 0, width: 64, height: 64)
+
+        if hasCargo {
+            if moveTargetX != nil {
+                driveStraightToTarget()
+                return
+            }
+            unloadHovercraftCargo(world)
+            return
+        }
+
+        // Tethered until each unit has stepped clear (or stopped trying).
+        unloadTether.removeAll { id in
+            guard let unit = world.findObject(id: id), unit.strength > 0 else { return true }
+            let clear = hypot(unit.worldX - worldX, unit.worldY - worldY) >= 24.0 || unit.mission != .move
+            if clear { unit.groupMoveSpeed = nil }  // off the deck: back to full speed
+            return clear
+        }
+        if !unloadTether.isEmpty { return }
+
+        if moveTargetX == nil {
+            moveTargetX = worldX
+            moveTargetY = Double((bounds.y + bounds.height + 2) * 24) + 12.0
+        }
+        driveStraightToTarget()
+    }
+
+    /// Detach all cargo in one go: each unit appears where it rode on deck and
+    /// walks onto the cell ahead (north) at half speed, as
+    /// Unload_Hovercraft_Process does (Set_Speed(0x80)).
+    private func unloadHovercraftCargo(_ world: GameWorld) {
+        for (i, id) in passengers.enumerated() {
+            guard let unit = world.findObject(id: id), unit.strength > 0 else { continue }
+            let deck = hovercraftDeckOffsets[i % hovercraftDeckOffsets.count]
+            unit.worldX = worldX + deck.dx
+            unit.worldY = worldY + deck.dy
+            unit.prevWorldX = unit.worldX
+            unit.prevWorldY = unit.worldY
+            unit.isInLimbo = false
+            unit.facing = 0
+            unit.mission = .move
+            unit.moveTargetX = worldX + deck.dx
+            unit.moveTargetY = worldY - 24.0 + deck.dy
+            unit.movePath = []
+            unit.groupMoveSpeed = unit.speed * 0.5
+            unloadTether.append(id)
+            if unit.isCommando && unit.house == world.playerHouse {
+                audioManager.play(.ramboRock, worldX: unit.worldX, worldY: unit.worldY)  // "Time to rock and roll"
+            }
+        }
+        passengers.removeAll()
+    }
+
+    /// Straight-line drive at full speed — the beach column is open water by
+    /// construction, and the spawn/exit rows lie off the map where pathfinding
+    /// can't go. Clears the target on arrival.
+    private func driveStraightToTarget() {
+        guard let tx = moveTargetX, let ty = moveTargetY else { return }
+        let dx = tx - worldX, dy = ty - worldY
+        let dist = hypot(dx, dy)
+        if dist <= speed {
+            worldX = tx
+            worldY = ty
+            moveTargetX = nil
+            moveTargetY = nil
+        } else {
+            worldX += dx / dist * speed
+            worldY += dy / dist * speed
+        }
     }
 }

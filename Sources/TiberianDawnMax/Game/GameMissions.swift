@@ -578,6 +578,8 @@ extension GameObject {
     func tickUnload() {
         if isMCV {
             tickMCVDeploy()
+        } else if isHovercraft {
+            tickHovercraftUnload()
         } else if isTransporter {
             // If transport still has a move target, move there first before unloading
             if hasCargo && moveTargetX != nil {

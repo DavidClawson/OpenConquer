@@ -1198,9 +1198,12 @@ func headlessTestCivEvacCommand() -> Int32 {
     }
 
     // 1. Negative first: a non-civilian boarding does NOT start the evac flight
+    // Both Chinooks are parked beside the infantry: boarding only happens on
+    // the ground (an airborne one is called down first).
     let apcHeli = createAircraft(world: world, type: .transport, house: .goodGuy,
                                  worldX: grunt.worldX + 18.0, worldY: grunt.worldY,
                                  facing: 0, mission: .guard_)
+    apcHeli.altitude = 0
     world.addObject(apcHeli)
     grunt.enterTransportID = apcHeli.id
     grunt.mission = .enter
@@ -1217,6 +1220,7 @@ func headlessTestCivEvacCommand() -> Int32 {
     let evacHeli = createAircraft(world: world, type: .transport, house: .goodGuy,
                                   worldX: moebius.worldX + 18.0, worldY: moebius.worldY,
                                   facing: 0, mission: .guard_)
+    evacHeli.altitude = 0
     world.addObject(evacHeli)
     moebius.enterTransportID = evacHeli.id
     moebius.mission = .enter
@@ -1233,6 +1237,7 @@ func headlessTestCivEvacCommand() -> Int32 {
     // 3. Fly out: off-map exit sets the flag, deletes without a 'kill'
     var ticks = 0
     while evacHeli.strength > 0 && ticks < 3000 {
+        evacHeli.tickAircraft()  // takeoff climb, as gameTick() runs it
         evacHeli.tickAircraftRetreat()
         ticks += 1
     }
@@ -1800,4 +1805,97 @@ private func parseDigest(_ output: String) -> String? {
         return String(line)
     }
     return nil
+}
+
+// MARK: - Transport helicopter flight (--test-heli-transport)
+
+/// ASSET-FREE: Chinook move/land/unload fidelity (AIRCRAFT.CPP Mission_Move,
+/// Process_Fly_To, Mission_Unload). A parked Chinook ordered to move lifts off,
+/// flies at no more than its max speed (aircraft used to step twice a tick),
+/// eases into the LZ, and lands there; a loaded one ordered to unload while
+/// airborne sets down before anyone gets out.
+func headlessTestHeliTransportCommand() -> Int32 {
+    print("test-heli-transport: Chinook takeoff / fly / land / unload")
+    let ini = """
+    [Basic]
+    BuildLevel=1
+    [GoodGuy]
+    Credits=50
+    [MAP]
+    Theater=TEMPERATE
+    X=2
+    Y=2
+    Width=60
+    Height=60
+    [INFANTRY]
+    0=GoodGuy,E1,256,1300,0,Guard,0,None
+    """
+    forcedGameSeed = 0x4E11_C0B7_E2A1_5EED
+    defer { forcedGameSeed = nil }
+    let saved = session.rules
+    session.rules = .classic1995
+    defer { session.rules = saved }
+
+    let data = parseScenarioData(INIFile(string: ini), name: "SYNTHHELI")
+    initGameWorld(scenario: data, scenarioName: "SYNTHHELI")
+    guard let world = session.world else { print("FAIL: no world"); return 1 }
+
+    // 1. Parked Chinook ordered 10 cells east
+    let heli = createAircraft(world: world, type: .transport, house: .goodGuy,
+                              worldX: 20 * 24 + 12, worldY: 20 * 24 + 12, facing: 64)
+    heli.altitude = 0
+    world.addObject(heli)
+    let targetX = heli.worldX + 240, targetY = heli.worldY
+    heli.moveTargetX = targetX
+    heli.moveTargetY = targetY
+    heli.mission = .move
+
+    var reachedFlightLevel = false
+    var maxStep = 0.0, lastStep = 0.0
+    var ticks = 0
+    while ticks < 400 {
+        let (px, py) = (heli.worldX, heli.worldY)
+        gameTick()
+        ticks += 1
+        let step = hypot(heli.worldX - px, heli.worldY - py)
+        if step > 0 { maxStep = max(maxStep, step); lastStep = step }
+        if heli.altitude == flightLevel { reachedFlightLevel = true }
+        if heli.mission == .guard_ && heli.altitude == 0 && reachedFlightLevel { break }
+    }
+    guard reachedFlightLevel else { print("FAIL: parked Chinook never took off"); return 1 }
+    guard maxStep <= heli.speed + 0.001 else {
+        print("FAIL: flew \(maxStep)px in one tick (max speed \(heli.speed)) — double-stepping"); return 1
+    }
+    guard lastStep < heli.speed * 0.5 else {
+        print("FAIL: no slowdown into the LZ (last step \(lastStep)px)"); return 1
+    }
+    guard abs(heli.worldX - targetX) < 0.01, abs(heli.worldY - targetY) < 0.01 else {
+        print("FAIL: ended at (\(heli.worldX), \(heli.worldY)), not the LZ"); return 1
+    }
+    guard heli.altitude == 0, heli.mission == .guard_ else {
+        print("FAIL: didn't land (altitude \(heli.altitude), mission \(heli.mission))"); return 1
+    }
+    print("  move: took off, max \(String(format: "%.2f", maxStep))px/tick, eased in, landed at the LZ (\(ticks) ticks)")
+
+    // 2. Airborne + loaded, ordered to unload → lands first, then unloads
+    guard let grunt = world.objects.first(where: { $0.typeName == "E1" }) else {
+        print("FAIL: E1 not placed"); return 1
+    }
+    let carrier = createAircraft(world: world, type: .transport, house: .goodGuy,
+                                 worldX: grunt.worldX, worldY: grunt.worldY, facing: 0)
+    world.addObject(carrier)
+    carrier.loadPassenger(grunt)
+    carrier.mission = .unload
+    var unloadedAtAltitude: Int? = nil
+    for _ in 0..<200 {
+        gameTick()
+        if !grunt.isInLimbo && unloadedAtAltitude == nil { unloadedAtAltitude = carrier.altitude }
+        if !carrier.hasCargo { break }
+    }
+    guard let alt = unloadedAtAltitude else { print("FAIL: passenger never unloaded"); return 1 }
+    guard alt == 0 else { print("FAIL: unloaded at altitude \(alt) — must land first"); return 1 }
+    print("  unload: landed, then the passenger got out")
+
+    print("PASS: Chinook takes off, flies at max speed, eases in, lands, and unloads on the ground")
+    return 0
 }

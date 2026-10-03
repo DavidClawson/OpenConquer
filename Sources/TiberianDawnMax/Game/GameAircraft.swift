@@ -158,10 +158,37 @@ extension GameObject {
             }
             return
         }
+        // No flight step here: every mission that moves an aircraft calls
+        // flyToward() itself. A shared step on top of those used to move all
+        // aircraft twice per tick (double speed).
+    }
 
-        // Normal flight: apply movement toward move target if flying
-        if altitude >= flightLevel && moveTargetX != nil {
-            let _ = flyToward()
+    /// Landable aircraft (the Chinook) set down at the end of a move.
+    var isLandable: Bool {
+        guard let at = AircraftType.from(iniName: typeName.uppercased()),
+              let data = aircraftTypeDataTable[at] else { return false }
+        return data.isLandable
+    }
+
+    /// MISSION_MOVE for aircraft (AIRCRAFT.CPP Mission_Move, helicopter branch):
+    /// take off if parked, fly to the LZ slowing over the last few cells, and —
+    /// for landable types — land there. Altitude changes run in tickAircraft().
+    func tickAircraftMove() {
+        if isTakingOff || isLanding { return }
+        guard moveTargetX != nil else {
+            mission = .guard_  // arrived (and touched down, if landable)
+            return
+        }
+        if altitude < flightLevel {
+            isTakingOff = true
+            return
+        }
+        if !flyToward(slowdown: isLandable) {
+            if isLandable {
+                isLanding = true
+            } else {
+                mission = .guard_
+            }
         }
     }
 
@@ -349,8 +376,12 @@ extension GameObject {
 
     /// Move aircraft directly toward target (no A* pathfinding — aircraft fly over everything)
     /// Returns true if still moving, false if arrived.
+    ///
+    /// `slowdown` eases into the landing zone like Process_Fly_To(true)
+    /// (AIRCRAFT.CPP): speed scales with the distance left inside 3 cells
+    /// (0x300 leptons), bounded to 1/8..full of max speed.
     @discardableResult
-    func flyToward() -> Bool {
+    func flyToward(slowdown: Bool = false) -> Bool {
         guard let targetX = moveTargetX, let targetY = moveTargetY else {
             return false
         }
@@ -362,6 +393,13 @@ extension GameObject {
         // Update facing
         if dist > 0.5 {
             facing = directionToFacing(dx: dx, dy: dy)
+        }
+
+        var speed = self.speed
+        if slowdown {
+            let leptons = dist * 256.0 / 24.0
+            let scaled = min(max(min(leptons, 768.0) / 3.0, 32.0), 255.0)
+            speed *= scaled / 255.0
         }
 
         if dist <= speed {
@@ -393,6 +431,15 @@ extension GameObject {
     func tickAircraftRetreat() {
         guard let world = session.world else { return }
         let bounds = world.mapBounds ?? MapBounds(x: 0, y: 0, width: 64, height: 64)
+
+        // A parked (or descending) aircraft lifts off before it heads out;
+        // tickAircraft() does the climb.
+        if isTakingOff { return }
+        if altitude < flightLevel {
+            isLanding = false
+            isTakingOff = true
+            return
+        }
 
         if moveTargetX == nil {
             // Head for the nearest edge, exiting a few cells beyond it

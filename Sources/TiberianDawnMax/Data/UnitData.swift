@@ -231,15 +231,16 @@ var unitTypeDataTable: [UnitType: UnitTypeData] = [
 
     .hover: UnitTypeData(
         type: .hover, iniName: "LST", fullName: "Hovercraft",
-        buildLevel: 99, prerequisite: .none, cost: 1000, scenario: 99, ownable: .bothAll,
-        strength: 200, armor: .aluminum, primaryWeapon: .m60mg, secondaryWeapon: nil,
-        sightRange: 5, ammo: -1,
-        speed: .hover, maxSpeed: .medium, rot: 5,
-        isBuildable: false, isLeader: false, hasTurret: true, isTwoShooter: false,
+        // Values per UDATA.CPP UnitHover: unarmed, no turret, MPH_MEDIUM_FAST.
+        buildLevel: 99, prerequisite: .none, cost: 300, scenario: 99, ownable: .bothAll,
+        strength: 400, armor: .aluminum, primaryWeapon: nil, secondaryWeapon: nil,
+        sightRange: 3, ammo: -1,
+        speed: .hover, maxSpeed: .mediumFast, rot: 127,
+        isBuildable: false, isLeader: false, hasTurret: false, isTwoShooter: false,
         isTransporter: true, isCrushable: false, isCrusher: false, isHarvester: false,
-        isCloakable: false, isRepairable: true, hasCrew: true, isGigundo: true,
-        isStealthy: false, isAnimating: true, isLockTurret: false,
-        riskValue: 80, rewardValue: 35, explosion: .fball1, defaultMission: .hunt
+        isCloakable: false, isRepairable: false, hasCrew: false, isGigundo: true,
+        isStealthy: false, isAnimating: false, isLockTurret: false,
+        riskValue: 80, rewardValue: 40, explosion: .fball1, defaultMission: .hunt
     ),
 
     .mhq: UnitTypeData(

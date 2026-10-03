@@ -115,12 +115,7 @@ func gameTick() {
             case .return_:
                 obj.tickAircraftReturn()
             case .move:
-                if obj.altitude >= flightLevel {
-                    let arrived = !obj.flyToward()
-                    if arrived {
-                        obj.mission = .guard_
-                    }
-                }
+                obj.tickAircraftMove()
             case .hunt, .timedHunt:
                 obj.tickAircraftGuard()
                 if obj.mission == .guard_ { obj.mission = .hunt }
@@ -130,7 +125,10 @@ func gameTick() {
             case .unload:
                 // Aircraft transport unloading (C17/TRAN) — handled by tickReinforcements
                 // for pending deliveries; direct unload for already-arrived transports
-                if obj.hasCargo && obj.moveTargetX == nil {
+                if obj.hasCargo && obj.moveTargetX == nil && obj.isLandable && obj.altitude > 0 {
+                    // A Chinook sets down before opening up (Mission_Unload lands first)
+                    if !obj.isLanding { obj.isLanding = true }
+                } else if obj.hasCargo && obj.moveTargetX == nil {
                     obj.tickAPCUnload()
                 } else if obj.moveTargetX != nil {
                     // Still flying to drop zone

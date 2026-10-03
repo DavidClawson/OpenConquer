@@ -420,6 +420,10 @@ def make_sprite_sheet(frames, frame_w, frame_h, max_cols=16):
 # The MEG path prefix for TD sprites
 MEG_PREFIX = "DATA\\ART\\TEXTURES\\SRGB\\TIBERIAN_DAWN\\"
 
+# Sprites shared with Red Alert, stored in TEXTURES_COMMON_SRGB.MEG.
+COMMON_VFX_PREFIX = "DATA\\ART\\TEXTURES\\SRGB\\COMMON\\VFX\\"
+COMMON_VFX = ["LROTOR", "RROTOR"]
+
 
 def categorize_meg_entries(meg):
     """Sort MEG entries into categories by subdirectory."""
@@ -782,6 +786,29 @@ def main():
                     sheet_info = f"  sheet: {mb:.1f}MB"
             print(f"  OK: {sprite_name:12s}  {frame_count:4d} frames  {cw}x{ch} canvas{sheet_info}")
             extracted += 1
+
+    # --- Shared VFX (helicopter rotors) ---
+    # LROTOR/RROTOR are shared by both games, so they live in
+    # TEXTURES_COMMON_SRGB.MEG under COMMON\VFX\, not the TD MEG.
+    if category in ('all', 'vfx'):
+        common_path = os.path.join(data_dir, 'TEXTURES_COMMON_SRGB.MEG')
+        if os.path.exists(common_path):
+            common = MEGFile(common_path)
+            vfx_dir = os.path.join(output_dir, 'vfx')
+            os.makedirs(vfx_dir, exist_ok=True)
+            for sprite_name in COMMON_VFX:
+                if only_set and sprite_name not in only_set:
+                    continue
+                zip_data = common.read_file(f"{COMMON_VFX_PREFIX}{sprite_name}.ZIP")
+                result = extract_sprite_zip(zip_data, sprite_name, vfx_dir, save_sheets) if zip_data else None
+                if result is None:
+                    print(f"  FAILED to extract: {sprite_name} (common)")
+                    failed += 1
+                    continue
+                print(f"  OK: {sprite_name:12s}  {result[0]:4d} frames  (common)")
+                extracted += 1
+        else:
+            print(f"  (skipping rotors: {common_path} not found)")
 
     # --- UI (cursors + sidebar meters) ---
     if category == 'all':

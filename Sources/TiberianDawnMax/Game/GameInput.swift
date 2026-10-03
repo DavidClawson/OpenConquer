@@ -101,7 +101,7 @@ func handleGameLeftUp(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
         for obj in world.objects {
             if obj.kind == .structure { continue }
             if obj.house != world.playerHouse { continue }  // Only select friendly units
-            if obj.strength <= 0 { continue }
+            if obj.strength <= 0 || obj.isInLimbo { continue }  // aboard a transport
             if obj.worldX >= topLeft.worldX && obj.worldX <= bottomRight.worldX &&
                obj.worldY >= topLeft.worldY && obj.worldY <= bottomRight.worldY {
                 obj.isSelected = true
@@ -171,7 +171,7 @@ func handleGameLeftUp(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
         var nearestDist = Double.infinity
 
         for obj in world.objects {
-            if obj.kind == .structure { continue }
+            if obj.kind == .structure || obj.isInLimbo { continue }
             let dx = obj.worldX - worldPos.worldX
             let dy = obj.worldY - worldPos.worldY
             let dist = sqrt(dx * dx + dy * dy)
@@ -190,6 +190,23 @@ func handleGameLeftUp(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
             clicked.mission = .unload
             audioManager.play(audioManager.unitAcknowledgeSound())
             // Clear selection state
+            input.selectionBoxStartX = nil
+            input.selectionBoxStartY = nil
+            input.selectionBoxEndX = nil
+            input.selectionBoxEndY = nil
+            input.isDragging = false
+            return
+        }
+
+        // Clicking our own selected, loaded transport unloads it (classic
+        // ACTION_SELF). A Chinook lands first — see the .unload aircraft case.
+        if let transport = ownTransport(atWorldX: worldPos.worldX, worldY: worldPos.worldY, world: world),
+           transport.isSelected, transport.hasCargo, transport.mission != .unload {
+            transport.mission = .unload
+            transport.moveTargetX = nil
+            transport.moveTargetY = nil
+            transport.movePath = []
+            audioManager.play(audioManager.unitAcknowledgeSound())
             input.selectionBoxStartX = nil
             input.selectionBoxStartY = nil
             input.selectionBoxEndX = nil

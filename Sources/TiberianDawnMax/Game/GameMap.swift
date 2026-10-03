@@ -288,6 +288,9 @@ func resolveStackedUnits() {
             // Only nudge units that aren't already on a path; a unit mid-move
             // will resolve itself.
             guard obj.moveTargetX == nil else { continue }
+            // A beached hovercraft shares its cell with the units stepping off
+            // its deck by design — it leaves on its own once they're clear.
+            guard !obj.isHovercraft else { continue }
             picked = obj
             break
         }

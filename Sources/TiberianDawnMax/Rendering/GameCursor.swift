@@ -149,6 +149,13 @@ func renderGameCursor(_ renderer: OpaquePointer?, world: GameWorld) {
                 }
             }
 
+            // A selected, loaded transport of ours under the cursor → unload (deploy cursor)
+            if !isHoveringMCV,
+               let transport = ownTransport(atWorldX: worldPos.worldX, worldY: worldPos.worldY, world: world),
+               transport.isSelected, transport.hasCargo {
+                isHoveringMCV = true
+            }
+
             if isHoveringMCV {
                 cursor = cursorDeploy
             } else if let enemy = findEnemyAtWorldPos(worldX: worldPos.worldX, worldY: worldPos.worldY) {

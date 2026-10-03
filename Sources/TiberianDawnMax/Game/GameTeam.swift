@@ -642,8 +642,11 @@ extension ActiveTeam {
 
         for id in members {
             if let obj = world.findObject(id: id), obj.strength > 0 {
-                // Set to guard if idle
-                if obj.mission == .move {
+                // Set to guard if idle. An aircraft still flying its move is
+                // left to finish it: the team counts "arrived" within
+                // teamStrayDistance, and halting there froze a Chinook in a
+                // hover short of its LZ instead of letting it land.
+                if obj.mission == .move && !obj.isAircraft {
                     obj.mission = .guard_
                     obj.moveTargetX = nil
                     obj.moveTargetY = nil

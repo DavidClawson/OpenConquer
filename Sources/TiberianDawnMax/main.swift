@@ -239,6 +239,11 @@ if CommandLine.arguments.contains("--test-civ-evac") {
     exit(headlessTestCivEvacCommand())
 }
 
+// Chinook move/land/unload self-test: --test-heli-transport
+if CommandLine.arguments.contains("--test-heli-transport") {
+    exit(headlessTestHeliTransportCommand())
+}
+
 // Enhanced-AI ruleset gating self-test: --test-ai-gating
 if CommandLine.arguments.contains("--test-ai-gating") {
     exit(headlessTestAIGatingCommand())

@@ -64,6 +64,7 @@ watching the game. Run the built binary directly:
 ./.build/debug/TiberianDawnMax --test-campaign-graph             # ASSET-FREE: CountryArray branching + GDI sabotage skip — runs in CI
 ./.build/debug/TiberianDawnMax --test-reinforcements             # ASSET-FREE: Edge= entry, team mission lists, loaner + limbo fidelity — runs in CI
 ./.build/debug/TiberianDawnMax --test-civ-evac                   # ASSET-FREE: civilian-evacuation win model (SCG11/SCG12) — runs in CI
+./.build/debug/TiberianDawnMax --test-heli-transport             # ASSET-FREE: Chinook takeoff / single-speed flight / LZ slowdown / land / land-before-unload — runs in CI
 ./.build/debug/TiberianDawnMax --test-ai-gating                  # ASSET-FREE: enhanced enemy-AI layer OFF under classic1995 — runs in CI
 ./.build/debug/TiberianDawnMax --ai-parity    <SCEN> <ticks>      # B3: assert the AI decide() phase is pure (no RNG/world mutation)
 ./.build/debug/TiberianDawnMax --ai-trace     <SCEN> <ticks>      # B3: print the per-house goal/decision stream each decide tick
@@ -91,10 +92,18 @@ simulation shows up as a changed digest. (Other diagnostic flags: `--test-mix`,
   their digests are **not comparable** — `--headless SCG01EA 4000` and
   `--determinism SCG01EA 4000` print different digests for the same code. Compare
   like-for-like. The documented regression baselines are the `--determinism`
-  values (as of 2026-07-24, **default ruleset = `classic1995`, veterancy OFF,
+  values (as of 2026-10-02, **default ruleset = `classic1995`, veterancy OFF,
   enhanced enemy AI OFF**):
-  SCG01EA 2500t `0x70572C2165FB3BBC`, 4000t `0xB3E6E8566D689265`,
+  SCG01EA 2500t `0x6F23B2EEA84E59F6`, 4000t `0x61141BE711B8B2CD`,
   SCB01EA 4000t `0xE824320DE6F2C796`.
+  Both SCG01EA digests changed (from `0x70572C2165FB3BBC` / `0xB3E6E8566D689265`)
+  when the hovercraft (LST) beach landing was ported to classic fidelity:
+  UDATA.CPP stats (MPH_MEDIUM_FAST, unarmed, 400 hp), the Calculated_Cell
+  SOURCE_BEACH column pick with an off-map entry and a straight run in
+  (`beachLandingCell`), all cargo unloading at once from the deck spots at
+  half speed, a tether wait, and the exit off the south edge
+  (`tickHovercraftUnload`). SCG01EA's opening reinforcement is a hovercraft,
+  so its run diverges; SCB01EA has none in-window and didn't move.
   All three digests changed (from `0xD188B0F93C6A9815` / `0xCDD2FC25630E52F8` /
   `0xD0A4B022F77129B4`) when the enhanced (non-classic) enemy-AI layer became
   a ruleset toggle that is OFF in `classic1995` (`Ruleset.enhancedEnemyAI`):
