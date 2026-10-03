@@ -41,7 +41,7 @@ Kept behind ruleset toggles so "classic" stays pure:
 
 ## Non-goals (for now)
 
-- **Multiplayer / netcode.** The determinism work would help here someday, but it's out of scope initially.
+- **Multiplayer / netcode** — not yet. The determinism and command-log work make lockstep play feasible; it's planned after the classic presentation milestone (see ROADMAP Phase 6).
 - **Red Alert or later titles.** Focus is Tiberian Dawn. (The engine may generalize later; not a near-term goal.)
 - **Bundling assets or a no-purchase-required experience.** Users must own the Remastered Collection. This is both legal necessity and respect for EA's IP.
 - **Being a drop-in OpenRA replacement.** Different philosophy: OpenRA modernizes; we stay faithful.

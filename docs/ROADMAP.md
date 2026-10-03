@@ -13,6 +13,7 @@ The phases below are the taxonomy; these milestones are the *order of attack* as
 - **M3 — Linux port** — Phase 5: image-loading abstraction, data-dir abstraction, Linux CI leg.
 - **M4 — Polish & packaging** *(mostly done)* — Phase 4: ~~unsigned `.app` bundle~~ ✅, ~~first-run setup screen~~ ✅, ~~DMG~~ ✅ (Sept 2026). Remaining: HD sidebar meters (#1); notarization is blocked on a paid Apple Developer account.
 - **M5 — Classic presentation** *(in progress — Oct 2026)* — the 1995 front end around the campaign: ~~CPS/WSA/PAL decoders~~ ✅, ~~VQA movie decoder~~ ✅, ~~movie player~~ ✅ (startup logo; intro/briefing/action before each campaign mission, win/lose after, intro/action on retry — per the scenario INI and Start_Scenario; Off/Pixels/Smooth/Enhanced setting), the animated map-selection screen (globe → region zoom → click-map territory pick, MAPSEL.CPP), and a `TITLE.CPS` title screen whose classic-style menu also carries our extras (Options, Rules, Skirmish, Editor). Optional live movie upscaling via Apple's low-latency super-resolution (see Phase 4).
+- **M6 — Multiplayer groundwork** *(planned — after M5)* — Phase 6, steps 1–2: per-player state and skirmish vs. the computer on the original multiplayer maps. Each step is useful alone; networking (steps 3–4) follows once these hold.
 
 ---
 
@@ -104,8 +105,31 @@ Assessed and tractable: the **only** Apple-specific code is PNG→texture decodi
 - [ ] Linux CI + build instructions.
 - [ ] (Stretch) Windows via the swift.org toolchain.
 
+## Phase 6 — Multiplayer  → Goals A, B  *(planned)*
+
+Lockstep, like the original, Red Alert and OpenRA: every machine runs the full
+simulation and players exchange only their orders ("tick 512: player 2 moves
+these units here"), so traffic is tiny and replays/spectating come almost free.
+The two hard prerequisites already exist: the sim is deterministic given a seed
+(`--determinism`, CI), and all input flows through logged, replayable
+`PlayerCommand`s (`--test-command-replay`).
+
+What still assumes a single human (as of Oct 2026):
+- **Selection** lives in the sim (`GameObject.isSelected`, `world.selectedObjects()`) — it must become per-player UI state.
+- **`playerHouse`** is referenced ~95 times across 27 Core files: fog, sidebar/production queues, credits, win/lose all assume one human house.
+- **Commands carry no sender** — each `PlayerCommand` needs its issuing house, and `apply` must validate ownership against it.
+- **Cross-machine determinism:** the sim uses `Double` math (and ~17 libm calls: sin/cos/atan2/…). Same build on Macs should agree; Mac↔Linux may drift (most RTS engines use fixed point). Detect drift by exchanging `WorldDigest` every N ticks and stopping on mismatch.
+
+Steps (each useful on its own):
+1. [ ] **Per-player state** — commands carry their house; selection out of the sim; per-house fog, production, credits, win/lose.
+2. [ ] **Skirmish vs. AI** on the original multiplayer maps (`SCM*.INI`, in GENERAL.MIX) — exercises the multi-house plumbing with no networking.
+3. [ ] **Two-player lockstep** over direct IP / LAN (Tailscale works among friends): input delay of a few ticks, per-tick command exchange, digest-based desync detection; saved replays fall out of this.
+4. [ ] **Lobby and connectivity** — a small relay server and invite codes instead of IP addresses / port forwarding. (Game Center would need the paid Apple Developer account, like notarization.)
+
+Every player installs their own game data, as today — nothing changes about the no-assets rule.
+
 ## Explicitly deferred / out of scope
 
-- Multiplayer / netcode.
+- Multiplayer *beyond* Phase 6 (matchmaking services, ranked play, more than a handful of players).
 - Red Alert and later titles.
 - Any bundling of assets.
