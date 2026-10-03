@@ -79,3 +79,74 @@ func runSidebarDiagnosticsIfRequested() -> Int32? {
     sidebarStyleOverride = nil
     return 0
 }
+
+// --list-buildables SCEN...
+// Loads each scenario and prints the player's owned structures and what the
+// sidebar offers (getAvailableStructures / getAvailableUnits).
+func runListBuildablesIfRequested() -> Int32? {
+    let args = CommandLine.arguments
+    guard let i = args.firstIndex(of: "--list-buildables") else { return nil }
+    for name in args[(i + 1)...] where !name.hasPrefix("--") {
+        guard runHeadless(scenario: name.uppercased(), ticks: 1, seed: nil) != nil else {
+            print("\(name): FAIL to load")
+            return 1
+        }
+        // runHeadless doesn't set the campaign's BuildLevel; read it as startNextMission does.
+        if let ini = mixManager.retrieve("\(name.uppercased()).INI").map({ INIFile(data: $0) }) {
+            session.scenarioBuildLevel = ini.int("Basic", "BuildLevel", default: 1)
+        }
+        print("\(name.uppercased()) level \(session.scenarioBuildLevel) owns \(getOwnedBuildingTypes().sorted())")
+        print("  structures: \(getAvailableStructures().map(\.name))")
+        print("  units:      \(getAvailableUnits().map(\.name))")
+    }
+    return 0
+}
+
+// --test-mcv-deploy [SCEN...]
+// Finds the player's MCV, orders it to deploy and reports the turn to
+// south-west, the yard's FACTMAKE build-up (frames, ticks) and that the yard
+// ends up working (mission guard). Default scenarios: those starting with an MCV.
+func runMCVDeployTestIfRequested() -> Int32? {
+    let args = CommandLine.arguments
+    guard let i = args.firstIndex(of: "--test-mcv-deploy") else { return nil }
+    var names = args[(i + 1)...].filter { !$0.hasPrefix("--") }.map { $0.uppercased() }
+    if names.isEmpty { names = ["SCG03EA", "SCB02EA"] }
+    var tested = 0
+    for name in names {
+        guard runHeadless(scenario: name, ticks: 1, seed: 1) != nil, let world = session.world,
+              let mcv = world.objects.first(where: { $0.isMCV && $0.house == world.playerHouse && $0.strength > 0 }) else {
+            print("\(name): no player MCV")
+            continue
+        }
+        tested += 1
+        mcv.strength = mcv.maxStrength / 2
+        let startFacing = mcv.facing
+        issue(.deploy(mcv: mcv.id))
+        var ticks = 0, turnTicks = 0, frames = Set<Int>()
+        var yard: GameObject?
+        while ticks < 600 {
+            gameTick()
+            ticks += 1
+            if yard == nil { yard = world.objects.first { $0.typeName == "FACT" && $0.house == world.playerHouse && $0.strength > 0 } }
+            if yard == nil { turnTicks = ticks }
+            if let y = yard {
+                if y.buildUpFrame >= 0 { frames.insert(y.buildUpFrame) }
+                if y.mission == .guard_ { break }
+            }
+        }
+        guard let y = yard else {
+            print("FAIL \(name): the MCV never deployed (facing \(mcv.facing))")
+            return 1
+        }
+        let buildTicks = ticks - turnTicks
+        print("\(name): MCV turned \(startFacing) -> 160 in \(turnTicks) ticks; FACTMAKE \(y.buildUpTotalFrames) frames, "
+              + "\(frames.count) shown over \(buildTicks) ticks; yard health \(y.strength)/\(y.maxStrength); mission \(y.mission)")
+        guard y.mission == .guard_, frames.count == y.buildUpTotalFrames, y.buildUpTotalFrames > 1,
+              (60...80).contains(buildTicks), y.strength < y.maxStrength else {
+            print("FAIL \(name)")
+            return 1
+        }
+    }
+    print(tested > 0 ? "PASS" : "FAIL: no scenario with an MCV")
+    return tested > 0 ? 0 : 1
+}

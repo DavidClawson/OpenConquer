@@ -293,28 +293,6 @@ func renderGame(_ renderer: OpaquePointer?) {
         if screenX > vw || screenY > vh ||
            screenX + pixW < 0 || screenY + pixH < 0 { continue }
 
-        // Resolve build-up frame count on first render (SHP data lives in rendering layer)
-        if obj.buildUpFrame >= 0 && obj.buildUpTotalFrames == 0 {
-            let spriteName = obj.typeName.uppercased()
-            if let shp = renderState.objectSHPCache[spriteName] {
-                obj.buildUpTotalFrames = max(1, shp.frames.count)
-            } else {
-                // Try loading the SHP to populate the cache
-                if let _ = getObjectTexture(renderer, typeName: spriteName, frame: 0, house: obj.house, theater: theater) {
-                    if let shp = renderState.objectSHPCache[spriteName] {
-                        obj.buildUpTotalFrames = max(1, shp.frames.count)
-                    }
-                }
-                if obj.buildUpTotalFrames == 0 {
-                    obj.buildUpTotalFrames = 1  // Fallback: skip animation
-                }
-            }
-            // For turreted structures, only body frames count for build-up
-            if obj.hasTurret && obj.buildUpTotalFrames > 32 {
-                obj.buildUpTotalFrames = 32
-            }
-        }
-
         // Warm the classic SHP cache before frame selection. pickStructureFrame
         // needs the total frame count to choose damaged/rubble frames; without
         // this, an as-yet-unloaded building reports 0 frames and always renders
@@ -326,10 +304,15 @@ func renderGame(_ renderer: OpaquePointer?) {
             _ = getObjectTexture(renderer, typeName: structSprite, frame: 0, house: obj.house, theater: theater)
         }
 
-        // Determine frame for structures (mirrors Vanilla-Conquer building.cpp:560-634)
+        // Determine frame for structures (mirrors Vanilla-Conquer building.cpp:560-634).
+        // While it goes up or is sold, a building draws its construction
+        // animation, <NAME>MAKE (BuildingClass::Draw_It, BSTATE_CONSTRUCTION).
         let structFrame: Int = pickStructureFrame(obj)
+        let building = obj.buildUpFrame >= 0 ? obj.typeName.uppercased() + "MAKE" : obj.typeName
 
-        if let info = getObjectTexture(renderer, typeName: obj.typeName, frame: structFrame, house: obj.house, theater: theater) {
+        if let info = getObjectTexture(renderer, typeName: building, frame: structFrame, house: obj.house, theater: theater)
+            ?? (building == obj.typeName ? nil
+                : getObjectTexture(renderer, typeName: obj.typeName, frame: 0, house: obj.house, theater: theater)) {
             let spriteX = screenX
             let spriteY = screenY + pixH - Int32(info.height)
             var dstRect = SDL_Rect(x: spriteX, y: spriteY, w: Int32(info.width), h: Int32(info.height))
@@ -340,7 +323,7 @@ func renderGame(_ renderer: OpaquePointer?) {
             // frame = Door_Stage() (0=closed, 1-3=opening, etc.) plus +4 for
             // damaged variants. Until production-driven door animation is
             // wired up we draw frame 0 always so the roof at least appears.
-            if obj.typeName.uppercased() == "WEAP" {
+            if obj.typeName.uppercased() == "WEAP" && obj.buildUpFrame < 0 {
                 let overlayFrame = obj.healthFraction < 0.5 ? 4 : 0
                 if let roof = getObjectTexture(renderer, typeName: "WEAP2", frame: overlayFrame, house: obj.house, theater: theater) {
                     let rx = screenX

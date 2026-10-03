@@ -1,4 +1,5 @@
 import Foundation
+import OpenConquerAssets
 
 // MARK: - Mission State Machine Implementations
 // Ported from Vanilla Conquer foot.cpp, unit.cpp, infantry.cpp, building.cpp
@@ -663,6 +664,22 @@ extension GameObject {
             if !canDeploy { break }
         }
 
+        // Try_To_Deploy (UNIT.CPP:1492): once the spot is legal the MCV turns
+        // to face south-west (DIR_SW) at its rate of turn, then unfolds.
+        let deployFacing = 160
+        if canDeploy && facing != deployFacing {
+            let rot = unitTypeDataTable[.mcv]?.rot ?? 5
+            let diff = (deployFacing - facing + 256) % 256
+            if diff <= rot || 256 - diff <= rot {
+                facing = deployFacing
+            } else if diff < 128 {
+                facing = (facing + rot) % 256
+            } else {
+                facing = (facing - rot + 256) % 256
+            }
+            return
+        }
+
         if canDeploy {
             // Deploy: remove MCV, create Construction Yard
             let deployCell = startY * 64 + startX
@@ -681,7 +698,12 @@ extension GameObject {
                 mission: .construction,
                 speed: 0.0
             )
-            // Start build-up animation
+            // The yard keeps the MCV's health ratio (Fixed_To_Cardinal of Health_Ratio).
+            if maxStrength > 0 {
+                let ratio = (strength << 8) / maxStrength
+                building.strength = max(1, (building.maxStrength * ratio + 0x80) >> 8)
+            }
+            // Start build-up animation (FACTMAKE.SHP)
             building.buildUpFrame = 0
             building.buildUpDelay = 0
             world.addObject(building)
@@ -712,21 +734,19 @@ extension GameObject {
 
     // MARK: - Building Build-Up Animation
 
-    /// Animate building construction frame by frame.
-    /// buildUpTotalFrames is resolved by the renderer on first draw (since frame count
-    /// comes from sprite data which is only available in the rendering layer).
+    /// Animate building construction: the <NAME>MAKE.SHP frames, spread over
+    /// five seconds whatever their count (BuildingTypeClass::One_Time,
+    /// BDATA.CPP:4147-4157); the building starts working when it finishes
+    /// (Mission_Construction, BUILDING.CPP:3539).
     package func tickBuildUp() {
         guard kind == .structure else {
             mission = .guard_
             return
         }
 
-        // Wait until renderer has resolved frame count
-        if buildUpTotalFrames == 0 {
-            return
-        }
+        if buildUpTotalFrames == 0 { buildUpTotalFrames = buildUpFrameCount(typeName) }
 
-        // If only 1 frame, skip animation but still trigger completion bonuses
+        // No construction animation: done at once, completion bonuses included
         if buildUpTotalFrames <= 1 {
             buildUpFrame = -1
             mission = .guard_
@@ -734,9 +754,8 @@ extension GameObject {
             return
         }
 
-        // Advance frame with delay (2 ticks per frame for smooth animation)
         buildUpDelay += 1
-        if buildUpDelay >= 2 {
+        if buildUpDelay >= buildUpFrameDelay(buildUpTotalFrames) {
             buildUpDelay = 0
             buildUpFrame += 1
 
@@ -971,6 +990,7 @@ extension GameObject {
 
         // Start deconstruction: play build-up animation in reverse
         // Set buildUpFrame to the last frame; tickDeconstruction will count down
+        if buildUpTotalFrames == 0 { buildUpTotalFrames = buildUpFrameCount(typeName) }
         if buildUpTotalFrames > 1 {
             buildUpFrame = buildUpTotalFrames - 1
             buildUpDelay = 0
@@ -990,10 +1010,7 @@ extension GameObject {
             return
         }
 
-        // Wait until renderer has resolved frame count
-        if buildUpTotalFrames == 0 {
-            return
-        }
+        if buildUpTotalFrames == 0 { buildUpTotalFrames = buildUpFrameCount(typeName) }
 
         // If only 1 frame, skip animation and sell immediately
         if buildUpTotalFrames <= 1 {
@@ -1001,9 +1018,9 @@ extension GameObject {
             return
         }
 
-        // Decrement frame with delay (2 ticks per frame, matching build-up speed)
+        // Count down at the build-up rate
         buildUpDelay += 1
-        if buildUpDelay >= 2 {
+        if buildUpDelay >= buildUpFrameDelay(buildUpTotalFrames) {
             buildUpDelay = 0
             buildUpFrame -= 1
 
@@ -1142,4 +1159,27 @@ extension GameObject {
             break
         }
     }
+}
+
+// MARK: - Construction animation data
+
+private var buildUpFrameCounts: [String: Int] = [:]
+
+/// Frames in a structure's construction animation (<NAME>MAKE.SHP), or 1 when
+/// it has none. Read from the game data so the simulation doesn't depend on
+/// what the renderer has loaded.
+package func buildUpFrameCount(_ typeName: String) -> Int {
+    let name = typeName.uppercased()
+    if let n = buildUpFrameCounts[name] { return n }
+    var count = 1
+    if let data = mixManager.retrieve("\(name)MAKE.SHP"), let shp = try? SHPFile(data: data) {
+        count = max(1, shp.frames.count)
+    }
+    buildUpFrameCounts[name] = count
+    return count
+}
+
+/// Ticks per construction frame: (5 * TICKS_PER_SECOND) / count (BDATA.CPP:4153).
+package func buildUpFrameDelay(_ count: Int) -> Int {
+    max(1, (5 * 15) / max(1, count))
 }
