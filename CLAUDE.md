@@ -84,7 +84,9 @@ e.g. `--headless SCG01EA 600` or `--determinism SCG01EA 2500`. The determinism
 check is the regression net for AI/pathfinding work: a change that perturbs the
 simulation shows up as a changed digest. (Other diagnostic flags: `--test-mix`,
 `--dump-scenario <NAME>`, `--test-gfx` / `--dump-gfx NAME OUTDIR [PAL]` for the
-CPS/WSA/PAL decoders — `Headless/GfxDiagnostics.swift`.) Implementation: `TiberianDawnMax/Headless/GameHeadless.swift`
+CPS/WSA/PAL decoders — `Headless/GfxDiagnostics.swift`; `--test-vqa NAME...` /
+`--dump-vqa NAME OUTDIR [--raw] [--ffmpeg-ima]` for the VQA movie decoder —
+`Headless/VQADiagnostics.swift`.) Implementation: `TiberianDawnMax/Headless/GameHeadless.swift`
 (scenario-backed tools) and `OpenConquerCore/SelfTests/` (the ASSET-FREE self-tests).
 
 **`swift test`** runs every ASSET-FREE self-test above (incl. `--test-synthetic 500`,
@@ -239,7 +241,7 @@ When reimplementing a behavior, grep the C++ for the relevant `Mission_*`,
 
 | Folder | What's there |
 |--------|--------------|
-| `OpenConquerAssets/` | MIX/SHP/ICN/INI/AUD/CPS/WSA/PAL parsers (shared LCW + XOR-delta in `WestwoodCodec`), asset manager |
+| `OpenConquerAssets/` | MIX/SHP/ICN/INI/AUD/CPS/WSA/PAL parsers (shared LCW + XOR-delta in `WestwoodCodec`), streaming VQA movie decoder (`VQAFile.swift`), asset manager |
 | `OpenConquerCore/Data/` | static type tables: units, buildings, infantry, aircraft, weapons, houses, sound IDs, facing tables |
 | `OpenConquerCore/Game/` | all simulation: loop, state, missions, AI, combat, economy, map/pathfinding, triggers, teams, save/load, campaign |
 | `OpenConquerCore/Scenario/` | INI scenario + map loaders |

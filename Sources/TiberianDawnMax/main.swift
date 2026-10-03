@@ -72,6 +72,9 @@ if let i = CommandLine.arguments.firstIndex(of: "--dump-gfx"), i + 2 < CommandLi
     exit(runDumpGfx(name: a[i + 1], outDir: a[i + 2], paletteName: i + 3 < a.count && !a[i + 3].hasPrefix("--") ? a[i + 3] : nil))
 }
 
+// --test-vqa NAME... / --dump-vqa NAME OUTDIR (Headless/VQADiagnostics.swift)
+if let code = runVQADiagnosticsIfRequested() { exit(code) }
+
 // Diagnostic: --dump-scenario <NAME>  prints map bounds, waypoints, etc.
 if let dumpIdx = CommandLine.arguments.firstIndex(of: "--dump-scenario"),
    dumpIdx + 1 < CommandLine.arguments.count {

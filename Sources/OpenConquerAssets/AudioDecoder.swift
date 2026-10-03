@@ -280,3 +280,91 @@ package func decodeIMAADPCM(_ data: Data, sampleCount: Int) -> [Int16] {
 
     return samples
 }
+
+// MARK: - Westwood IMA ADPCM stream (VQA SND2)
+
+/// Per-channel IMA ADPCM decoder state that persists across chunks.
+///
+/// VQA SND2 audio is one continuous IMA stream chopped into per-frame chunks:
+/// unlike the AUD chunks `decodeIMAADPCM` handles, an SND2 chunk carries no
+/// predictor/index header, so the predictor and step index must carry over
+/// from the previous chunk (Vanilla-Conquer common/soscodec.cpp keeps them in
+/// `_SOS_COMPRESS_INFO.Channels[]`, initialised once per movie by
+/// sosCODECInitStream: predictor 0, index 0).
+package struct IMAADPCMChannelState: Equatable {
+    package var predictor: Int32
+    package var stepIndex: Int
+
+    package init(predictor: Int32 = 0, stepIndex: Int = 0) {
+        self.predictor = predictor
+        self.stepIndex = stepIndex
+    }
+
+    /// Expand one 4-bit code. `.westwood` sums the diff bit by bit
+    /// (step>>3 + step>>2 + step>>1 + step) — the reference IMA arithmetic the
+    /// game's SOS codec uses (sosCODECGenerateDecompressTable, soscodec.cpp).
+    /// `.multiply` is ffmpeg's shortcut `((2*(n&7)+1)*step) >> 3`
+    /// (adpcm_ima_expand_nibble), which rounds differently by a few LSBs per
+    /// step and so drifts by up to a few hundred over a movie.
+    @inline(__always)
+    package mutating func expand(_ nibble: Int, arithmetic: IMAArithmetic = .westwood) -> Int16 {
+        let step = imaStepTable[stepIndex]
+        var diff: Int
+        if arithmetic == .westwood {
+            diff = step >> 3
+            if nibble & 4 != 0 { diff += step }
+            if nibble & 2 != 0 { diff += step >> 1 }
+            if nibble & 1 != 0 { diff += step >> 2 }
+        } else {
+            diff = ((2 * (nibble & 7) + 1) * step) >> 3
+        }
+        if nibble & 8 != 0 { diff = -diff }
+        predictor = max(-32768, min(32767, predictor + Int32(diff)))
+        stepIndex = max(0, min(88, stepIndex + imaIndexTable[nibble]))
+        return Int16(predictor)
+    }
+}
+
+/// How an IMA nibble becomes a predictor delta (see `IMAADPCMChannelState.expand`).
+package enum IMAArithmetic {
+    /// Bit-by-bit sum, as the original game decodes. The default.
+    case westwood
+    /// ffmpeg's multiply form; only for byte-comparing against ffmpeg output.
+    case multiply
+}
+
+/// Decode one headerless Westwood IMA ADPCM chunk (VQA SND2), continuing from
+/// `states` (one entry per channel, updated in place), and return interleaved
+/// 16-bit samples.
+///
+/// Layout (sosCODECDecompressDataTemplate, soscodec.cpp): mono is one byte per
+/// two samples, low nibble first. Stereo interleaves *bytes* L,R,L,R; each
+/// byte holds two consecutive samples of its channel (low nibble first).
+package func decodeWestwoodIMAChunk(
+    _ bytes: UnsafeRawBufferPointer,
+    channels: Int,
+    states: inout [IMAADPCMChannelState],
+    arithmetic: IMAArithmetic = .westwood
+) -> [Int16] {
+    let ch = max(1, channels)
+    while states.count < ch { states.append(IMAADPCMChannelState()) }
+    let bytesPerChannel = bytes.count / ch
+    var out = [Int16](repeating: 0, count: bytesPerChannel * 2 * ch)
+    out.withUnsafeMutableBufferPointer { dst in
+        for c in 0..<ch {
+            var state = states[c]
+            var si = c
+            var di = c
+            for _ in 0..<bytesPerChannel {
+                let b = Int(bytes[si])
+                si += ch
+                dst[di] = state.expand(b & 0x0F, arithmetic: arithmetic)
+                di += ch
+                dst[di] = state.expand(b >> 4, arithmetic: arithmetic)
+                di += ch
+            }
+            states[c] = state
+        }
+    }
+    return out
+}

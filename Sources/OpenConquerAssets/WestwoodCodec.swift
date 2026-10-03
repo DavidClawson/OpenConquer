@@ -91,6 +91,89 @@ package enum WestwoodCodec {
         return (dest, dp)
     }
 
+    /// Pointer-based LCW for hot paths (VQA decodes ~3 streams per frame):
+    /// the same opcode handling as `lcwDecompressCounted`, but decompressing
+    /// into caller-owned memory without allocating. Never writes past
+    /// `dest.count`; returns the number of bytes written (LCW_Uncompress's
+    /// return value, which VQA's CPLZ uses as the palette size).
+    ///
+    /// `relative`: the later Westwood variant, flagged by a leading 0x00 byte
+    /// that the caller strips, where the 0xFF long copy and the 0xC0-0xFD
+    /// medium copy take their offset *back from the write position* instead of
+    /// from the start of the output. Tiberian Dawn's LCW_Uncompress has no such
+    /// mode; ffmpeg's decode_format80 does.
+    package static func lcwDecompress(
+        _ source: UnsafeBufferPointer<UInt8>,
+        into dest: UnsafeMutableBufferPointer<UInt8>,
+        relative: Bool = false
+    ) -> Int {
+        let outputSize = dest.count
+        let srcCount = source.count
+        var sp = 0
+        var dp = 0
+
+        while dp < outputSize && sp < srcCount {
+            let op = source[sp]
+            sp += 1
+
+            if (op & 0x80) == 0 {
+                // 0x00-0x7F: Short copy back from dest
+                let count = Int(op >> 4) + 3
+                guard sp < srcCount else { break }
+                let offset = Int(source[sp]) + (Int(op & 0x0F) << 8)
+                sp += 1
+                let copyFrom = dp - offset
+                guard copyFrom >= 0 else { break }
+                let n = min(count, outputSize - dp)
+                for i in 0..<n {
+                    dest[dp] = dest[copyFrom + i]
+                    dp += 1
+                }
+
+            } else if (op & 0x40) == 0 {
+                if op == 0x80 { break }  // End of data
+                let count = Int(op & 0x3F)
+                let n = min(count, min(outputSize - dp, srcCount - sp))
+                for _ in 0..<n {
+                    dest[dp] = source[sp]
+                    dp += 1
+                    sp += 1
+                }
+
+            } else if op == 0xFE {
+                guard sp + 2 < srcCount else { break }
+                let count = Int(source[sp]) | (Int(source[sp + 1]) << 8)
+                let fillByte = source[sp + 2]
+                sp += 3
+                let n = min(count, outputSize - dp)
+                for _ in 0..<n {
+                    dest[dp] = fillByte
+                    dp += 1
+                }
+
+            } else {
+                // 0xFF: long copy (16-bit count); 0xC0-0xFD: medium copy (count + 3)
+                let long = op == 0xFF
+                guard sp + (long ? 3 : 1) < srcCount else { break }
+                var count = Int(op & 0x3F) + 3
+                if long {
+                    count = Int(source[sp]) | (Int(source[sp + 1]) << 8)
+                    sp += 2
+                }
+                var offset = Int(source[sp]) | (Int(source[sp + 1]) << 8)
+                sp += 2
+                if relative { offset = dp - offset }
+                let n = min(count, outputSize - dp)
+                for i in 0..<n {
+                    let srcIdx = offset + i
+                    dest[dp] = (srcIdx >= 0 && srcIdx < outputSize) ? dest[srcIdx] : 0
+                    dp += 1
+                }
+            }
+        }
+        return dp
+    }
+
     // MARK: XOR Delta (Format 40)
 
     /// Apply_XOR_Delta (xordelta.cpp): XORs `delta` onto `buffer` in place.
