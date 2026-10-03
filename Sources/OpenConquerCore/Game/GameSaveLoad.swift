@@ -3,7 +3,7 @@ import OpenConquerAssets
 
 // MARK: - Mid-Mission Save/Load System
 // Captures and restores full in-progress mission state, complementing the
-// between-mission campaign save (GameCampaign.swift).  Serialization patterns
+// between-mission campaign save (GameCampaignSave.swift).  Serialization patterns
 // are deliberately compatible with the existing SavedObject / SavedCell /
 // SavedTrigger structs so the two systems share vocabulary.
 
@@ -132,7 +132,7 @@ package struct MissionSaveData: Codable {
 // MARK: - Object Snapshot
 
 /// Extended object snapshot that captures ALL runtime state.
-/// Mirrors SavedObject from GameCampaign.swift but is self-contained.
+/// Mirrors SavedObject from GameCampaignSaveFormat.swift but is self-contained.
 package struct MidMissionSavedObject: Codable {
     // Identity
     package let id: Int
