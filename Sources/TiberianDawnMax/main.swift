@@ -106,6 +106,9 @@ if let code = runVQADiagnosticsIfRequested() { exit(code) }
 // --test-fonts / --dump-font NAME OUT.png "TEXT" (Headless/FontDiagnostics.swift)
 if let code = runFontDiagnosticsIfRequested() { exit(code) }
 
+// --extract-assets REMASTERED_DATA_DIR OUT_DATA_DIR (Headless/ImportDiagnostics.swift)
+if let code = runImportDiagnosticsIfRequested() { exit(code) }
+
 // --list-buildables SCEN... (Headless/SidebarDiagnostics.swift)
 if let code = runListBuildablesIfRequested() { exit(code) }
 if let code = runMCVDeployTestIfRequested() { exit(code) }
