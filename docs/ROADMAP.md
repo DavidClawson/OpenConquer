@@ -121,7 +121,7 @@ What still assumes a single human (as of Oct 2026):
 - **Cross-machine determinism:** the sim uses `Double` math (and ~17 libm calls: sin/cos/atan2/…). Same build on Macs should agree; Mac↔Linux may drift (most RTS engines use fixed point). Detect drift by exchanging `WorldDigest` every N ticks and stopping on mismatch.
 
 Steps (each useful on its own):
-1. [ ] **Per-player state** — commands carry their house; selection out of the sim; per-house fog, production, credits, win/lose.
+1. [ ] **Per-player state** — ~~commands carry their house~~ ✅, ~~selection out of the sim~~ ✅, ~~AI gating via `isHuman`~~ ✅; per-house production/credits, fog and win/lose next. Survey and plan: `docs/MULTIPLAYER.md`.
 2. [ ] **Skirmish vs. AI** on the original multiplayer maps (`SCM*.INI`, in GENERAL.MIX) — exercises the multi-house plumbing with no networking.
 3. [ ] **Two-player lockstep** over direct IP / LAN (Tailscale works among friends): input delay of a few ticks, per-tick command exchange, digest-based desync detection; saved replays fall out of this.
 4. [ ] **Lobby and connectivity** — a small relay server and invite codes instead of IP addresses / port forwarding. (Game Center would need the paid Apple Developer account, like notarization.)

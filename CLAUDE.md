@@ -261,7 +261,11 @@ When reimplementing a behavior, grep the C++ for the relevant `Mission_*`,
   `issue(_:)`; `gameTick` applies the queue first thing and appends each to
   `world.commandLog` with its tick. Seed + log replays a game exactly
   (`--test-command-replay`). New orders get a case there, not direct mutation
-  from UI code. UI-only state (selection, modes, placement cursor) stays in UI.
+  from UI code. Each command carries the house that issued it
+  (`issue(_:as:)`, default the player's) and only moves that house's objects
+  (`--test-command-ownership`). UI-only state (modes, placement cursor) stays
+  in UI; selection and control groups live in `session.selection`
+  (`GameObject.isSelected` is a view onto it), never in the world.
 - **Game objects** are a single `GameObject` **class** (reference type) in
   `Game/GameState.swift`. Behavior is attached via `extension GameObject` blocks
   spread across many files (missions, combat, economy, movement, animation).
