@@ -1,5 +1,7 @@
 import CSDL2
 import Foundation
+import OpenConquerAssets
+import OpenConquerCore
 
 // MARK: - Remastered HD Mouse Cursors
 //

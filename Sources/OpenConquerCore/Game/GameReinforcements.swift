@@ -1,0 +1,1132 @@
+import Foundation
+
+// MARK: - Reinforcements & Cargo Transport System
+// Ported from Vanilla Conquer reinf.cpp, cargo.cpp, cargo.h
+
+// MARK: - Pending Reinforcement (C17 fly-in delivery)
+
+/// Tracks a cargo plane flying across the map to deliver units.
+/// The C17 spawns at the right map edge, flies left to the drop zone,
+/// unloads its cargo, then continues off the left edge and is removed.
+package class PendingReinforcement {
+    package let transportId: Int            // Object ID of the C17 aircraft
+    package let dropCell: Int               // Cell where cargo is delivered
+    package let house: House
+    package var state: ReinforcementState = .flyingIn
+
+    package enum ReinforcementState {
+        case flyingIn       // Flying toward drop zone
+        case unloading      // At drop zone, deploying cargo
+        case flyingOut      // Cargo delivered, exiting map
+    }
+
+    package init(transportId: Int, dropCell: Int, house: House) {
+        self.transportId = transportId
+        self.dropCell = dropCell
+        self.house = house
+    }
+}
+
+// MARK: - Cargo Extension Methods on GameObject
+
+extension GameObject {
+
+    /// Whether this object type can carry passengers (APC, TRAN, C17, HOVER)
+    package var isTransporter: Bool {
+        let upper = typeName.uppercased()
+        // Check unit type data
+        if let ut = UnitType.from(iniName: upper), let data = unitTypeDataTable[ut] {
+            return data.isTransporter
+        }
+        // Check aircraft type data
+        if let at = AircraftType.from(iniName: upper), let data = aircraftTypeDataTable[at] {
+            return data.isTransporter
+        }
+        return false
+    }
+
+    /// Maximum passenger capacity for this transport
+    package var maxPassengers: Int {
+        let upper = typeName.uppercased()
+        switch upper {
+        case "APC":  return 5
+        case "TRAN": return 5   // Chinook
+        case "C17":  return 5   // Cargo plane
+        case "LST": return 5    // Hovercraft (Landing Ship Tank)
+        default:     return 0
+        }
+    }
+
+    /// True if this transport has passengers
+    package var hasCargo: Bool {
+        !passengers.isEmpty
+    }
+
+    /// Number of passengers currently loaded
+    package var passengerCount: Int {
+        passengers.count
+    }
+
+    /// Load a passenger into this transport.
+    /// The passenger enters limbo (disappears from map).
+    package func loadPassenger(_ infantry: GameObject) {
+        guard isTransporter else { return }
+        guard passengers.count < maxPassengers else { return }
+        guard infantry.kind == .infantry || infantry.kind == .unit else { return }
+
+        passengers.append(infantry.id)
+        infantry.isInLimbo = true
+    }
+
+    /// Unload all passengers around this transport's current position.
+    /// Passengers reappear on the map near the transport.
+    package func unloadPassengers() {
+        guard let world = session.world else { return }
+        guard !passengers.isEmpty else { return }
+
+        var unloadIndex = 0
+        for passengerId in passengers {
+            guard let passenger = world.findObject(id: passengerId) else { continue }
+            guard passenger.strength > 0 else { continue }
+
+            // Place passenger near the transport, offset by sub-cell positions
+            let offset = subCellOffset(unloadIndex % 5)
+            passenger.worldX = worldX + Double(offset.dx)
+            passenger.worldY = worldY + Double(offset.dy) + 12.0
+            passenger.prevWorldX = passenger.worldX
+            passenger.prevWorldY = passenger.worldY
+            passenger.isInLimbo = false
+            passenger.subCell = unloadIndex % 5
+
+            // Assign appropriate mission
+            passenger.mission = .guardArea
+            passenger.movePath = []
+            passenger.moveTargetX = nil
+            passenger.moveTargetY = nil
+
+            unloadIndex += 1
+        }
+        passengers.removeAll()
+
+        print("Unloaded \(unloadIndex) passengers from \(typeName) at (\(Int(worldX)), \(Int(worldY)))")
+    }
+
+    /// Unload a single passenger (LIFO order like VC CargoClass::Detach_Object)
+    package func unloadOnePassenger() -> GameObject? {
+        guard let world = session.world else { return nil }
+        guard !passengers.isEmpty else { return nil }
+
+        let passengerId = passengers.removeLast()
+        guard let passenger = world.findObject(id: passengerId) else { return nil }
+        guard passenger.strength > 0 else { return nil }
+
+        let offset = subCellOffset(passengers.count % 5)
+        passenger.worldX = worldX + Double(offset.dx)
+        passenger.worldY = worldY + Double(offset.dy) + 12.0
+        passenger.prevWorldX = passenger.worldX
+        passenger.prevWorldY = passenger.worldY
+        passenger.isInLimbo = false
+        if passenger.isCommando && passenger.house == world.playerHouse {
+            audioManager.play(.ramboRock, worldX: passenger.worldX, worldY: passenger.worldY)  // "Time to rock and roll"
+        }
+
+        if typeName.uppercased() == "LST" {
+            // Hovercraft beach landing: instead of materializing the unit on the
+            // shoreline and standing it still, walk it a few cells inland (north,
+            // away from the water the LST sailed in from — the same south-water
+            // assumption the sail-back uses) so units visibly disembark onto the
+            // shore rather than popping into existence on the beach.
+            passenger.mission = .move
+            passenger.moveTargetX = passenger.worldX
+            passenger.moveTargetY = max(12.0, worldY - 3.0 * 24.0)
+            passenger.movePath = []
+        } else {
+            // APC / destroyed-transport unload: disembark in place and hold.
+            passenger.mission = .guardArea
+            passenger.movePath = []
+            passenger.moveTargetX = nil
+            passenger.moveTargetY = nil
+        }
+
+        return passenger
+    }
+}
+
+// MARK: - Reinforcement Delivery System
+
+/// Create and place a reinforcement team — port of Do_Reinforcements
+/// (REINF.CPP:63-430).
+///
+/// - A team with a mission list gets a force-active `ActiveTeam` that executes
+///   those missions (REINF.CPP:75-80); members without one enter and hold.
+/// - Delivery source: any aircraft → air; hovercraft → beach; gunboat →
+///   shipping; otherwise the owning house's `Edge=` (REINF.CPP:111-128).
+/// - Loaner rules (REINF.CPP:169-199): a transport is a loaner only when it is
+///   carrying something AND is not a ground unit; a transport-only team (e.g.
+///   SCG12's evac chopper) IS the reinforcement and keeps its transport.
+///   Fixed-wing attack craft (A10) are always loaners.
+package func doReinforcements(teamName: String) {
+    guard session.world != nil else { return }
+
+    guard let teamType = session.teamTypes.first(where: { $0.name == teamName }) else {
+        print("Reinforcements: Unknown team type '\(teamName)'")
+        return
+    }
+    guard !teamType.classSlots.isEmpty else { return }
+
+    // Team composition flags (REINF.CPP:89-105)
+    var airTransport = false
+    var waterTransport = false
+    var onlyTransport = true
+
+    for slot in teamType.classSlots {
+        let upper = slot.typeName.uppercased()
+        let isAircraftType = AircraftType.from(iniName: upper) != nil
+        var isTransporterType = false
+        if let ut = UnitType.from(iniName: upper), let data = unitTypeDataTable[ut] {
+            isTransporterType = data.isTransporter
+            if data.isTransporter && data.speed == .hover {
+                waterTransport = true
+            }
+        }
+        if isTransporterType || isAircraftType {
+            if isAircraftType { airTransport = true }
+        } else {
+            onlyTransport = false
+        }
+    }
+
+    // Gunboat special case: keys off the FIRST class slot (REINF.CPP:123)
+    let isGunboat: Bool
+    if let first = teamType.classSlots.first,
+       let ut = UnitType.from(iniName: first.typeName.uppercased()), ut.isGunboat {
+        isGunboat = true
+    } else {
+        isGunboat = false
+    }
+
+    // Controlling team: only created when there are missions to run
+    // (REINF.CPP:70-80). The team handler assigns the members' missions.
+    let team = createReinforcementTeam(type: teamType)
+
+    if airTransport {
+        doAirReinforcement(teamType: teamType, team: team, onlyTransport: onlyTransport)
+    } else if waterTransport || isGunboat {
+        doBeachReinforcement(teamType: teamType, team: team, isGunboat: isGunboat)
+    } else {
+        doGroundReinforcement(teamType: teamType, team: team,
+                              edge: houseEdge(teamType.house))
+    }
+}
+
+// MARK: - Edge Cell Selection (DisplayClass::Calculated_Cell)
+
+/// Pick a clear cell along a map edge for a reinforcement to enter at — port of
+/// Calculated_Cell's SOURCE_NORTH/EAST/SOUTH/WEST arms (DISPLAY.CPP:2413-2450):
+/// random starting offset, then scan the whole edge for a cell where both the
+/// edge cell and its inward neighbor are passable. Returns nil if the edge is
+/// fully blocked. Uses the seeded RNG — this is simulation randomness.
+package func calculatedEdgeCell(edge: MapEdge, bounds: MapBounds) -> Int? {
+    func clear(_ cell: Int) -> Bool {
+        cell >= 0 && cell < 4096 && landPassability[cell]
+    }
+
+    switch edge {
+    case .north, .south:
+        let row = (edge == .north) ? bounds.y - 1 : bounds.y + bounds.height
+        let inward = (edge == .north) ? 64 : -64
+        let index = rndInt(1...bounds.width)
+        for x in 0..<bounds.width {
+            let cell = row * 64 + bounds.x + (x + index) % bounds.width
+            if clear(cell) && clear(cell + inward) { return cell }
+        }
+    case .east, .west:
+        let col = (edge == .east) ? bounds.x + bounds.width : bounds.x - 1
+        let inward = (edge == .east) ? -1 : 1
+        let index = rndInt(1...bounds.height)
+        for y in 0..<bounds.height {
+            let cell = (bounds.y + (y + index) % bounds.height) * 64 + col
+            if clear(cell) && clear(cell + inward) { return cell }
+        }
+    }
+    return nil
+}
+
+/// Facing (0-255) pointing inward from a map edge.
+package func edgeInwardFacing(_ edge: MapEdge) -> Int {
+    switch edge {
+    case .north: return 128  // enter from north → face south
+    case .east:  return 192  // face west
+    case .south: return 0    // face north
+    case .west:  return 64   // face east
+    }
+}
+
+/// Cell delta stepping inward (onto the map) from a given edge.
+package func edgeInwardDelta(_ edge: MapEdge) -> Int {
+    switch edge {
+    case .north: return 64
+    case .east:  return -1
+    case .south: return -64
+    case .west:  return 1
+    }
+}
+
+// MARK: - Air Reinforcement (C17 / Transport Helicopter / Fixed-Wing)
+
+/// Deliver reinforcements by air — port of the SOURCE_AIR arm of
+/// Do_Reinforcements (REINF.CPP:340-394). Aircraft enter from the owning
+/// house's `Edge=` (cargo planes align with the airstrip row, east edge).
+/// Fidelity points:
+/// - Transporters carrying cargo are loaners; a transport-only team keeps its
+///   transport (that IS the reinforcement — SCG12's evac chopper).
+/// - Team-less fixed-wing (A10 strike) gets MISSION_HUNT (REINF.CPP:366-368)
+///   and is always a loaner (REINF.CPP:191-193).
+/// - Teamed aircraft enter under team control and follow the mission list.
+private func doAirReinforcement(teamType: TeamType, team: ActiveTeam?, onlyTransport: Bool) {
+    guard let world = session.world else { return }
+    let bounds = world.mapBounds ?? MapBounds(x: 0, y: 0, width: 64, height: 64)
+    let edge = houseEdge(teamType.house)
+
+    // Split slots: air transports carry, everything else (incl. fixed-wing
+    // attack craft and any ground cargo) is delivered (REINF.CPP:169-199).
+    var transportSlots: [TeamClassSlot] = []
+    var otherSlots: [TeamClassSlot] = []
+    for slot in teamType.classSlots {
+        let upper = slot.typeName.uppercased()
+        if let at = AircraftType.from(iniName: upper), let data = aircraftTypeDataTable[at],
+           data.isTransporter {
+            transportSlots.append(slot)
+        } else {
+            otherSlots.append(slot)
+        }
+    }
+
+    // Drop destination: Calculated_Cell(SOURCE_AIR) = waypoint 25, else map
+    // center (DISPLAY.CPP:2452-2462); C17s align with the airstrip instead.
+    let hasC17 = transportSlots.contains { $0.typeName.uppercased() == "C17" }
+        || transportSlots.contains { AircraftType.from(iniName: $0.typeName.uppercased()) == .cargo }
+    var dropCell = session.scenarioWaypoints[25]
+        ?? ((bounds.y + bounds.height / 2) * 64 + bounds.x + bounds.width / 2)
+    if hasC17, let airstrip = findAirstrip(house: teamType.house) {
+        dropCell = airstrip.cell
+    }
+    let dropPos = cellToPixel(dropCell)
+    let dropX = Double(dropPos.px) + 12.0
+    let dropY = Double(dropPos.py) + 12.0
+
+    // Entry point along the house's edge (REINF.CPP:349-357); C17s always
+    // stream in from the east at the drop row (classic aligns with the
+    // airstrip docking row, east edge).
+    let entryPoint: (x: Double, y: Double)
+    if hasC17 {
+        entryPoint = (x: Double((bounds.x + bounds.width) * 24) + 48.0, y: dropY)
+    } else if let cell = calculatedEdgeCell(edge: edge, bounds: bounds) {
+        let pos = cellToPixel(cell)
+        entryPoint = (x: Double(pos.px) + 12.0, y: Double(pos.py) + 12.0)
+    } else {
+        entryPoint = (x: Double((bounds.x + bounds.width) * 24) + 48.0, y: dropY)
+    }
+    let entryFacing = edgeInwardFacing(edge)
+
+    // Cargo objects ride in limbo aboard the first transport
+    var cargoIds: [Int] = []
+    var fixedWingObjects: [GameObject] = []
+    for slot in otherSlots {
+        for _ in 0..<slot.desiredCount {
+            let upper = slot.typeName.uppercased()
+            if let at = AircraftType.from(iniName: upper),
+               let data = aircraftTypeDataTable[at], data.isFixedWing {
+                // Fixed-wing attack craft (A10): its own delivery, not cargo
+                let plane = createAircraft(
+                    world: world, type: at, house: teamType.house,
+                    worldX: entryPoint.x, worldY: entryPoint.y,
+                    facing: entryFacing,
+                    mission: team != nil ? .guard_ : .hunt  // REINF.CPP:366-368
+                )
+                plane.isALoaner = true  // A10s always loaners (REINF.CPP:191-193)
+                world.addObject(plane)
+                fixedWingObjects.append(plane)
+                team?.members.append(plane.id)
+                continue
+            }
+            let kind = slot.kind
+            let speed = resolveSpeed(typeName: slot.typeName, kind: kind)
+            let hp = resolveStrength(typeName: slot.typeName, kind: kind, scenarioStrength: 256)
+            let cargo = GameObject(
+                id: world.allocateId(),
+                typeName: slot.typeName,
+                house: teamType.house,
+                kind: kind,
+                worldX: dropX, worldY: dropY,
+                facing: 128,
+                strength: hp,
+                mission: .guard_,
+                speed: speed
+            )
+            cargo.isInLimbo = true
+            world.addObject(cargo)
+            cargoIds.append(cargo.id)
+            team?.members.append(cargo.id)
+        }
+    }
+
+    // Suppress the arrival announcement for loaded cargo planes — it plays at
+    // the unload instead (REINF.CPP:222-229 okvoice).
+    var announceNow = true
+
+    for slot in transportSlots {
+        for _ in 0..<slot.desiredCount {
+            let at = AircraftType.from(iniName: slot.typeName.uppercased()) ?? .cargo
+            let transport = createAircraft(
+                world: world, type: at, house: teamType.house,
+                worldX: entryPoint.x, worldY: entryPoint.y,
+                facing: entryFacing,
+                mission: .guard_
+            )
+            world.addObject(transport)
+            team?.members.append(transport.id)
+
+            if !cargoIds.isEmpty && transport.passengers.isEmpty {
+                // First transport carries everything (REINF.CPP:218-233)
+                transport.passengers = cargoIds
+                // A carrying transport is a loaner — delivery agent only
+                // (REINF.CPP:176-178). A transport-only team is NOT.
+                transport.isALoaner = !onlyTransport
+            }
+
+            if team == nil {
+                if transport.hasCargo {
+                    // Fly to the drop cell, unload, exit (classic
+                    // MISSION_UNLOAD → Assign_Destination, REINF.CPP:369-374)
+                    transport.mission = .unload
+                    transport.moveTargetX = dropX
+                    transport.moveTargetY = dropY
+                    session.pendingReinforcements.append(PendingReinforcement(
+                        transportId: transport.id, dropCell: dropCell, house: teamType.house))
+                    if at == .cargo { announceNow = false }
+                } else {
+                    // Empty transport IS the reinforcement: fly to the drop
+                    // cell and await orders (REINF.CPP:371-374)
+                    transport.mission = .move
+                    transport.moveTargetX = dropX
+                    transport.moveTargetY = dropY
+                }
+            }
+            // With a team: the force-active team's mission list drives it
+            // (move/unload waypoints) — no scripted exit, no forced unload.
+
+            print("Reinforcements: \(slot.typeName) entering from \(edge.rawValue) "
+                  + "with \(transport.passengerCount) passengers"
+                  + (team != nil ? " (teamed)" : ""))
+        }
+    }
+
+    if announceNow && teamType.house == world.playerHouse {
+        audioManager.speak(.reinforcements)
+    }
+}
+
+// MARK: - Beach Reinforcement (Hovercraft / LST)
+
+/// Deliver reinforcements via beach landing (hovercraft/LST) or shipping lane (gunboat).
+/// Ported from VC reinf.cpp SOURCE_BEACH / SOURCE_SHIPPING logic.
+/// The hover lander itself never joins the team (REINF.CPP:160); its cargo does.
+///
+/// Hovercraft: Spawns at southern water edge, sails north to beach, unloads cargo.
+/// Gunboat: Spawns at eastern water edge, sails west across map.
+private func doBeachReinforcement(teamType: TeamType, team: ActiveTeam?, isGunboat: Bool) {
+    guard let world = session.world else { return }
+    let bounds = world.mapBounds ?? MapBounds(x: 0, y: 0, width: 64, height: 64)
+
+    if isGunboat {
+        // SOURCE_SHIPPING: Gunboat arrives from east edge, sails west
+        // Find a water row for the gunboat (scan from top of map for water rows)
+        var shippingRow = bounds.y + bounds.height / 2
+        for y in bounds.y..<(bounds.y + bounds.height) {
+            let rightEdgeCell = y * 64 + bounds.x + bounds.width - 1
+            if rightEdgeCell < 4096 && waterPassability[rightEdgeCell] {
+                shippingRow = y
+                break
+            }
+        }
+
+        let spawnX = Double((bounds.x + bounds.width) * 24) + 24.0
+        let spawnY = Double(shippingRow * 24) + 12.0
+
+        for slot in teamType.classSlots {
+            for _ in 0..<slot.desiredCount {
+                let speed = resolveSpeed(typeName: slot.typeName, kind: .unit)
+                let hp = resolveStrength(typeName: slot.typeName, kind: .unit, scenarioStrength: 256)
+                let obj = GameObject(
+                    id: world.allocateId(),
+                    typeName: slot.typeName,
+                    house: teamType.house,
+                    kind: .unit,
+                    worldX: spawnX, worldY: spawnY,
+                    facing: 192,  // DIR_W
+                    strength: hp,
+                    mission: .hunt,
+                    speed: speed
+                )
+                obj.isALoaner = true
+                // Destination: west edge of map along same row (stay within bounds)
+                obj.moveTargetX = Double(bounds.x * 24) + 12.0
+                obj.moveTargetY = spawnY
+                world.addObject(obj)
+            }
+        }
+
+        print("Reinforcements: Gunboat arriving via shipping from east edge at row \(shippingRow)")
+    } else {
+        // SOURCE_BEACH: Hovercraft arrives from south, lands on beach.
+        // Scan columns from CENTER outward to find a beach (water→land transition),
+        // preferring columns near the middle of the map for natural-looking approach.
+        var beachCell: Int? = nil
+        let centerX = bounds.x + bounds.width / 2
+        for offset in 0..<bounds.width {
+            // Alternate left and right from center
+            let candidates = offset == 0 ? [centerX] : [centerX + offset, centerX - offset]
+            for x in candidates {
+                if x < bounds.x || x >= bounds.x + bounds.width { continue }
+
+                // Scan upward from bottom to find where water meets land
+                var foundWater = false
+                for y in stride(from: bounds.y + bounds.height - 1, through: bounds.y, by: -1) {
+                    let cell = y * 64 + x
+                    guard cell >= 0 && cell < 4096 else { continue }
+                    if waterPassability[cell] {
+                        foundWater = true
+                    } else if foundWater && landPassability[cell] {
+                        // Found land cell above water — this is a beach
+                        beachCell = cell
+                        break
+                    }
+                }
+                if beachCell != nil { break }
+            }
+            if beachCell != nil { break }
+        }
+
+        // Prefer the classic beach column (straight, rock-free run from the
+        // off-map row); the heuristic scan above is only a fallback.
+        let classicBeach = beachLandingCell(bounds: bounds, world: world)
+        if let classic = classicBeach { beachCell = classic }
+
+        // Fallback: if no beach found, use waypoint 25 or center of map
+        let landingCell = beachCell ?? session.scenarioWaypoints[25]
+            ?? ((bounds.y + bounds.height / 2) * 64 + bounds.x + bounds.width / 2)
+
+        let landingPos = cellToPixel(landingCell)
+        let destX = Double(landingPos.px) + 12.0
+        let destY = Double(landingPos.py) + 12.0
+
+        // Spawn hovercraft at the southernmost water cell in the landing column
+        // (NOT outside map bounds, which would be impassable for hover units)
+        let landingCellX = landingCell % 64
+        var spawnCellY = bounds.y + bounds.height - 1
+        for y in stride(from: bounds.y + bounds.height - 1, through: bounds.y, by: -1) {
+            let cell = y * 64 + landingCellX
+            if cell >= 0 && cell < 4096 && waterPassability[cell] {
+                spawnCellY = y
+                break
+            }
+        }
+        // If no water found in this column, try adjacent columns
+        if !waterPassability[spawnCellY * 64 + landingCellX] {
+            for dx in 1...5 {
+                for tryX in [landingCellX - dx, landingCellX + dx] {
+                    guard tryX >= bounds.x && tryX < bounds.x + bounds.width else { continue }
+                    for y in stride(from: bounds.y + bounds.height - 1, through: bounds.y, by: -1) {
+                        let cell = y * 64 + tryX
+                        if cell >= 0 && cell < 4096 && waterPassability[cell] {
+                            spawnCellY = y
+                            break
+                        }
+                    }
+                    if waterPassability[spawnCellY * 64 + min(63, max(0, tryX))] { break }
+                }
+                if spawnCellY != bounds.y + bounds.height - 1 { break }
+            }
+        }
+        // Classic: enter from the off-map row below the beach column, facing
+        // north (REINF.CPP SOURCE_BEACH: XY_Cell(Cell_X(beach), MapCellY+MapCellHeight)).
+        if classicBeach != nil { spawnCellY = bounds.y + bounds.height }
+        let spawnY = Double(spawnCellY * 24) + 12.0
+        let spawnX = Double(landingCellX * 24) + 12.0
+
+        // Separate transport from cargo
+        var transportObj: GameObject? = nil
+        var cargoObjects: [GameObject] = []
+
+        for slot in teamType.classSlots {
+            for _ in 0..<slot.desiredCount {
+                let kind = slot.kind
+                let speed = resolveSpeed(typeName: slot.typeName, kind: kind)
+                let hp = resolveStrength(typeName: slot.typeName, kind: kind, scenarioStrength: 256)
+
+                let upper = slot.typeName.uppercased()
+                let isTransport: Bool
+                if let ut = UnitType.from(iniName: upper), let data = unitTypeDataTable[ut] {
+                    isTransport = data.isTransporter
+                } else {
+                    isTransport = false
+                }
+
+                let obj = GameObject(
+                    id: world.allocateId(),
+                    typeName: slot.typeName,
+                    house: teamType.house,
+                    kind: kind,
+                    worldX: spawnX, worldY: spawnY,
+                    facing: 0,  // DIR_N — facing north (toward beach)
+                    strength: hp,
+                    mission: .move,
+                    speed: speed
+                )
+
+                if isTransport {
+                    transportObj = obj
+                    obj.isALoaner = true
+                } else {
+                    cargoObjects.append(obj)
+                    // Cargo joins the controlling team; the lander never does
+                    // (REINF.CPP:160)
+                    team?.members.append(obj.id)
+                }
+
+                world.addObject(obj)
+            }
+        }
+
+        // Load cargo into hovercraft and send it to the beach
+        if let transport = transportObj {
+            for cargo in cargoObjects {
+                transport.loadPassenger(cargo)
+            }
+            transport.moveTargetX = destX
+            transport.moveTargetY = destY
+            transport.mission = .unload
+        }
+
+        print("Reinforcements: Hovercraft approaching beach from south at (\(Int(spawnX)), \(Int(spawnY))) -> cell \(landingCell)")
+    }
+
+    if teamType.house == world.playerHouse {
+        audioManager.speak(.reinforcements)
+    }
+}
+
+// MARK: - Ground Reinforcement
+
+/// Deliver reinforcements by ground from the owning house's map edge — port of
+/// the SOURCE_NORTH/EAST/SOUTH/WEST arm of Do_Reinforcements
+/// (REINF.CPP:257-335). Teamed members enter with MISSION_GUARD and the team
+/// handler drives them; team-less members move one cell inward and hold.
+private func doGroundReinforcement(teamType: TeamType, team: ActiveTeam?, edge: MapEdge) {
+    guard let world = session.world else { return }
+    let bounds = world.mapBounds ?? MapBounds(x: 0, y: 0, width: 64, height: 64)
+
+    // Entry point along the house's edge; fall back to the edge midpoint if the
+    // whole edge is blocked (classic aborts — we degrade gracefully instead).
+    let entryCell: Int
+    if let cell = calculatedEdgeCell(edge: edge, bounds: bounds) {
+        entryCell = cell
+    } else {
+        switch edge {
+        case .north: entryCell = (bounds.y - 1) * 64 + bounds.x + bounds.width / 2
+        case .south: entryCell = (bounds.y + bounds.height) * 64 + bounds.x + bounds.width / 2
+        case .east:  entryCell = (bounds.y + bounds.height / 2) * 64 + bounds.x + bounds.width
+        case .west:  entryCell = (bounds.y + bounds.height / 2) * 64 + bounds.x - 1
+        }
+    }
+    let facing = edgeInwardFacing(edge)
+
+    // Create the members, splitting ground transports (APC) from the rest.
+    // Ground transports are never loaners (REINF.CPP:176): the crate arrives
+    // with the goods and both are keepers.
+    var transportObj: GameObject? = nil
+    var cargoObjects: [GameObject] = []
+
+    for slot in teamType.classSlots {
+        for _ in 0..<slot.desiredCount {
+            let kind = slot.kind
+            let speed = resolveSpeed(typeName: slot.typeName, kind: kind)
+            let hp = resolveStrength(typeName: slot.typeName, kind: kind, scenarioStrength: 256)
+
+            let upper = slot.typeName.uppercased()
+            var isTransport = false
+            if let ut = UnitType.from(iniName: upper), let data = unitTypeDataTable[ut] {
+                isTransport = data.isTransporter
+            }
+
+            let pos = cellToPixel(entryCell)
+            let obj = GameObject(
+                id: world.allocateId(),
+                typeName: slot.typeName,
+                house: teamType.house,
+                kind: kind,
+                worldX: Double(pos.px) + 12.0, worldY: Double(pos.py) + 12.0,
+                facing: facing,
+                strength: hp,
+                mission: .guard_,
+                speed: speed
+            )
+
+            if isTransport && transportObj == nil {
+                transportObj = obj
+            } else {
+                cargoObjects.append(obj)
+            }
+            world.addObject(obj)
+        }
+    }
+
+    // If a transport came along, everything else rides inside it
+    // (REINF.CPP:218-233: Attach + place only the transport).
+    var placedObjects: [GameObject]
+    if let transport = transportObj, !cargoObjects.isEmpty {
+        for cargo in cargoObjects {
+            transport.loadPassenger(cargo)
+        }
+        placedObjects = [transport]
+    } else {
+        placedObjects = cargoObjects
+        if let transport = transportObj { placedObjects.append(transport) }
+    }
+
+    // Stagger on-map entry cells: first object on the entry cell, the rest on
+    // nearby free cells along the edge (approximates the classic adjacent-cell
+    // unlimbo scatter, REINF.CPP:296-312).
+    var usedCells = Set<Int>()
+    for obj in placedObjects {
+        var cell = entryCell
+        if usedCells.contains(cell) {
+            let lateral = (edge == .north || edge == .south) ? 1 : 64
+            for step in 1...8 {
+                let candidates = [entryCell + step * lateral, entryCell - step * lateral]
+                if let free = candidates.first(where: {
+                    !usedCells.contains($0) && $0 >= 0 && $0 < 4096 && landPassability[$0]
+                }) {
+                    cell = free
+                    break
+                }
+            }
+        }
+        usedCells.insert(cell)
+        let pos = cellToPixel(cell)
+        obj.worldX = Double(pos.px) + 12.0
+        obj.worldY = Double(pos.py) + 12.0
+        obj.prevWorldX = obj.worldX
+        obj.prevWorldY = obj.worldY
+
+        if let team = team {
+            // Team handler assigns the real missions (REINF.CPP:287-289)
+            obj.mission = .guard_
+            team.members.append(obj.id)
+        } else {
+            // No mission list: step onto the map and hold (REINF.CPP:290-292)
+            let inwardCell = cell + edgeInwardDelta(edge)
+            let dest = cellToPixel(inwardCell)
+            obj.mission = .move
+            obj.moveTargetX = Double(dest.px) + 12.0
+            obj.moveTargetY = Double(dest.py) + 12.0
+        }
+    }
+    // Limboed passengers follow their transport's team membership implicitly —
+    // classic adds them to the team too; ours recruit into it on unload if the
+    // team still exists. Keep them listed so team strength counts the cargo.
+    if let team = team, let transport = transportObj, !cargoObjects.isEmpty {
+        for cargo in cargoObjects where cargo.id != transport.id {
+            team.members.append(cargo.id)
+        }
+    }
+
+    print("Reinforcements: ground team '\(teamType.name)' entering from \(edge.rawValue) at cell \(entryCell)"
+          + (team != nil ? " (teamed, \(teamType.missionList.count) missions)" : ""))
+
+    if teamType.house == world.playerHouse {
+        audioManager.speak(.reinforcements)
+    }
+}
+
+// MARK: - Reinforcement Tick
+
+/// Tick all pending reinforcement deliveries (C17 fly-in).
+/// Called every game tick from the main game loop.
+package func tickReinforcements() {
+    guard let world = session.world else { return }
+
+    var completedIndices: [Int] = []
+
+    for (index, pending) in session.pendingReinforcements.enumerated() {
+        guard let transport = world.findObject(id: pending.transportId) else {
+            completedIndices.append(index)
+            continue
+        }
+        guard transport.strength > 0 else {
+            // Transport destroyed — unload cargo where it died
+            transport.unloadPassengers()
+            completedIndices.append(index)
+            continue
+        }
+
+        switch pending.state {
+        case .flyingIn:
+            // Fly toward drop zone
+            let stillFlying = transport.flyToward()
+            if !stillFlying {
+                // Arrived at drop zone
+                pending.state = .unloading
+            }
+
+        case .unloading:
+            // Drop all cargo at the current position. The arrival announcement
+            // for loaded cargo planes plays here, not at map entry
+            // (REINF.CPP:222-229 okvoice → announced on unload).
+            if pending.house == world.playerHouse {
+                audioManager.speak(.reinforcements)
+            }
+            transport.unloadPassengers()
+            pending.state = .flyingOut
+
+            // Set exit target: fly off left edge of map
+            let exitX: Double
+            if let bounds = world.mapBounds {
+                exitX = Double(bounds.x * 24) - 96.0
+            } else {
+                exitX = -96.0
+            }
+            transport.moveTargetX = exitX
+            transport.moveTargetY = transport.worldY
+            transport.facing = 192  // Face west
+
+        case .flyingOut:
+            // Fly off map
+            let stillFlying = transport.flyToward()
+            if !stillFlying {
+                // Off map — remove transport
+                transport.leftMap = true
+                transport.strength = 0
+                completedIndices.append(index)
+            }
+
+            // Also remove if well past map edge
+            if let bounds = world.mapBounds {
+                if transport.worldX < Double(bounds.x * 24) - 48.0 {
+                    transport.leftMap = true
+                    transport.strength = 0
+                    if !completedIndices.contains(index) {
+                        completedIndices.append(index)
+                    }
+                }
+            }
+        }
+    }
+
+    // Remove completed reinforcements (in reverse order to preserve indices)
+    for index in completedIndices.sorted().reversed() {
+        if index < session.pendingReinforcements.count {
+            session.pendingReinforcements.remove(at: index)
+        }
+    }
+}
+
+// MARK: - Transport Boarding (player-ordered ACTION_ENTER)
+
+extension GameObject {
+
+    /// Tick the enter-transport mission: walk to the transport and load as a
+    /// passenger. A civilian (non-technician) boarding a transport AIRCRAFT
+    /// makes it immediately fly off the map — the classic evacuation flight
+    /// (AircraftClass::Receive_Message RADIO_IM_IN, AIRCRAFT.CPP:2530-2542).
+    package func tickEnterTransport() {
+        guard let world = session.world,
+              let tid = enterTransportID,
+              let transport = world.findObject(id: tid),
+              transport.strength > 0, !transport.isInLimbo,
+              transport.isTransporter,
+              transport.passengerCount < transport.maxPassengers else {
+            // Transport gone, full, or invalid — stand down
+            enterTransportID = nil
+            mission = .guard_
+            moveTargetX = nil
+            moveTargetY = nil
+            movePath = []
+            return
+        }
+
+        // An airborne transport that isn't flying anywhere comes down to take
+        // the passenger aboard (RADIO_HELLO → the helicopter lands); boarding
+        // waits for touchdown.
+        if transport.isAircraft && transport.altitude > 0 {
+            if !transport.isLanding && !transport.isTakingOff && transport.moveTargetX == nil {
+                transport.isLanding = true
+            }
+        }
+        let landed = !transport.isAircraft || transport.altitude == 0
+
+        // Board from any adjacent cell, diagonals included (≤ 36px). A 20px
+        // reach only worked when pathing happened to stop right beside the
+        // transport's center — the Chinook is ~2 cells long, and its own cell
+        // is occupied, so the walker often parked just out of reach.
+        let dx = transport.worldX - worldX
+        let dy = transport.worldY - worldY
+        let dist = sqrt(dx * dx + dy * dy)
+        if dist <= 36.0 && !landed {
+            return  // beside it — wait for it to set down
+        }
+        if dist <= 36.0 {
+            enterTransportID = nil
+            moveTargetX = nil
+            moveTargetY = nil
+            movePath = []
+            mission = .guard_
+            transport.loadPassenger(self)
+
+            // Classic technicians (per-instance IsTechnician civilians spawned
+            // from destroyed buildings) don't count — we never spawn those, so
+            // every isCivilian type qualifies here.
+            if transport.isAircraft,
+               let data = getInfantryTypeDataByName(typeName.uppercased()),
+               data.isCivilian {
+                transport.mission = .retreat
+                transport.moveTargetX = nil
+                transport.moveTargetY = nil
+            }
+        } else {
+            if moveTargetX == nil {
+                moveTargetX = transport.worldX
+                moveTargetY = transport.worldY
+                movePath = []
+            }
+            moveOneStep()
+        }
+    }
+}
+
+// MARK: - APC / Transport Unload Mission
+
+extension GameObject {
+
+    /// Tick the APC unload mission: eject passengers one at a time
+    package func tickAPCUnload() {
+        guard isTransporter else {
+            mission = .guard_
+            return
+        }
+
+        guard !passengers.isEmpty else {
+            mission = .guard_
+            return
+        }
+
+        guard let world = session.world else { return }
+
+        // Unload one passenger every 8 ticks
+        if world.tickCount % 8 == 0 {
+            if let _ = unloadOnePassenger() {
+                // Keep unloading until empty
+                if passengers.isEmpty {
+                    // If this is a loaner transport, it should leave
+                    if isALoaner {
+                        if isAircraft {
+                            // Fly off map
+                            let exitX: Double
+                            if let bounds = world.mapBounds {
+                                exitX = Double(bounds.x * 24) - 96.0
+                            } else {
+                                exitX = -96.0
+                            }
+                            moveTargetX = exitX
+                            moveTargetY = worldY
+                            mission = .move
+                        } else if cachedSpeedType == .hover || cachedSpeedType == .float_ {
+                            // Water transport (hovercraft): sail to southernmost water cell then get cleaned up
+                            if let bounds = world.mapBounds {
+                                // Find southernmost water cell in current column within bounds
+                                let col = cellX
+                                var exitY = cellY
+                                for y in stride(from: bounds.y + bounds.height - 1, through: cellY, by: -1) {
+                                    let cell = y * 64 + col
+                                    if cell >= 0 && cell < 4096 && waterPassability[cell] {
+                                        exitY = y
+                                        break
+                                    }
+                                }
+                                moveTargetX = worldX
+                                moveTargetY = Double(exitY * 24) + 12.0
+                            } else {
+                                moveTargetY = worldY + 96.0
+                                moveTargetX = worldX
+                            }
+                            facing = 128  // DIR_S
+                            mission = .move
+                        } else {
+                            // Ground transport: drive off map
+                            mission = .retreat
+                        }
+                    } else {
+                        mission = .guard_
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Helper: Find Airstrip
+
+/// Find the nearest airstrip belonging to a given house.
+package func findAirstrip(house: House) -> GameObject? {
+    guard let world = session.world else { return nil }
+
+    return world.objects.first {
+        $0.kind == .structure &&
+        $0.house == house &&
+        $0.strength > 0 &&
+        $0.typeName.uppercased() == "AFLD"
+    }
+}
+
+// MARK: - Hovercraft (LST) Beach Landing
+
+/// Where cargo rides on an LST's deck, relative to its center: StoppingCoordAbs
+/// (CONST.CPP) — the cell center, then the four quarter-cell spots. Unloaded
+/// units step off from the same spot they were drawn on.
+package let hovercraftDeckOffsets: [(dx: Double, dy: Double)] = [
+    (0, 0), (-6, -6), (6, -6), (-6, 6), (6, 6),
+]
+
+/// Port of DisplayClass::Calculated_Cell(SOURCE_BEACH) (DISPLAY.CPP): a column
+/// qualifies when its off-map row and last map row are water, the run of
+/// water north from there is unbroken (a rock or unit ends the scan and the
+/// column is rejected), and it ends on beach/clear/road with the landing cell
+/// and the two cells inland free of units and terrain. Prefers columns whose
+/// neighbors also qualify, then takes the one ~3/4 through the list.
+package func beachLandingCell(bounds: MapBounds, world: GameWorld) -> Int? {
+    func land(_ cell: Int) -> LandType {
+        guard cell >= 0 && cell < 4096 else { return .rock }
+        return cellLandType(templateType: mapCells[cell].templateType, iconIndex: mapCells[cell].iconIndex)
+    }
+    let terrainCells = Set(scenarioData?.terrain.map { $0.cell } ?? [])
+    func hasTechno(_ cell: Int) -> Bool { !(world.occupancy[cell]?.isEmpty ?? true) }
+    func blocked(_ cell: Int) -> Bool { hasTechno(cell) || terrainCells.contains(cell) }
+
+    var cells: [Int] = []
+    for x in 0..<bounds.width {
+        let col = bounds.x + x
+        let offRow = (bounds.y + bounds.height) * 64 + col
+        // The off-map row may not exist on a map touching the 64-cell edge;
+        // treat it as water then (it's the sea the LST comes from).
+        if offRow < 4096 && land(offRow) != .water { continue }
+        if land(offRow - 64) != .water { continue }
+        var newCell = offRow
+        for y in stride(from: bounds.height, through: 0, by: -1) {
+            newCell = (bounds.y + y) * 64 + col
+            if newCell >= 4096 { continue }
+            if hasTechno(newCell) || land(newCell) != .water { break }
+        }
+        let l = land(newCell)
+        if (l == .beach || l == .clear || l == .road) && !blocked(newCell)
+            && !blocked(newCell - 64) && !blocked(newCell - 128) {
+            cells.append(newCell)
+        }
+    }
+
+    var alternate: [Int] = []
+    if cells.count >= 3 {
+        for i in 1..<(cells.count - 1)
+        where cells[i - 1] % 64 + 1 == cells[i] % 64 && cells[i + 1] % 64 - 1 == cells[i] % 64 {
+            alternate.append(cells[i])
+        }
+    }
+    func pick(_ list: [Int]) -> Int { list.count < 4 ? list[list.count - 1] : list[list.count - list.count / 4] }
+    guard var cell = !alternate.isEmpty ? pick(alternate) : (!cells.isEmpty ? pick(cells) : nil) else {
+        return nil
+    }
+    if scenarioData?.theater == .desert { cell += 64 }
+    return cell
+}
+
+extension GameObject {
+
+    package var isHovercraft: Bool { typeName.uppercased() == "LST" }
+
+    /// Hovercraft MISSION_UNLOAD (UNIT.CPP Mission_Unload UNIT_HOVER,
+    /// Unload_Hovercraft_Process, DriveClass::Exit_Map): sail straight up the
+    /// beach column, put everyone ashore at once, wait for them to clear the
+    /// deck, then back off the south edge — the loaner cleanup deletes it there.
+    package func tickHovercraftUnload() {
+        guard let world = session.world else { return }
+        let bounds = world.mapBounds ?? MapBounds(x: 0, y: 0, width: 64, height: 64)
+
+        if hasCargo {
+            if moveTargetX != nil {
+                driveStraightToTarget()
+                return
+            }
+            unloadHovercraftCargo(world)
+            return
+        }
+
+        // Tethered until each unit has stepped clear (or stopped trying).
+        unloadTether.removeAll { id in
+            guard let unit = world.findObject(id: id), unit.strength > 0 else { return true }
+            let clear = hypot(unit.worldX - worldX, unit.worldY - worldY) >= 24.0 || unit.mission != .move
+            if clear { unit.groupMoveSpeed = nil }  // off the deck: back to full speed
+            return clear
+        }
+        if !unloadTether.isEmpty { return }
+
+        if moveTargetX == nil {
+            moveTargetX = worldX
+            moveTargetY = Double((bounds.y + bounds.height + 2) * 24) + 12.0
+        }
+        driveStraightToTarget()
+    }
+
+    /// Detach all cargo in one go: each unit appears where it rode on deck and
+    /// walks onto the cell ahead (north) at half speed, as
+    /// Unload_Hovercraft_Process does (Set_Speed(0x80)).
+    private func unloadHovercraftCargo(_ world: GameWorld) {
+        for (i, id) in passengers.enumerated() {
+            guard let unit = world.findObject(id: id), unit.strength > 0 else { continue }
+            let deck = hovercraftDeckOffsets[i % hovercraftDeckOffsets.count]
+            unit.worldX = worldX + deck.dx
+            unit.worldY = worldY + deck.dy
+            unit.prevWorldX = unit.worldX
+            unit.prevWorldY = unit.worldY
+            unit.isInLimbo = false
+            unit.facing = 0
+            unit.mission = .move
+            unit.moveTargetX = worldX + deck.dx
+            unit.moveTargetY = worldY - 24.0 + deck.dy
+            unit.movePath = []
+            unit.groupMoveSpeed = unit.speed * 0.5
+            unloadTether.append(id)
+            if unit.isCommando && unit.house == world.playerHouse {
+                audioManager.play(.ramboRock, worldX: unit.worldX, worldY: unit.worldY)  // "Time to rock and roll"
+            }
+        }
+        passengers.removeAll()
+    }
+
+    /// Straight-line drive at full speed — the beach column is open water by
+    /// construction, and the spawn/exit rows lie off the map where pathfinding
+    /// can't go. Clears the target on arrival.
+    private func driveStraightToTarget() {
+        guard let tx = moveTargetX, let ty = moveTargetY else { return }
+        let dx = tx - worldX, dy = ty - worldY
+        let dist = hypot(dx, dy)
+        if dist <= speed {
+            worldX = tx
+            worldY = ty
+            moveTargetX = nil
+            moveTargetY = nil
+        } else {
+            worldX += dx / dist * speed
+            worldY += dy / dist * speed
+        }
+    }
+}

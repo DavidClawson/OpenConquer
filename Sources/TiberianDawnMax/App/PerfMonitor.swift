@@ -1,5 +1,6 @@
 import CSDL2
 import Foundation
+import OpenConquerCore
 
 // MARK: - Performance Monitor
 // Tracks frame timing, FPS, and per-system costs.

@@ -1,5 +1,7 @@
 import CSDL2
 import Foundation
+import OpenConquerAssets
+import OpenConquerCore
 
 // MARK: - M13: Audio System
 // Ported from Vanilla Conquer audio.cpp, theme.cpp

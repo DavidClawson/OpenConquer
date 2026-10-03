@@ -81,7 +81,7 @@ watching the game. Run the built binary directly:
 e.g. `--headless SCG01EA 600` or `--determinism SCG01EA 2500`. The determinism
 check is the regression net for AI/pathfinding work: a change that perturbs the
 simulation shows up as a changed digest. (Other diagnostic flags: `--test-mix`,
-`--dump-scenario <NAME>`.) Implementation: `Game/GameHeadless.swift`.
+`--dump-scenario <NAME>`.) Implementation: `TiberianDawnMax/Headless/GameHeadless.swift`.
 
 - Note: the simulation is deterministic given a seed, both across separate
   processes and across two `initGameWorld` calls in one process (`initGameWorld`
@@ -183,18 +183,32 @@ When reimplementing a behavior, grep the C++ for the relevant `Mission_*`,
 
 ## Architecture (the mental model)
 
-- **Single source of truth:** a global `session: GameSession` (`main.swift`) owns
-  all mutable state through nested containers:
+- **Three modules** (see `Package.swift`), each depending only on those above:
+  - `OpenConquerAssets` — archive and file formats (MIX, SHP, ICN, INI, AUD).
+  - `OpenConquerCore` — the simulation: data tables, rules, scenarios. **Never
+    imports SDL** and never touches rendering, audio or UI state; the compiler
+    enforces it. It talks outward only through narrow seams: `audioManager`
+    (the `SimAudio` protocol, silent by default), the `eventBus` (e.g.
+    `.ionCannonStrike` for screen effects), and the `saveView` camera hooks.
+  - `TiberianDawnMax` — the app: SDL, rendering, audio, UI, headless harness.
+  Cross-module declarations use `package` access. New Core code that the app
+  calls must be `package` (an implicit memberwise init stays internal: spell
+  it out as a `package init` when the app constructs the type).
+- **Simulation state:** a global `session: GameSession`
+  (`OpenConquerCore/Game/GameSession.swift`) owns all mutable sim state:
   - `session.world` → `GameWorld` (objects, map, occupancy) — `Game/GameState.swift`
   - `session.production` → build queues / sidebar
   - `session.scripting` → triggers, AI, teams
   - `session.combat` → projectiles, animations, superweapons
   - `session.campaign` → mission progression
+  App-only state (current screen, menus, frame clock) is `app: AppState`
+  (`TiberianDawnMax/App/AppState.swift`); the sim never refers to it.
 - **Game objects** are a single `GameObject` **class** (reference type) in
   `Game/GameState.swift`. Behavior is attached via `extension GameObject` blocks
   spread across many files (missions, combat, economy, movement, animation).
 - **Fixed-tick loop:** the sim runs at a fixed **15 FPS** (`Game/GameLoop.swift`),
-  decoupled from render FPS via an accumulator in `main.swift`. Rendering
+  decoupled from render FPS via an accumulator in `App/FrameClock.swift`, which
+  also sets the presentation up whenever the sim builds a new world. Rendering
   interpolates between ticks. `gameTick()` is the one discrete update: occupancy
   rebuild → fog → per-object mission ticks → AI → triggers → tiberium growth →
   remove dead.
@@ -203,17 +217,19 @@ When reimplementing a behavior, grep the C++ for the relevant `Mission_*`,
   processes and across two `initGameWorld` calls in one process. The headless
   harness guards this.
 
-## Folder map (`Sources/TiberianDawnMax/`)
+## Folder map (`Sources/`)
 
 | Folder | What's there |
 |--------|--------------|
-| `App/` | session container, input, event handling, perf, window |
-| `Game/` | all simulation: loop, state, missions, AI, combat, economy, map/pathfinding, triggers, teams, save/load, campaign |
-| `Rendering/` | `GameRenderer` (in-game), `MapRenderer` (scenario/map view), cursor, text |
-| `Data/` | static type tables: units, buildings, infantry, aircraft, weapons, houses |
-| `Assets/` | MIX/SHP/ICN/INI parsers, asset manager, remastered-sprite handling |
-| `Scenario/` | INI scenario + map loaders |
-| `Audio/`, `UI/` | sound + menus |
+| `OpenConquerAssets/` | MIX/SHP/ICN/INI/AUD parsers, asset manager |
+| `OpenConquerCore/Data/` | static type tables: units, buildings, infantry, aircraft, weapons, houses, sound IDs, facing tables |
+| `OpenConquerCore/Game/` | all simulation: loop, state, missions, AI, combat, economy, map/pathfinding, triggers, teams, save/load, campaign |
+| `OpenConquerCore/Scenario/` | INI scenario + map loaders |
+| `TiberianDawnMax/App/` | app state, frame clock, input, event handling, perf, window, settings |
+| `TiberianDawnMax/Rendering/` | `GameRenderer` (in-game), `MapRenderer` (scenario/map view), effects, cursor, text, remastered sprites |
+| `TiberianDawnMax/UI/` | menus, sidebars (classic + modern), in-game input |
+| `TiberianDawnMax/Audio/` | audio engine, sound library, unit voices |
+| `TiberianDawnMax/Headless/` | headless harness and self-tests |
 
 Key files to know: `Game/GameState.swift` (object model + Mission enum),
 `Game/GameLoop.swift` (tick + `moveOneStep`), `Game/GameMap.swift` (pathfinding +

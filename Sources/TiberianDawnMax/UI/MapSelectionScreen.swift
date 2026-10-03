@@ -1,5 +1,6 @@
-import Foundation
 import CSDL2
+import Foundation
+import OpenConquerCore
 
 // MARK: - Map Selection Screen (campaign branching)
 //

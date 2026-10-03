@@ -1,5 +1,6 @@
 import CSDL2
 import Foundation
+import OpenConquerAssets
 
 // MARK: - Sound Test Screen
 // Browse and play all game sounds organized by category.

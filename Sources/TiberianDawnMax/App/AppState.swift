@@ -1,4 +1,5 @@
 import Foundation
+import OpenConquerCore
 
 // MARK: - App State
 // Everything about the running app that isn't the simulation: which screen is

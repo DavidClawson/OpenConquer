@@ -1,5 +1,6 @@
 import CSDL2
 import Foundation
+import OpenConquerCore
 
 // MARK: - Frame Clock
 // Drives the simulation from real time: fixed 15 Hz ticks out of a variable

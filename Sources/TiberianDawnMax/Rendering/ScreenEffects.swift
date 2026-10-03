@@ -1,4 +1,5 @@
 import Foundation
+import OpenConquerCore
 
 // MARK: - Screen Effects
 // Superweapon flash, shake and ion beam. The sim announces the strike on the

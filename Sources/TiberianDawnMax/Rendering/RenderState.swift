@@ -1,5 +1,6 @@
 import CSDL2
 import Foundation
+import OpenConquerAssets
 
 // MARK: - RenderState Sub-Containers
 

@@ -1,4 +1,5 @@
 import Foundation
+import OpenConquerCore
 
 // MARK: - User Settings
 // Presentation/input preferences persisted between sessions. These are NOT

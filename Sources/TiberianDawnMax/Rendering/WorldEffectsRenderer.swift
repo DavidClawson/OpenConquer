@@ -1,5 +1,6 @@
 import CSDL2
 import Foundation
+import OpenConquerCore
 
 // Drawing for in-world sim objects that aren't GameObjects: crates and
 // in-flight projectiles.

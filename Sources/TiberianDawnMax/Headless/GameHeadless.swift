@@ -1,4 +1,6 @@
 import Foundation
+import OpenConquerAssets
+import OpenConquerCore
 
 // MARK: - Headless simulation harness
 //

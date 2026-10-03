@@ -1,5 +1,7 @@
 import CSDL2
 import Foundation
+import OpenConquerAssets
+import OpenConquerCore
 
 // MARK: - Sprite Playground
 // Interactive sprite browser for debugging rendering issues.

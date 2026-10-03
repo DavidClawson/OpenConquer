@@ -1,4 +1,6 @@
 import Foundation
+import OpenConquerAssets
+import OpenConquerCore
 
 // MARK: - Sound Library
 // Manages loading and caching of decoded audio.
