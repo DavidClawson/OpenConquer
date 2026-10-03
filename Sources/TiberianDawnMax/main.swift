@@ -244,6 +244,11 @@ if CommandLine.arguments.contains("--test-heli-transport") {
     exit(headlessTestHeliTransportCommand())
 }
 
+// Classic target acquisition self-test: --test-original-targeting
+if CommandLine.arguments.contains("--test-original-targeting") {
+    exit(headlessTestOriginalTargetingCommand())
+}
+
 // Enhanced-AI ruleset gating self-test: --test-ai-gating
 if CommandLine.arguments.contains("--test-ai-gating") {
     exit(headlessTestAIGatingCommand())

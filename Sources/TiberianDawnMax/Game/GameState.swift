@@ -189,6 +189,7 @@ class GameObject {
     var passengers: [Int] = []      // Object IDs of loaded passengers
     var unloadTether: [Int] = []    // Hovercraft: just-unloaded units it waits on before leaving
     var leftMap: Bool = false       // Removed by leaving the map (a classic delete, not a loss)
+    var baseAttackTimerEnd: Int = 0 // Tick until this attacker stops triggering rescues (BaseAttackTimer)
     var isALoaner: Bool = false     // Transport is a loaner (auto-removed after delivery)
 
     // Flags (VC TechnoClass/ObjectClass)
@@ -234,6 +235,7 @@ class GameObject {
     private(set) var cachedIsMCV: Bool = false
     private(set) var cachedIsGunboat: Bool = false
     private(set) var cachedIsCommando: Bool = false
+    private(set) var cachedRisk: Int = 0
     private(set) var cachedIsDefenseStructure: Bool = false
     private(set) var cachedIsPowerPlant: Bool = false
     private(set) var cachedIsRefinery: Bool = false
@@ -271,6 +273,7 @@ class GameObject {
                 cachedIsHarvester = ut.isHarvester
                 cachedIsMCV = ut.isMCV
                 cachedIsGunboat = ut.isGunboat
+                cachedRisk = data.riskValue
                 ammo = data.ammo
             }
         case .infantry:
@@ -284,6 +287,7 @@ class GameObject {
                 cachedSpeedType = .foot
                 cachedIsCrushable = true  // All infantry are crushable
                 cachedIsCommando = it.isCommando
+                cachedRisk = data.riskValue
             }
         case .structure:
             if let st = StructType.from(iniName: upper), let data = buildingTypeDataTable[st] {
@@ -323,6 +327,8 @@ class GameObject {
     var isMCV: Bool { cachedIsMCV }
     var isGunboat: Bool { cachedIsGunboat }
     var isCommando: Bool { cachedIsCommando }
+    /// TechnoTypeClass::Risk — how dangerous this type is, for rescue sizing.
+    var riskValue: Int { cachedRisk }
     var isDefenseStructure: Bool { cachedIsDefenseStructure }
     var isPowerPlant: Bool { cachedIsPowerPlant }
     var isRefinery: Bool { cachedIsRefinery }

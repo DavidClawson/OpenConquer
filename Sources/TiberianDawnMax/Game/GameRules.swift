@@ -71,6 +71,20 @@ struct Ruleset {
     /// Read at the single branch point: the demote step in `updateFog`.
     var fogRegrowth: Bool
 
+    /// How units find targets. TRUE is faithful to 1995 (TechnoClass::
+    /// Evaluate_Object / Threat_Range / FootClass::Take_Damage):
+    /// - the player's units are always visible to the computer, even under
+    ///   shroud; other targets need only have been discovered by the player;
+    /// - guard scans weapon range, area guard twice it (max 10 cells) around
+    ///   its home cell, hunt the whole map;
+    /// - a hit computer unit hunts its attacker; a hit unarmed building or
+    ///   harvester calls up to six rescuers (Base_Is_Attacked);
+    /// - a player's commando never auto-fires from guard.
+    /// FALSE keeps the enhanced model: targets gated by the house's own sight,
+    /// wider scans, and short-range return fire. Read through
+    /// `usesOriginalTargeting` (GameCombat.swift).
+    var originalTargeting: Bool
+
     // Future tunables slot in here (crush behavior, build adjacency, economy
     // constants, …), each read at a single branch point in the simulation.
 
@@ -82,7 +96,8 @@ struct Ruleset {
         fogAwarePathfinding: false,
         enhancedEnemyAI: false,
         spawnsInitialTeams: false,
-        fogRegrowth: false
+        fogRegrowth: false,
+        originalTargeting: true
     )
 
     /// Classic plus modern gameplay enhancements.
@@ -93,7 +108,8 @@ struct Ruleset {
         fogAwarePathfinding: true,
         enhancedEnemyAI: true,
         spawnsInitialTeams: true,
-        fogRegrowth: true
+        fogRegrowth: true,
+        originalTargeting: false
     )
 
     /// All built-in presets, in display order.

@@ -17,6 +17,14 @@ extension GameObject {
             suspendedTarget = cell  // Remember home cell as Int
         }
 
+        if usesOriginalTargeting {
+            let home = suspendedTarget ?? cell
+            tickGuardAreaOriginal(homeX: Double(home % 64 * 24) + 12.0,
+                                  homeY: Double(home / 64 * 24) + 12.0,
+                                  scan: world.tickCount % 15 == 0)
+            return
+        }
+
         // Only process periodically (every ~1 second)
         guard world.tickCount % 15 == 0 else { return }
 
@@ -28,6 +36,7 @@ extension GameObject {
 
         let resolved = resolveWeapon()
         let weaponRange = resolved?.range ?? 96.0
+
         let maxPatrolDist = weaponRange + 256.0  // Weapon range + ~10 cells
 
         let distFromHome = sqrt(pow(worldX - homeX, 2) + pow(worldY - homeY, 2))
@@ -102,6 +111,33 @@ extension GameObject {
         // Keep moving if we have a target
         if moveTargetX != nil {
             moveOneStep()
+        }
+    }
+
+    /// FootClass::Mission_Guard_Area: stay near home, never wander. Race
+    /// back when more than 2 cells out while idle (the weapon range + 1 cell
+    /// leash while fighting is in tickAttack); otherwise look for targets within twice weapon range, capped at 10
+    /// cells, measured from home (THREAT_AREA).
+    private func tickGuardAreaOriginal(homeX: Double, homeY: Double, scan: Bool) {
+        let distFromHome = sqrt(pow(worldX - homeX, 2) + pow(worldY - homeY, 2))
+        if moveTargetX == nil && distFromHome > 48.0 {
+            moveTargetX = homeX
+            moveTargetY = homeY
+            movePath = []
+        }
+        if moveTargetX != nil {
+            if !moveOneStep() {
+                moveTargetX = nil
+                moveTargetY = nil
+            }
+            return
+        }
+        guard scan && isArmed else { return }
+        let scanRange = min((resolveWeapon()?.range ?? 96.0) * 2.0, 10.0 * 24.0)
+        if let enemy = findNearestEnemy(self, range: scanRange, from: (homeX, homeY), filter: originalTargetFilter) {
+            attackTarget = enemy.id
+            mission = .attack
+            suspendedMission = .guardArea
         }
     }
 
@@ -266,7 +302,9 @@ extension GameObject {
 
         // If no target acquired, seek enemies across entire map
         if attackTarget == nil && moveTargetX == nil {
-            if let enemy = findNearestEnemy(self, range: 64.0 * 24.0) {
+            // THREAT_NORMAL scans the whole map; 64 cells misses the far corners.
+            let range = usesOriginalTargeting ? Double.infinity : 64.0 * 24.0
+            if let enemy = findNearestEnemy(self, range: range, filter: originalTargetFilter) {
                 attackTarget = enemy.id
                 mission = .attack
                 return

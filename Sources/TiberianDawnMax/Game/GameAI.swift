@@ -76,6 +76,9 @@ func tickAI() {
     for obj in world.objects {
         // Only control enemy (non-player) units
         if obj.house == world.playerHouse { continue }
+        // Original targeting: missions do all acquisition (guard, area
+        // guard, hunt); these wider periodic scans are enhanced-only.
+        if usesOriginalTargeting && (obj.isArmed || obj.kind == .structure) && !obj.isHarvester { continue }
         if obj.house == .neutral { continue }
         if obj.strength <= 0 { continue }
 

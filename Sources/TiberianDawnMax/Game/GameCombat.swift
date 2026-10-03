@@ -64,15 +64,37 @@ func isAntiAirOnly(_ obj: GameObject) -> Bool {
     return bData.isAntiAircraft
 }
 
+/// The single read of `Ruleset.originalTargeting`.
+var usesOriginalTargeting: Bool { session.rules.originalTargeting }
+
+/// Whether `obj` may pick `other` as a target. Original rule
+/// (TechnoClass::Evaluate_Object): the player's units are always visible,
+/// anything else must have been discovered by the player. Enhanced rule:
+/// the attacker's own house must currently see the cell.
+private func canAcquire(_ other: GameObject, by obj: GameObject, world: GameWorld) -> Bool {
+    let cell = other.cellY * 64 + other.cellX
+    if usesOriginalTargeting {
+        if other.house == world.playerHouse { return true }
+        guard cell >= 0 && cell < 4096 else { return false }
+        return world.map.fogState[cell] != .unexplored
+    }
+    return canHouseSee(cell: cell, house: obj.house)
+}
+
 /// Find the nearest enemy within range of an object.
-/// Acquisition is gated by `obj.house`'s line-of-sight: enemies in the
-/// attacker's own fog of war are not picked up. Pass `requireVisibility: false`
-/// for cases where visibility shouldn't matter (e.g. scripted hunts).
-func findNearestEnemy(_ obj: GameObject, range: Double, requireVisibility: Bool = true) -> GameObject? {
+/// Acquisition is gated by visibility (see `canAcquire`). Pass
+/// `requireVisibility: false` for cases where visibility shouldn't matter
+/// (e.g. scripted hunts). `origin` measures range from another point (area
+/// guard scans around its home cell); `filter` limits eligible targets.
+func findNearestEnemy(_ obj: GameObject, range: Double, requireVisibility: Bool = true,
+                      from origin: (x: Double, y: Double)? = nil,
+                      filter: ((GameObject) -> Bool)? = nil) -> GameObject? {
     guard let world = session.world else { return nil }
     var nearest: GameObject? = nil
     var nearestDist = Double.infinity
     let aaOnly = isAntiAirOnly(obj)
+    let fromX = origin?.x ?? obj.worldX
+    let fromY = origin?.y ?? obj.worldY
 
     for other in world.objects {
         if other.id == obj.id { continue }
@@ -86,13 +108,11 @@ func findNearestEnemy(_ obj: GameObject, range: Double, requireVisibility: Bool 
         // Aircraft are exempt — they're spotted from the air, so AA
         // weapons (SAM, gunboat, rocket infantry) engage at full
         // weapon range even when their own sightRange is shorter.
-        if requireVisibility && !other.isAircraft {
-            let cell = other.cellY * 64 + other.cellX
-            if !canHouseSee(cell: cell, house: obj.house) { continue }
-        }
+        if requireVisibility && !other.isAircraft && !canAcquire(other, by: obj, world: world) { continue }
+        if let filter = filter, !filter(other) { continue }
 
-        let dx = other.worldX - obj.worldX
-        let dy = other.worldY - obj.worldY
+        let dx = other.worldX - fromX
+        let dy = other.worldY - fromY
         let dist = sqrt(dx * dx + dy * dy)
         if dist <= range && dist < nearestDist {
             nearest = other
@@ -134,6 +154,12 @@ extension GameObject {
         var adjustedDamage = finalDamage
         if veteranLevel >= 2 {
             adjustedDamage = max(1, adjustedDamage * 3 / 4)
+        }
+
+        // Computer base or harvester under attack calls for help.
+        if usesOriginalTargeting, (kind == .structure || isHarvester),
+           let aId = attackerId, let world = session.world, let attacker = world.findObject(id: aId) {
+            baseIsAttacked(by: attacker, world: world)
         }
 
         strength -= adjustedDamage
@@ -212,6 +238,10 @@ extension GameObject {
         guard let world = session.world else { return }
         guard kind == .unit || kind == .infantry else { return }
         guard isArmed else { return }
+        if usesOriginalTargeting {
+            retaliateOriginal(world: world)
+            return
+        }
         if isHarvester || isMCV { return }
         // Don't override these missions — player or scripted control
         switch mission {
@@ -249,6 +279,108 @@ extension GameObject {
         movePath = []
         moveTargetX = nil
         moveTargetY = nil
+    }
+
+    /// FootClass::Take_Damage's response for a unit outside a team. A hit
+    /// computer unit hunts its attacker at any distance; a player's unit only
+    /// shoots back if the attacker is in range. Neither drops a target that
+    /// is armed and in range, and sleeping or busy units don't react.
+    private func retaliateOriginal(world: GameWorld) {
+        guard let aid = lastAttackerId,
+              let attacker = world.findObject(id: aid),
+              attacker.strength > 0,
+              isEnemy(self, attacker) else { return }
+        if isInTeam(world: world) { return }
+        // Sticky guards snap out of it when hit (Enter_Idle_Mode).
+        if mission == .sticky { mission = .guard_ }
+        // Only anti-aircraft weapons answer an aircraft.
+        if attacker.isAircraft && !isAntiAirOnly(self) { return }
+        switch mission {
+        case .ambush, .guard_, .guardArea, .attack, .timedHunt: break
+        default: return
+        }
+        let range = resolveWeapon()?.range ?? 96.0
+        func inRange(_ o: GameObject) -> Bool {
+            let dx = o.worldX - worldX, dy = o.worldY - worldY
+            return sqrt(dx * dx + dy * dy) <= range
+        }
+        let isPlayer = house == world.playerHouse
+        if let tid = attackTarget, let current = findObjectById(tid), current.strength > 0 {
+            if isPlayer { return }
+            if current.isArmed && inRange(current) { return }
+        }
+        if isPlayer {
+            guard inRange(attacker) else { return }
+            if mission == .guardArea { suspendedMission = .guardArea }
+        } else {
+            // Assign_Mission(MISSION_HUNT) with the attacker as TarCom.
+            suspendedMission = .hunt
+        }
+        attackTarget = aid
+        mission = .attack
+        movePath = []
+        moveTargetX = nil
+        moveTargetY = nil
+    }
+
+    func isInTeam(world: GameWorld) -> Bool {
+        session.activeTeams.contains { $0.members.contains(id) }
+    }
+
+    /// TechnoClass::Base_Is_Attacked: a computer house whose unarmed building
+    /// or harvester is hit sends up to six rescuers after the attacker, enough
+    /// to outweigh twice its risk, then ignores that attacker for 15 seconds.
+    func baseIsAttacked(by enemy: GameObject, world: GameWorld) {
+        if house == world.playerHouse || house == .neutral || !isEnemy(self, enemy) { return }
+        if isArmed { return }
+        guard enemy.kind == .infantry || (enemy.kind == .unit && !enemy.isAircraft) else { return }
+        if enemy.isGunboat || enemy.isHovercraft { return }
+        if world.tickCount < enemy.baseAttackTimerEnd { return }
+
+        var desired = enemy.riskValue * 2
+        var candidates: [(obj: GameObject, value: Int)] = []
+        for obj in world.objects where obj.house == house && obj.strength > 0 && !obj.isInLimbo {
+            guard obj.kind == .infantry || (obj.kind == .unit && !obj.isAircraft) else { continue }
+            if obj.mission == .sticky || obj.mission == .sleep { continue }
+            let value = obj.rescueValue(against: enemy, world: world)
+            if value < 0 { desired += value } else if value > 0 { candidates.append((obj, value)) }
+        }
+        guard desired > 0 else { return }
+        // Best six, highest value first (stable on ties: object order).
+        let chosen = candidates.enumerated()
+            .sorted { $0.element.value != $1.element.value ? $0.element.value > $1.element.value : $0.offset < $1.offset }
+            .prefix(6).map(\.element.obj)
+        var riskTotal = 0
+        for d in chosen {
+            // MISSION_RESCUE runs Mission_Hunt with the attacker as TarCom.
+            d.attackTarget = enemy.id
+            d.mission = .attack
+            d.suspendedMission = .hunt
+            d.movePath = []
+            d.moveTargetX = nil
+            d.moveTargetY = nil
+            riskTotal += d.riskValue
+            if riskTotal > desired { break }
+        }
+        if riskTotal > desired {
+            enemy.baseAttackTimerEnd = world.tickCount + 15 * 15
+        }
+    }
+
+    /// FootClass::Rescue_Mission: how much this unit can help against
+    /// `enemy`. Negative = already on it; 0 = unavailable. The original
+    /// divides by distance over speed; our movement speeds aren't in leptons,
+    /// so distance (in cells beyond weapon range) is used alone.
+    private func rescueValue(against enemy: GameObject, world: GameWorld) -> Int {
+        if attackTarget == enemy.id { return -riskValue }
+        if let tid = attackTarget, let t = findObjectById(tid), t.strength > 0, t.isArmed { return 0 }
+        if mission == .harvest || riskValue == 0 || !isArmed || isInTeam(world: world) { return 0 }
+        let range = resolveWeapon()?.range ?? 96.0
+        let dx = enemy.worldX - worldX, dy = enemy.worldY - worldY
+        let beyond = sqrt(dx * dx + dy * dy) - range
+        let threat = riskValue * 256
+        guard beyond > 0 else { return threat }
+        return max(threat / max(Int(beyond / 24.0), 1), 1)
     }
 
     /// Rotate turret toward target facing. Returns true when aligned.
@@ -308,7 +440,8 @@ extension GameObject {
             if let suspended = suspendedMission {
                 mission = suspended
                 suspendedMission = nil
-                missionStatus = 0
+                // Area guard keeps its home cell (original targeting).
+                missionStatus = usesOriginalTargeting && suspended == .guardArea ? 1 : 0
                 // Recalculate path when resuming suspended move
                 movePath = []
             } else {
@@ -325,6 +458,22 @@ extension GameObject {
 
         let resolved = resolveWeapon()
         let range = resolved?.range ?? 96.0
+
+        // Area guard's leash (Mission_Guard_Area): beyond weapon range + 1
+        // cell from home, drop the target and go back.
+        if usesOriginalTargeting && suspendedMission == .guardArea, let home = suspendedTarget {
+            let hx = Double(home % 64 * 24) + 12.0, hy = Double(home / 64 * 24) + 12.0
+            if sqrt(pow(worldX - hx, 2) + pow(worldY - hy, 2)) > range + 24.0 {
+                attackTarget = nil
+                mission = .guardArea
+                suspendedMission = nil
+                missionStatus = 1
+                movePath = []
+                moveTargetX = nil
+                moveTargetY = nil
+                return
+            }
+        }
 
         let dx = target.worldX - worldX
         let dy = target.worldY - worldY
@@ -430,8 +579,28 @@ extension GameObject {
         }
     }
 
+    /// The commando's rifle only goes after infantry and buildings
+    /// (InfantryClass::Greatest_Threat, WEAPON_RIFLE).
+    var originalTargetFilter: ((GameObject) -> Bool)? {
+        guard usesOriginalTargeting && isCommando else { return nil }
+        return { $0.kind == .infantry || $0.kind == .structure }
+    }
+
     /// Auto-target enemies in guard range
     func tickGuardScan() {
+        if usesOriginalTargeting {
+            // A player's commando never picks targets from guard or area
+            // guard; it fires only when ordered (INFANTRY.CPP, WEAPON_RIFLE).
+            if isCommando && house == session.world?.playerHouse &&
+               (mission == .guard_ || mission == .guardArea) { return }
+            // THREAT_RANGE: only what the weapon can already reach.
+            let range = resolveWeapon()?.range ?? 96.0
+            if let enemy = findNearestEnemy(self, range: range, filter: originalTargetFilter) {
+                attackTarget = enemy.id
+                mission = .attack
+            }
+            return
+        }
         // Use sight range for detection (includes veterancy bonus)
         let sightPixels = Double(sightRange) * 24.0
         let resolved = resolveWeapon()

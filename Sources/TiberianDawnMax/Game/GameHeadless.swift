@@ -1899,3 +1899,103 @@ func headlessTestHeliTransportCommand() -> Int32 {
     print("PASS: Chinook takes off, flies at max speed, eases in, lands, and unloads on the ground")
     return 0
 }
+
+// MARK: - Original target acquisition (--test-original-targeting)
+
+/// ASSET-FREE: classic1995 target acquisition (TECHNO.CPP Evaluate_Object /
+/// Threat_Range / Base_Is_Attacked, FOOT.CPP Take_Damage, INFANTRY.CPP
+/// Greatest_Threat). The computer sees the player's units through shroud, a
+/// hit computer unit hunts its attacker from any distance, an unarmed base
+/// building calls rescuers, and a player's commando doesn't auto-fire.
+func headlessTestOriginalTargetingCommand() -> Int32 {
+    print("test-original-targeting: classic target acquisition and reactions")
+    let ini = """
+    [Basic]
+    BuildLevel=1
+    [GoodGuy]
+    Credits=50
+    [MAP]
+    Theater=TEMPERATE
+    X=2
+    Y=2
+    Width=60
+    Height=60
+    """
+    forcedGameSeed = 0x7A26_E7AC_0B5E_55ED
+    defer { forcedGameSeed = nil }
+    let saved = session.rules
+    session.rules = .classic1995
+    defer { session.rules = saved }
+
+    let data = parseScenarioData(INIFile(string: ini), name: "SYNTHTARGET")
+    initGameWorld(scenario: data, scenarioName: "SYNTHTARGET")
+    guard let world = session.world else { print("FAIL: no world"); return 1 }
+    world.map.fogState = Array(repeating: .unexplored, count: 4096)
+
+    func place(_ type: String, _ kind: ObjectKind, _ house: House, _ x: Double, _ y: Double,
+               _ mission: Mission = .guard_) -> GameObject {
+        let o = GameObject(id: world.allocateId(), typeName: type, house: house, kind: kind,
+                           worldX: x * 24 + 12, worldY: y * 24 + 12, facing: 0,
+                           strength: resolveStrength(typeName: type, kind: kind, scenarioStrength: 256),
+                           mission: mission, speed: resolveSpeed(typeName: type, kind: kind))
+        world.addObject(o); return o
+    }
+
+    // 1. A turret fires at a shrouded player tank 5.5 cells out: past its
+    //    5-cell sight, inside its 6-cell gun.
+    let gun = place("GUN", .structure, .badGuy, 30, 30)
+    let tank = place("MTNK", .unit, .goodGuy, 35.5, 30)
+    gun.tickGuardScan()
+    guard gun.attackTarget == tank.id else { print("FAIL: turret ignored a player tank in gun range"); return 1 }
+    session.rules = .enhanced
+    updateFog()
+    gun.attackTarget = nil; gun.mission = .guard_
+    gun.tickGuardScan()
+    session.rules = .classic1995
+    guard gun.attackTarget == nil else { print("FAIL: enhanced turret saw past its own sight"); return 1 }
+    print("  turret: engages a shrouded player unit in weapon range (enhanced: sight-gated)")
+
+    // 2. A hunter finds a player unit across the map (corner to corner).
+    tank.strength = 0
+    let hunter = place("E1", .infantry, .badGuy, 5, 5, .hunt)
+    let far = place("E1", .infantry, .goodGuy, 55, 55)
+    hunter.tickHunt()
+    guard hunter.attackTarget == far.id else { print("FAIL: hunter didn't find the far player unit"); return 1 }
+    print("  hunt: finds a player unit anywhere on the map")
+
+    // 3. A guarding tank shot from 14 cells hunts the attacker.
+    let ltnk = place("LTNK", .unit, .badGuy, 10, 45)
+    let sniper = place("RMBO", .infantry, .goodGuy, 24, 45)
+    ltnk.applyDamage(amount: 10, warhead: .sa, attackerHouse: .goodGuy, attackerId: sniper.id)
+    guard ltnk.attackTarget == sniper.id, ltnk.mission == .attack, ltnk.suspendedMission == .hunt else {
+        print("FAIL: hit tank didn't hunt its attacker (mission \(ltnk.mission))"); return 1
+    }
+    print("  damage: a hit computer unit hunts its attacker from any distance")
+
+    // 4. Shooting an unarmed power plant sends rescuers: enough E1s
+    //    (risk 10 each) to exceed twice the attacker's risk.
+    let plant = place("NUKE", .structure, .badGuy, 45, 10)
+    var guards: [GameObject] = []
+    for i in 0..<5 { guards.append(place("E1", .infantry, .badGuy, 40 + Double(i), 14)) }
+    let raider = place("E1", .infantry, .goodGuy, 47, 13)
+    plant.applyDamage(amount: 10, warhead: .sa, attackerHouse: .goodGuy, attackerId: raider.id)
+    let rescuers = guards.filter { $0.attackTarget == raider.id }.count
+    guard rescuers == 3 else { print("FAIL: \(rescuers) rescuers answered, expected 3"); return 1 }
+    guard raider.baseAttackTimerEnd > world.tickCount else { print("FAIL: base-attack timer not set"); return 1 }
+    print("  base attacked: \(rescuers) rescuers sent, attacker timed out")
+
+    // 5. The player's commando doesn't auto-fire from guard; Nod's does,
+    //    but only at infantry and buildings.
+    let havoc = place("RMBO", .infantry, .goodGuy, 20, 20)
+    _ = place("E1", .infantry, .badGuy, 22, 20)
+    havoc.tickGuardScan()
+    guard havoc.attackTarget == nil else { print("FAIL: player commando auto-fired from guard"); return 1 }
+    let nodCommando = place("RMBO", .infantry, .badGuy, 20, 55)
+    _ = place("JEEP", .unit, .goodGuy, 22, 55)
+    nodCommando.tickGuardScan()
+    guard nodCommando.attackTarget == nil else { print("FAIL: commando auto-targeted a vehicle"); return 1 }
+    print("  commando: player's holds fire in guard; rifle ignores vehicles")
+
+    print("PASS: classic target acquisition matches the original")
+    return 0
+}

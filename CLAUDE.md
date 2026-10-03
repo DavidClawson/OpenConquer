@@ -66,6 +66,7 @@ watching the game. Run the built binary directly:
 ./.build/debug/TiberianDawnMax --test-civ-evac                   # ASSET-FREE: civilian-evacuation win model (SCG11/SCG12) — runs in CI
 ./.build/debug/TiberianDawnMax --test-heli-transport             # ASSET-FREE: Chinook takeoff / single-speed flight / LZ slowdown / land / land-before-unload — runs in CI
 ./.build/debug/TiberianDawnMax --test-ai-gating                  # ASSET-FREE: enhanced enemy-AI layer OFF under classic1995 — runs in CI
+./.build/debug/TiberianDawnMax --test-original-targeting         # ASSET-FREE: classic target acquisition, retaliation, base-attack rescue — runs in CI
 ./.build/debug/TiberianDawnMax --ai-parity    <SCEN> <ticks>      # B3: assert the AI decide() phase is pure (no RNG/world mutation)
 ./.build/debug/TiberianDawnMax --ai-trace     <SCEN> <ticks>      # B3: print the per-house goal/decision stream each decide tick
 ./.build/debug/TiberianDawnMax --test-flags   <SCEN>             # Tier-1: per-instance invulnerable / must-survive flags
@@ -94,8 +95,18 @@ simulation shows up as a changed digest. (Other diagnostic flags: `--test-mix`,
   like-for-like. The documented regression baselines are the `--determinism`
   values (as of 2026-10-02, **default ruleset = `classic1995`, veterancy OFF,
   enhanced enemy AI OFF**):
-  SCG01EA 2500t `0x6F23B2EEA84E59F6`, 4000t `0x61141BE711B8B2CD`,
-  SCB01EA 4000t `0xE824320DE6F2C796`.
+  SCG01EA 2500t `0x9CC893509D34122A`, 4000t `0xFE87053AB1F51FFF`,
+  SCB01EA 4000t `0x4BD118CA4072F594`.
+  All three changed (from `0x6F23B2EEA84E59F6` / `0x61141BE711B8B2CD` /
+  `0xE824320DE6F2C796`) when target acquisition was ported to the original
+  (`Ruleset.originalTargeting`, ON in `classic1995`): the computer sees the
+  player's units through shroud (Evaluate_Object), guard scans weapon range,
+  area guard twice it from home with a 1-cell leash and no wandering, hunt the
+  whole map, a hit computer unit hunts its attacker (FootClass::Take_Damage),
+  unarmed buildings and harvesters call rescuers (Base_Is_Attacked), the
+  player's commando holds fire in guard, the periodic aggro scans in `tickAI`
+  no longer run, and BGGY/BIKE sight is 2. Covered by
+  `--test-original-targeting`.
   Both SCG01EA digests changed (from `0x70572C2165FB3BBC` / `0xB3E6E8566D689265`)
   when the hovercraft (LST) beach landing was ported to classic fidelity:
   UDATA.CPP stats (MPH_MEDIUM_FAST, unarmed, 400 hp), the Calculated_Cell

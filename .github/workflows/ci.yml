@@ -61,6 +61,7 @@ jobs:
           ./.build/debug/TiberianDawnMax --test-civ-evac
           ./.build/debug/TiberianDawnMax --test-heli-transport
           ./.build/debug/TiberianDawnMax --test-ai-gating
+          ./.build/debug/TiberianDawnMax --test-original-targeting
           # Full-tick determinism net on a scenario fabricated in code (no MIX):
           ./.build/debug/TiberianDawnMax --test-synthetic 500
 
