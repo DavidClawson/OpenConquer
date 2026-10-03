@@ -180,7 +180,7 @@ presentation*. Listed for completeness.
 | Classic SHP rendering | 🟢 | |
 | Remastered HD sprite rendering | 🟢 | Extracted from the user's own Remastered install. |
 | HD cursors | ✅ | 57 families / 456 frames, with hotspots; falls back to procedural shapes. |
-| HD sidebar power/progress meters | ⬜ | Art extracted to `ui/sidebar/`, not yet wired. **[[#1](https://github.com/DavidClawson/OpenConquer/issues/1) — good first issue]** Roadmap Phase 4. |
+| HD sidebar power/progress meters | 🟢 | Modern sidebar: power segments, build/charge progress and health bars from `ui/sidebar/` (`Rendering/SidebarHD.swift`), procedural fallback. The classic sidebar keeps HPWRBAR/HCLOCK, now with PowerClass's settle bounce. [#1](https://github.com/DavidClawson/OpenConquer/issues/1) |
 | Arbitrary window size / zoom | 🟢 | Deliberate deviation from the fixed 640×400. |
 | Audio (classic AUD + remastered masters) | 🟢 | |
 | Smudges render under buildings/units | ✅ | |

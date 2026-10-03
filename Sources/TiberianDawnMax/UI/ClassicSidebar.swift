@@ -29,7 +29,16 @@ var classicSidebarScale: Int32 {
 
 /// The classic sidebar is in use: chosen in Options and its art is installed.
 var classicSidebarActive: Bool {
-    UserSettings.sidebarStyle == .classic && ClassicSidebarArt.shared.isAvailable
+    (sidebarStyleOverride ?? UserSettings.sidebarStyle) == .classic && ClassicSidebarArt.shared.isAvailable
+}
+
+/// Forces a sidebar style without touching the saved setting (--test-sidebar).
+var sidebarStyleOverride: SidebarStyle?
+
+/// Run `steps` 15 Hz animation steps now (--test-sidebar: settle the power bar).
+func stepClassicSidebarForTesting(steps: Int) {
+    guard let world = session.world else { return }
+    for _ in 0..<steps { stepClassicAnimations(world, force: true) }
 }
 
 // MARK: - Layout (hi-res coordinates relative to the sidebar column)
@@ -160,12 +169,44 @@ final class ClassicSidebarArt {
 
 // MARK: - State
 
+/// One power-bar level as PowerClass animates it (POWER.CPP AI / Draw_It):
+/// the height slides 1px a step toward the target, and on arrival bounces
+/// through _modtable for 12 steps in the direction it was moving.
+struct ClassicPowerLevel {
+    private static let modTable: [Int32] = [0, -1, 0, 1, 0, -1, -2, -1, 0, 1, 2, 1, 0]
+    var height: Int32 = 0
+    var desired: Int32 = 0
+    var recorded = 0
+    var bounce = 0
+    var dir: Int32 = 0
+
+    /// One AI step for a power value whose bar height is `target`.
+    mutating func step(value: Int, target: Int32) {
+        if value != recorded {
+            desired = target
+            recorded = value
+            bounce = 12
+            if height > desired { dir = -1 } else if height < desired { dir = 1 } else { bounce = 0 }
+        }
+        if bounce > 0 && height == desired {
+            bounce -= 1
+        } else if height != desired {
+            height += dir
+        }
+    }
+
+    /// The drawn height: bouncing once it has arrived.
+    var shown: Int32 {
+        height == desired ? height + Self.modTable[bounce] * dir : height
+    }
+}
+
 /// Per-session presentation state for the classic sidebar.
 private struct ClassicSidebarState {
     var topIndex = [0, 0]          // first visible cameo per column
     var radarFrame = 0             // HRADAR frame currently shown
-    var powerHeight: Int32 = 0     // displayed (animated) power-bar height
-    var drainHeight: Int32 = 0
+    var power = ClassicPowerLevel()  // output: the filled section
+    var drain = ClassicPowerLevel()  // drain: the HPOWER marker
     var lastStepTicks: UInt32 = 0  // 15 Hz animation clock
 }
 private var classicState = ClassicSidebarState()
@@ -302,16 +343,51 @@ func renderClassicSidebar(_ renderer: OpaquePointer?) {
     renderClassicTab(renderer)
 }
 
-/// Credits tab (TAB.CPP Draw_Credits_Tab): HTABS over a black strip, the
-/// value centered. 12GRNGRD.FNT isn't loaded yet, so the built-in font stands in.
+/// Credits tab (TAB.CPP Draw_Credits_Tab, CREDITS.CPP Graphic_Logic): HTABS
+/// over a black strip, the value centered on it in 12GRNGRD.FNT
+/// (TPF_GREEN12_GRAD | TPF_USE_GRAD_PAL, colour 11). The built-in font
+/// stands in when UPDATE.MIX isn't installed.
 private func renderClassicTab(_ renderer: OpaquePointer?) {
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255)
     var top = screenRect(0, 0, classicSidebarLogicalWidth, 15)
     SDL_RenderFillRect(renderer, &top)
     blit(renderer, "HTABS.SHP", frame: 0, 0, 0)
+    let text = "\(session.displayedCredits)"
+    if let tex = classicCreditsTexture(renderer, text) {
+        var dst = screenRect(80 - tex.width / 2, 0, tex.width, tex.height)
+        SDL_RenderCopy(renderer, tex.texture, nil, &dst)
+        return
+    }
     let s = classicSidebarScale
-    drawText(renderer, "\(session.displayedCredits)",
-             centerX: sidebarOriginX + 80 * s, centerY: 7 * s, color: .green, scale: max(1, s))
+    drawText(renderer, text, centerX: sidebarOriginX + 80 * s, centerY: 7 * s, color: .green, scale: max(1, s))
+}
+
+private var creditsTexture: (text: String, theater: TheaterType, texture: OpaquePointer, width: Int32, height: Int32)?
+
+/// The credits value rendered through the theater palette, cached until it changes.
+private func classicCreditsTexture(_ renderer: OpaquePointer?, _ text: String)
+    -> (texture: OpaquePointer, width: Int32, height: Int32)? {
+    let theater = session.world?.theater ?? .temperate
+    if let c = creditsTexture, c.text == text, c.theater == theater { return (c.texture, c.width, c.height) }
+    guard let font = ClassicDialogArt.shared.scoreFont, renderState.gamePalette.count >= 256 else { return nil }
+    // _textfontpal[11], fore = fontpalette[1] (DIALOG.CPP Simple_Text_Print);
+    // GREEN12_GRAD keeps FontXSpacing 1.
+    let pal: [UInt8] = [0, 1, 4, 166, 41, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    let w = max(1, font.width(of: text, xSpacing: 1)), h = font.height
+    var page = [UInt8](repeating: 0, count: w * h)
+    font.draw(text, into: &page, pageWidth: w, pageHeight: h, x: 0, y: 0, remap: pal, xSpacing: 1)
+    var argb = [UInt32](repeating: 0, count: w * h)
+    for i in 0..<(w * h) where page[i] != 0 {
+        let c = renderState.gamePalette[Int(page[i])]
+        argb[i] = 0xFF00_0000 | (UInt32(c.r) << 16) | (UInt32(c.g) << 8) | UInt32(c.b)
+    }
+    guard let tex = SDL_CreateTexture(renderer, 0x16362004 /* ARGB8888 */, Int32(SDL_TEXTUREACCESS_STATIC.rawValue),
+                                      Int32(w), Int32(h)) else { return nil }
+    _ = argb.withUnsafeMutableBufferPointer { SDL_UpdateTexture(tex, nil, $0.baseAddress, Int32(w * 4)) }
+    SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND)
+    if let old = creditsTexture { SDL_DestroyTexture(old.texture) }
+    creditsTexture = (text, theater, tex, Int32(w), Int32(h))
+    return (tex, Int32(w), Int32(h))
 }
 
 /// Radar (RADAR.CPP): HRADAR frame 0 = no radar, 1-21 = powering up, 22 =
@@ -427,7 +503,10 @@ private func renderClassicButtons(_ renderer: OpaquePointer?) {
 /// green/yellow/red fill below it, and the HPOWER marker at the drain level.
 private func renderClassicPowerBar(_ renderer: OpaquePointer?) {
     let bottom = ClassicLayout.powerBottom
-    let fillTop = bottom - classicState.powerHeight
+    let maxHeight = bottom - ClassicLayout.powerY - 1  // Bound(…, 0, PowHeight - 2)
+    let powerHeight = min(maxHeight, max(0, classicState.power.shown))
+    let drainHeight = min(maxHeight, max(0, classicState.drain.shown))
+    let fillTop = bottom - powerHeight
     guard let world = session.world else { return }
     let state = getHouseState(world.playerHouse)
     let fill = state.powerDrain > state.powerOutput * 2 ? 6 : (state.powerDrain > state.powerOutput ? 4 : 2)
@@ -444,9 +523,11 @@ private func renderClassicPowerBar(_ renderer: OpaquePointer?) {
     }
     for (frame, y) in pieces {
         if !empty.isEmpty { blit(renderer, "HPWRBAR.SHP", frame: frame, ClassicLayout.powerX, y, clipY: empty) }
-        blit(renderer, "HPWRBAR.SHP", frame: frame + fill, ClassicLayout.powerX, y, clipY: full)
+        if powerHeight > 0 {  // the filled section is skipped at zero height
+            blit(renderer, "HPWRBAR.SHP", frame: frame + fill, ClassicLayout.powerX, y, clipY: full)
+        }
     }
-    blit(renderer, "HPOWER.SHP", frame: 0, ClassicLayout.powerX, bottom - classicState.drainHeight + 1)
+    blit(renderer, "HPOWER.SHP", frame: 0, ClassicLayout.powerX, bottom - drainHeight + 1)
 }
 
 /// Power_Height (POWER.CPP): each full 100 units closes 1/6 of the remaining
@@ -464,10 +545,11 @@ private func classicPowerHeight(_ value: Int) -> Int32 {
     return Int32(h * Int(ClassicLayout.powerMax) / 218)
 }
 
-/// 15 Hz: radar power-up/down frames, and the power bar sliding 1px a step.
-private func stepClassicAnimations(_ world: GameWorld) {
+/// 15 Hz: radar power-up/down frames, and the power bar sliding 1px a step
+/// then bouncing.
+private func stepClassicAnimations(_ world: GameWorld, force: Bool = false) {
     let now = SDL_GetTicks()
-    guard now - classicState.lastStepTicks >= 66 else { return }
+    guard force || now - classicState.lastStepTicks >= 66 else { return }
     classicState.lastStepTicks = now
 
     // Radar
@@ -487,10 +569,8 @@ private func stepClassicAnimations(_ world: GameWorld) {
 
     // Power bar
     let state = getHouseState(world.playerHouse)
-    let target = classicPowerHeight(state.powerOutput)
-    let drainTarget = classicPowerHeight(state.powerDrain)
-    classicState.powerHeight += (target > classicState.powerHeight ? 1 : (target < classicState.powerHeight ? -1 : 0))
-    classicState.drainHeight += (drainTarget > classicState.drainHeight ? 1 : (drainTarget < classicState.drainHeight ? -1 : 0))
+    classicState.power.step(value: state.powerOutput, target: classicPowerHeight(state.powerOutput))
+    classicState.drain.step(value: state.powerDrain, target: classicPowerHeight(state.powerDrain))
 }
 
 /// Forget scroll positions and animation state (new mission).

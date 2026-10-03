@@ -453,6 +453,9 @@ guard SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_AUDIO) == 0 else {
     exit(1)
 }
 
+// --test-sidebar SCEN TICKS OUTDIR (Headless/SidebarDiagnostics.swift): needs SDL, no window
+if let code = runSidebarDiagnosticsIfRequested() { exit(code) }
+
 // Fog-aware ("advanced") wayfinding is now selected via the ruleset — the
 // player picks Classic vs Enhanced on the Options screen. Default is Classic
 // (session.rules = .classic1995), which uses robust classic wayfinding.

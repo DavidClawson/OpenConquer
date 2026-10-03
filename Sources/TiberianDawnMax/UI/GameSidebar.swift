@@ -105,6 +105,8 @@ func renderSidebar(_ renderer: OpaquePointer?) {
             // Progress bar
             if isBuilding, let queue = session.unitBuildQueue.item {
                 let progress = Double(queue.progress) / Double(queue.totalTicks)
+                if drawHDProgressBar(renderer, x: sx + 6, y: by + buttonH - 6, w: buttonW - 4, h: 4,
+                                     fraction: progress) { continue }
                 let barW = Int32(Double(buttonW - 4) * progress)
                 SDL_SetRenderDrawColor(renderer, 0, 200, 0, 100)
                 var barRect = SDL_Rect(x: sx + 6, y: by + buttonH - 5, w: barW, h: 3)
@@ -168,6 +170,8 @@ func renderSidebar(_ renderer: OpaquePointer?) {
             // Progress bar
             if isBuilding, let queue = session.structureBuildQueue.item, !isReady {
                 let progress = Double(queue.progress) / Double(queue.totalTicks)
+                if drawHDProgressBar(renderer, x: sx + 6, y: by + buttonH - 6, w: buttonW - 4, h: 4,
+                                     fraction: progress) { continue }
                 let barW = Int32(Double(buttonW - 4) * progress)
                 SDL_SetRenderDrawColor(renderer, 0, 200, 0, 100)
                 var barRect = SDL_Rect(x: sx + 6, y: by + buttonH - 5, w: barW, h: 3)
@@ -303,6 +307,19 @@ func renderPowerBar(_ renderer: OpaquePointer?, sx: Int32) {
         barColor = (0, 180, 0)        // Green: surplus
     }
 
+    if drawHDPowerBar(renderer, x: barX, y: barY - 1, w: barW, h: barH + 2,
+                      outputFraction: outputFrac, drainFraction: drainFrac, color: barColor) {
+        // A dark plate behind the numbers so they read over the lit segments.
+        let textW = Int32("\(houseState.powerOutput)/\(houseState.powerDrain)".count) * 8 + 8
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 170)
+        var plate = SDL_Rect(x: sx + sidebarWidth / 2 - textW / 2, y: barY, w: textW, h: barH)
+        SDL_RenderFillRect(renderer, &plate)
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE)
+        drawPowerReadout(renderer, sx: sx, barY: barY, barH: barH, state: houseState)
+        return
+    }
+
     // Power output bar (top half)
     let greenW = Int32(Double(barW) * outputFrac)
     SDL_SetRenderDrawColor(renderer, barColor.r, barColor.g, barColor.b, 255)
@@ -320,13 +337,15 @@ func renderPowerBar(_ renderer: OpaquePointer?, sx: Int32) {
     SDL_SetRenderDrawColor(renderer, 80, 80, 80, 255)
     SDL_RenderDrawRect(renderer, &bgRect)
 
-    // Numerical power values
-    let powerColor: Color = houseState.isLowPower ? .red : (houseState.hasPower ? .green : .amber)
-    let powerText = "\(houseState.powerOutput)/\(houseState.powerDrain)"
-    drawText(renderer, powerText, centerX: sx + sidebarWidth / 2, centerY: barY + barH / 2, color: powerColor, scale: 1)
+    drawPowerReadout(renderer, sx: sx, barY: barY, barH: barH, state: houseState)
+}
 
-    // Low power warning label below the bar
-    if houseState.isLowPower {
+/// Output/drain numbers over the bar, and the LOW POWER label under it.
+private func drawPowerReadout(_ renderer: OpaquePointer?, sx: Int32, barY: Int32, barH: Int32, state: HouseState) {
+    let powerColor: Color = state.isLowPower ? .red : (state.hasPower ? .green : .amber)
+    let powerText = "\(state.powerOutput)/\(state.powerDrain)"
+    drawText(renderer, powerText, centerX: sx + sidebarWidth / 2, centerY: barY + barH / 2, color: powerColor, scale: 1)
+    if state.isLowPower {
         drawText(renderer, "LOW POWER", centerX: sx + sidebarWidth / 2, centerY: barY + barH + 5, color: .red, scale: 1)
     }
 }
@@ -447,7 +466,8 @@ func renderSuperWeaponButtons(_ renderer: OpaquePointer?) {
         SDL_RenderFillRect(renderer, &rect)
 
         // Charge bar
-        if !weapon.isReady {
+        if !weapon.isReady,
+           !drawHDProgressBar(renderer, x: x + 1, y: y + bh - 5, w: bw - 2, h: 4, fraction: weapon.chargeFraction) {
             let fillW = Int32(Double(bw - 2) * weapon.chargeFraction)
             SDL_SetRenderDrawColor(renderer, color.r / 3, color.g / 3, color.b / 3, 200)
             var fillRect = SDL_Rect(x: x + 1, y: y + 1, w: fillW, h: bh - 2)
@@ -615,9 +635,12 @@ private func drawHealthBar(_ renderer: OpaquePointer?, x: Int32, y: Int32, w: In
     } else {
         color = (200, 40, 0)       // Red: critical
     }
-    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, 255)
-    var fillRect = SDL_Rect(x: x, y: y, w: fillW, h: barH)
-    SDL_RenderFillRect(renderer, &fillRect)
+    if !drawHDFillBar(renderer, "UI_HEALTHBAR_FILLED_GREYSCALE", x: x, y: y, w: w, h: barH,
+                      fraction: fraction, tint: color) {
+        SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, 255)
+        var fillRect = SDL_Rect(x: x, y: y, w: fillW, h: barH)
+        SDL_RenderFillRect(renderer, &fillRect)
+    }
 
     // Border
     SDL_SetRenderDrawColor(renderer, 80, 80, 80, 255)

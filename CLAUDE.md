@@ -99,6 +99,8 @@ contact sheet, types a hall-of-fame name into a scratch table, `Headless/ScoreDi
 `--score-screen GDI|NOD` opens the window on it;
 `--test-classic-menus OUTDIR` snapshots the classic Load Mission and Options dialogs,
 `Headless/ClassicMenusDiagnostics.swift`;
+`--test-sidebar SCEN TICKS OUTDIR` renders both sidebars to PNG through an SDL software renderer,
+no window, `Headless/SidebarDiagnostics.swift`;
 `--find-asset NAME...` prints which MIX archive holds each file. `--ending GDI|NOD` opens the window on
 that side's campaign ending (finale movies, score screen, Nod's target pick; `UI/EndingScreens.swift`).) Implementation: `TiberianDawnMax/Headless/GameHeadless.swift`
 (scenario-backed tools) and `OpenConquerCore/SelfTests/` (the ASSET-FREE self-tests).
