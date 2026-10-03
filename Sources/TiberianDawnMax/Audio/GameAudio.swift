@@ -544,7 +544,7 @@ class AudioManager: SimAudio {
                 musicLoading = false
                 isMusicPlaying = true
                 consecutiveTrackFailures = 0
-                let maxAmp = r.samples.prefix(min(r.samples.count, 44100)).reduce(Int16(0)) { max(abs($0), abs($1)) }
+                let maxAmp = r.samples.prefix(min(r.samples.count, 44100)).reduce(0) { max($0, Int($1.magnitude)) }  // magnitude: abs(Int16.min) traps
                 print("AudioManager: Playing theme '\(r.theme.title)' (\(r.samples.count) samples, \(r.sampleRate)Hz, peak=\(maxAmp))")
             } else {
                 musicLoading = false
