@@ -105,7 +105,13 @@ no window, `Headless/SidebarDiagnostics.swift`;
 renders one full game frame headlessly (`Headless/ScreenshotDiagnostics.swift`; the README screenshots);
 `--list-buildables SCEN...` prints what the sidebar offers in each mission and `--test-mcv-deploy [SCEN...]`
 checks an MCV's turn and FACTMAKE build-up, `Headless/SidebarDiagnostics.swift`;
-`--find-asset NAME...` prints which MIX archive holds each file. `--ending GDI|NOD` opens the window on
+`--find-asset NAME...` prints which MIX archive holds each file.
+`--extract-assets REMASTERED_DATA_DIR OUT_DATA_DIR [--cancel-after SECONDS]` runs the native
+importer (`OpenConquerAssets/Import/`, entry point `extractRemasteredAssets`) that replaces the
+python extractors for players: HD sprites, cursors/sidebar meters and HD audio from the Remastered
+`Data/` MEGs into `OUT_DATA_DIR/extracted/`, pixel/sample-identical to `tools/extract_remastered_*.py`
+minus the unread sprite sheets; the classic AUD->WAV step is not ported (the game decodes AUD from
+the MIX itself, more faithfully) — `Headless/ImportDiagnostics.swift`. Use a release build to time it. `--ending GDI|NOD` opens the window on
 that side's campaign ending (finale movies, score screen, Nod's target pick; `UI/EndingScreens.swift`).) Implementation: `TiberianDawnMax/Headless/GameHeadless.swift`
 (scenario-backed tools) and `OpenConquerCore/SelfTests/` (the ASSET-FREE self-tests).
 
