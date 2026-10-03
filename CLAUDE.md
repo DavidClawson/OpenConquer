@@ -97,7 +97,8 @@ snapshots the title menus and drives the choose-your-side screen, `Headless/Titl
 `--test-score GDI|NOD OUTDIR` runs the end-of-mission score screen on made-up stats (snapshots +
 contact sheet, types a hall-of-fame name into a scratch table, `Headless/ScoreDiagnostics.swift`) and
 `--score-screen GDI|NOD` opens the window on it;
-`--find-asset NAME...` prints which MIX archive holds each file.) Implementation: `TiberianDawnMax/Headless/GameHeadless.swift`
+`--find-asset NAME...` prints which MIX archive holds each file. `--ending GDI|NOD` opens the window on
+that side's campaign ending (finale movies, score screen, Nod's target pick; `UI/EndingScreens.swift`).) Implementation: `TiberianDawnMax/Headless/GameHeadless.swift`
 (scenario-backed tools) and `OpenConquerCore/SelfTests/` (the ASSET-FREE self-tests).
 
 **`swift test`** runs every ASSET-FREE self-test above (incl. `--test-synthetic 500`,

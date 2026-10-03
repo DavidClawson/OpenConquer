@@ -1418,8 +1418,9 @@ private func isInMinimap(_ x: Int32, _ y: Int32) -> Bool {
 
 // MARK: - Score Screen
 
-/// Do_Win after the win movie (SCENARIO.CPP:439-478): the score screen, then
-/// map selection. Each side's last mission goes to its ending with neither.
+/// Do_Win after the win movie (SCENARIO.CPP:430-478): the score screen, then
+/// map selection. Each side's last mission goes to its ending instead, which
+/// shows the score screen itself (ENDING.CPP).
 func continueAfterWin() {
     session.missionScore.elapsedTicks = session.world?.tickCount ?? 0
     let state = session.campaignState
@@ -1434,8 +1435,18 @@ func continueAfterWin() {
         }
     }
     // Read the stats before handleWin() moves the campaign on.
-    if state.currentMission < state.maxMission,
-       let score = ScorePresentationScreen.make(inputs: ScorePresentationScreen.inputsFromSession(), then: next) {
+    let inputs = ScorePresentationScreen.inputsFromSession()
+    if state.currentMission >= state.maxMission {
+        // GDI_Ending / Nod_Ending, with the score screen inside them.
+        session.campaign.handleWin()
+        playCampaignEnding(isGDI: state.currentFaction == "GDI") { then in
+            if let score = ScorePresentationScreen.make(inputs: inputs, then: then) {
+                app.currentScreen = score
+            } else {
+                then()
+            }
+        }
+    } else if let score = ScorePresentationScreen.make(inputs: inputs, then: next) {
         app.currentScreen = score
     } else {
         next()

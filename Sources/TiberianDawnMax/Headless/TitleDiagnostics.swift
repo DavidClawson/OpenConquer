@@ -50,6 +50,22 @@ func runTitleDiagnosticsIfRequested() -> Int32? {
         print("FAIL: the Nod pick didn't stop on frame 14")
         return 1
     }
+    // Nod_Ending's target screen: the prompt typed out, and the quadrants.
+    guard let target = NodTargetScreen(then: { _ in }) else {
+        print("FAIL: SATSEL.CPS / SATSEL.PAL not installed")
+        return 1
+    }
+    target.testAdvance(ticks: 40)
+    save(target.composeRGBA(), "08-nod-target")
+    let quadrants = [(500, 100, 1), (100, 100, 2), (100, 300, 3), (500, 300, 4)]
+    for (x, y, want) in quadrants where NodTargetScreen.target(atX: x, y: y) != want {
+        print("FAIL: click (\(x),\(y)) should pick NODEND\(want)")
+        return 1
+    }
+    guard NodTargetScreen.target(atX: 300, y: 20) == nil else {
+        print("FAIL: a click above the picture band was accepted")
+        return 1
+    }
     print("PASS — snapshots in \(outDir.path)")
     return 0
 }

@@ -535,6 +535,13 @@ else if let i = CommandLine.arguments.firstIndex(of: "--score-screen") {
         app.currentScreen = makeMainMenu()
     } ?? makeMainMenu()
 }
+else if let i = CommandLine.arguments.firstIndex(of: "--ending") {
+    // Debug: --ending GDI|NOD plays that side's campaign ending on made-up stats.
+    let gdi = i + 1 >= CommandLine.arguments.count || CommandLine.arguments[i + 1].uppercased() != "NOD"
+    playCampaignEnding(isGDI: gdi) { then in
+        app.currentScreen = ScorePresentationScreen.make(inputs: sampleScoreInputs(gdi: gdi), then: then) ?? makeMainMenu()
+    }
+}
 else if let i = CommandLine.arguments.firstIndex(of: "--play-movie") {
     // Debug: --play-movie NAME [NAME...] plays those movies, then the menu.
     let names = CommandLine.arguments[(i + 1)...].prefix { !$0.hasPrefix("--") }
