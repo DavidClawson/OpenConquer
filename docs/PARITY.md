@@ -92,18 +92,20 @@ counted as parity gaps.
 | Power production/drain and the low-power state | 🟢 | `HOUSE.CPP` power | Drives the sidebar meter and build rate. |
 | Building sell refund | 🟡 | `BUILDING.CPP` sell | Flat 50% of cost. The original refunds based on the building's *current* health-scaled value. **[[#4](https://github.com/DavidClawson/OpenConquer/issues/4) — good first issue]** |
 | Repair bay (FIX) heals a vehicle on the pad | ✅ | — | `--test-repair`. |
-| Building repair (wrench) cost/rate | 🟢 | `BUILDING.CPP` repair | |
+| Building repair (wrench) cost/rate | 🟢 | `BUILDING.CPP` repair | The wrench overlay itself is under [Presentation](#presentation). |
 
 ## Production & base building
 
 | Item | Status | Reference | Notes |
 |---|---|---|---|
-| Prerequisites, build level, house ownability | 🟢 | `bdata/udata` tables | |
+| What the sidebar offers | 🟢 | `HOUSE.CPP:449` Can_Build, `BUILDING.CPP` Update_Buildables, `SIDEBAR.CPP` Recalc | An item is listed while the player owns a factory that makes its kind (barracks or Hand of Nod for infantry, weapons factory or airstrip for vehicles, helipad for aircraft, construction yard for structures) and Can_Build allows it: ownable, prerequisites with the original's equivalences (Hand = barracks, advanced power = power, …), first-available scenario ≤ the mission's BuildLevel, and the campaign special cases (no GDI bazooka before #8, MLRS from #9, no Nod APC/helipad, …). `--list-buildables` prints it per mission; nothing asserts it yet. |
+| Nod #11 Stealth Tank rule (prerequisite = the mission objective buildings) | ⬜ | `HOUSE.CPP` Can_Build | The one Can_Build special case not modelled. |
 | Low power halves build rate | 🟡 | `FACTORY.CPP::AI` | Ours: skip every other tick. Original: staged rate table. Folded into [#6](https://github.com/DavidClawson/OpenConquer/issues/6). |
 | **Build time formula** | 🟡 | `FACTORY.CPP` | Ours: `max(30, cost/5)` ticks, flat. Original: a 54-step (`STEP_COUNT`) staged model with per-tick installment payments (`Cost_Per_Tick`). [#6](https://github.com/DavidClawson/OpenConquer/issues/6). |
 | **Multi-factory acceleration** | ⬜ | `FACTORY.CPP:245-263` | The original speeds a human player's production by the number of same-type factories owned. Not implemented. **[[#5](https://github.com/DavidClawson/OpenConquer/issues/5) — good first issue]** |
 | **Installment payment** (charged per tick, refund on cancel = what you paid) | ⬜ | `FACTORY.CPP:696-707` | We charge the full cost up front and refund it on cancel. [#6](https://github.com/DavidClawson/OpenConquer/issues/6). |
-| MCV deploys into a Construction Yard | 🟢 | `UNIT.CPP` deploy | Footprint/blocking checks before deploying. |
+| MCV deploys into a Construction Yard | ✅ | `UNIT.CPP:1492` Try_To_Deploy | Footprint check, then the MCV turns to face south-west at its rate of turn before unfolding; the yard keeps the MCV's health ratio. `--test-mcv-deploy`. |
+| Construction animation (`<NAME>MAKE.SHP`) and its timing | ✅ | `BDATA.CPP:4147-4157`, `BUILDING.CPP:3539` | The MAKE frames are spread over five seconds whatever their count (`(5 × 15) / frames` ticks each); the building starts working when it finishes. The frame count comes from the game data in the sim, not from the renderer. Selling plays it backwards at the same rate. `--test-mcv-deploy` checks the FACTMAKE run. |
 | Build-area adjacency rules | 🟢 | `BUILDING.CPP` | |
 
 ## Fog, radar & vision
@@ -180,9 +182,16 @@ presentation*. Listed for completeness.
 | Classic SHP rendering | 🟢 | |
 | Remastered HD sprite rendering | 🟢 | Extracted from the user's own Remastered install. |
 | HD cursors | ✅ | 57 families / 456 frames, with hotspots; falls back to procedural shapes. |
+| Classic front end: title screen and main menu, choose your side, Load Mission and Options dialogs | 🟢 | Ports of Select_Game / Main_Menu (`MENUS.CPP`), Choose_Side (`INTRO.CPP`) and the dialog primitives (`DIALOG.CPP`, `TEXTBTN.CPP`, `LOADDLG.CPP`) over the Win95 HTITLE.PCX. Options and Developer Tools are ours, in the same style. `--test-title`, `--test-classic-menus` (snapshots). |
+| Campaign movies (intro/briefing/action, win/lose, retry) | 🟢 | Per the scenario INI and Start_Scenario's rules; the side's first movie (GDI1 / NOD1PRE) from Choose_Side; straight from the briefing movie into the mission, the text briefing only when no movie plays. Optional live Apple super-resolution (Enhanced). `--test-vqa`. |
+| Animated map selection | ✅ | MAPSEL.CPP's sequence and CLICK_*.CPS colour lookup, Win95 hi-res text. `--test-map-select` asserts the pick is committed. |
+| End-of-mission score screen | ✅ | SCORE.CPP's presentation (count-ups, bar graphs, Nod's firing squad, hall of fame with name entry). `--test-score`. |
+| Campaign endings | 🟢 | GDI_Ending / Nod_Ending (`ENDING.CPP`), including Nod's satellite target pick (`--test-title` checks the quadrants). GDIFINB/GDIEND2 are unreachable, as in the source (TempleIoned is never set). The ATTRACT2.CPS still before the teaser isn't in the released data. |
+| Repair wrench overlay | 🟢 | SELECT.SHP's SELECT_WRENCH frame (or the Remastered UI_REPAIRING), centred on the building, blinking every 15 game ticks (`BUILDING.CPP:630-635, 1055`). Replaced our spinning procedural wrench. |
+| Edge-scroll and other per-frame input steps in a mission | 🟡 | Tied to the frame rate (missions keep the old uneven ~30-40 fps pacing so their speed doesn't change; menus and classic screens run at a steady 60). Should be tied to elapsed time. |
 | HD sidebar power/progress meters | 🟢 | Modern sidebar: power segments, build/charge progress and health bars from `ui/sidebar/` (`Rendering/SidebarHD.swift`), procedural fallback. The classic sidebar keeps HPWRBAR/HCLOCK, now with PowerClass's settle bounce. [#1](https://github.com/DavidClawson/OpenConquer/issues/1) |
 | Arbitrary window size / zoom | 🟢 | Deliberate deviation from the fixed 640×400. |
-| Audio (classic AUD + remastered masters) | 🟢 | |
+| Audio (classic AUD + remastered masters) | 🟢 | IMA `.AUD` decodes as one continuous stream across chunks (soundio_common.cpp); was misread as per-chunk headers, which garbled the title music and side-select speech. Sample counts match ffmpeg's decoder. |
 | Smudges render under buildings/units | ✅ | |
 
 ## Ruleset deviations
@@ -203,8 +212,10 @@ Per-toggle overrides on top of a preset are not implemented yet (preset-level on
 
 ## Explicitly out of scope
 
-Multiplayer / netcode · Red Alert and later titles · bundling any game asset ·
+Red Alert and later titles · bundling any game asset ·
 original save-file compatibility · replay compatibility with the C++ RNG stream.
+Multiplayer isn't a parity item: it's planned as new work (Roadmap Phase 6,
+[`MULTIPLAYER.md`](MULTIPLAYER.md)).
 
 ## Contributing to this document
 
