@@ -81,21 +81,21 @@ class SoundTestState {
         let cat = categories[category]
         let isTheme = cat.name == "MUSIC THEMES"
 
-        guard audioManager.loadSound(name) else { return }
-        guard let samples = audioManager.soundCache[name],
-              let rate = audioManager.soundSampleRates[name] else { return }
+        guard gameAudio.loadSound(name) else { return }
+        guard let samples = gameAudio.soundCache[name],
+              let rate = gameAudio.soundSampleRates[name] else { return }
 
         if isTheme {
             // Play as music
-            audioManager.musicSamples = samples
-            audioManager.musicOffset = 0
-            audioManager.isMusicPlaying = true
-            audioManager.isMusicLooping = false
+            gameAudio.musicSamples = samples
+            gameAudio.musicOffset = 0
+            gameAudio.isMusicPlaying = true
+            gameAudio.isMusicLooping = false
         } else {
             // Play as sound effect (non-positional, full volume)
-            audioManager.activeSounds.append(AudioManager.ActiveSound(
+            gameAudio.activeSounds.append(AudioManager.ActiveSound(
                 samples: samples, offset: 0,
-                volume: audioManager.masterVolume,
+                volume: gameAudio.masterVolume,
                 pan: 0.0,
                 sourceSampleRate: rate
             ))
@@ -107,10 +107,10 @@ class SoundTestState {
 
     /// Stop current sound test playback
     private func stopPlayback() {
-        audioManager.activeSounds.removeAll()
-        audioManager.stopMusic()
-        audioManager.activeSpeech = nil
-        SDL_ClearQueuedAudio(audioManager.audioDevice)
+        gameAudio.activeSounds.removeAll()
+        gameAudio.stopMusic()
+        gameAudio.activeSpeech = nil
+        SDL_ClearQueuedAudio(gameAudio.audioDevice)
         playing = nil
     }
 
@@ -201,7 +201,7 @@ class SoundTestState {
         let infoY = listY + Int32(maxVisible) * rowH + 30
         if selection < cat.sounds.count {
             let entry = cat.sounds[selection]
-            if let lib = audioManager.soundLibrary, let audio = lib.load(entry.id) {
+            if let lib = gameAudio.soundLibrary, let audio = lib.load(entry.id) {
                 let dur = String(format: "%.2fs", audio.duration)
                 let info = "Rate: \(audio.sampleRate)Hz   Duration: \(dur)   Samples: \(audio.samples.count)   Source: \(audio.source.rawValue)"
                 drawText(renderer, info, centerX: renderState.windowWidth / 2, centerY: infoY, color: .green, scale: 1)

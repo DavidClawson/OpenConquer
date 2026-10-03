@@ -312,6 +312,21 @@ struct MidMissionSavedCrate: Codable {
     let isCollected: Bool
 }
 
+// MARK: - Camera in Saves
+
+/// Where the player was looking. Saves carry it, but the camera belongs to
+/// the app, which installs these hooks at startup (headless keeps the defaults).
+struct SavedView {
+    var cameraX: Double = 0
+    var cameraY: Double = 0
+    var zoom: Double = 1
+}
+
+var saveView: (current: () -> SavedView, restore: (SavedView) -> Void) = (
+    current: { SavedView() },
+    restore: { _ in }
+)
+
 // MARK: - Save Function
 
 /// Save the current mid-mission state to a numbered slot.
@@ -567,9 +582,9 @@ func saveMission(slot: Int, description: String? = nil) -> Bool {
         mapBoundsW: bounds.width,
         mapBoundsH: bounds.height,
         nextObjectId: world.nextObjectId,
-        cameraX: renderState.gameCameraX,
-        cameraY: renderState.gameCameraY,
-        zoomLevel: renderState.gameZoomLevel,
+        cameraX: saveView.current().cameraX,
+        cameraY: saveView.current().cameraY,
+        zoomLevel: saveView.current().zoom,
         sidebarCredits: session.sidebarCredits,
         displayedCredits: session.displayedCredits,
         scenarioBuildLevel: session.scenarioBuildLevel,
@@ -826,9 +841,7 @@ func loadMission(slot: Int) -> Bool {
         }
 
         // --- Camera ---
-        renderState.gameCameraX = save.cameraX
-        renderState.gameCameraY = save.cameraY
-        renderState.gameZoomLevel = save.zoomLevel
+        saveView.restore(SavedView(cameraX: save.cameraX, cameraY: save.cameraY, zoom: save.zoomLevel))
 
         // --- Credits ---
         session.sidebarCredits = save.sidebarCredits
@@ -994,19 +1007,6 @@ func loadMission(slot: Int) -> Bool {
         // --- Rebuild derived data ---
         buildPassabilityMap()
         updateOccupancy()
-
-        // Reload palette for theater
-        let palName: String
-        switch world.theater {
-        case .temperate: palName = "TEMPERAT.PAL"
-        case .desert: palName = "DESERT.PAL"
-        case .winter: palName = "WINTER.PAL"
-        }
-        renderState.gamePalette = loadPalette(palName)
-
-        // Reset tick timing so the game loop doesn't try to catch up
-        session.lastTickTime = 0
-        session.tickAccumulator = 0
 
         // Clear transient UI state
         session.isPlacingStructure = false

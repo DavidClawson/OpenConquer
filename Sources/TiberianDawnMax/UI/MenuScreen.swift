@@ -31,8 +31,8 @@ class MainMenuScreen: MenuScreen {
         // Start menu music on first render
         if !musicStarted {
             musicStarted = true
-            if !audioManager.isMusicPlaying {
-                audioManager.playMenuMusic(.aoi)
+            if !gameAudio.isMusicPlaying {
+                gameAudio.playMenuMusic(.aoi)
             }
         }
 
@@ -44,18 +44,18 @@ class MainMenuScreen: MenuScreen {
         }
 
         // Music status
-        let musicStatus = audioManager.musicEnabled ? "M: Music ON" : "M: Music OFF"
+        let musicStatus = gameAudio.musicEnabled ? "M: Music ON" : "M: Music OFF"
         drawText(renderer, musicStatus, centerX: renderState.windowWidth / 2, centerY: renderState.windowHeight - 60, color: .gray, scale: 1)
         drawText(renderer, "R964", centerX: renderState.windowWidth / 2, centerY: renderState.windowHeight - 40, color: .gray, scale: 1)
     }
 
     func handleKeyDown(_ key: Int32) {
         if key == Int32(SDLK_ESCAPE.rawValue) {
-            session.running = false
+            app.running = false
         } else if key == Int32(SDLK_m.rawValue) {
-            audioManager.toggleMusic()
-            if audioManager.musicEnabled && !audioManager.isMusicPlaying {
-                audioManager.playMenuMusic(.aoi)
+            gameAudio.toggleMusic()
+            if gameAudio.musicEnabled && !gameAudio.isMusicPlaying {
+                gameAudio.playMenuMusic(.aoi)
             }
         }
     }
@@ -86,7 +86,7 @@ class DifficultyScreen: MenuScreen {
 
     func handleKeyDown(_ key: Int32) {
         if key == Int32(SDLK_ESCAPE.rawValue) {
-            session.currentScreen = MainMenuScreen()
+            app.currentScreen = MainMenuScreen()
         }
     }
 
@@ -150,7 +150,7 @@ class OptionsScreen: MenuScreen {
 
     func handleKeyDown(_ key: Int32) {
         if key == Int32(SDLK_ESCAPE.rawValue) {
-            session.currentScreen = MainMenuScreen()
+            app.currentScreen = MainMenuScreen()
         }
     }
 
@@ -171,7 +171,7 @@ class OptionsScreen: MenuScreen {
 class FactionScreen: MenuScreen {
     func render(_ renderer: OpaquePointer?) {
         drawText(renderer, "Choose Your Side", centerX: renderState.windowWidth / 2, centerY: 100, color: .amber, scale: 3)
-        drawText(renderer, "Difficulty: \(session.selectedDifficulty.rawValue)", centerX: renderState.windowWidth / 2, centerY: 160, color: .green, scale: 2)
+        drawText(renderer, "Difficulty: \(app.selectedDifficulty.rawValue)", centerX: renderState.windowWidth / 2, centerY: 160, color: .green, scale: 2)
 
         for btn in makeFactionButtons() {
             let isGDI = btn.label == "GDI"
@@ -186,7 +186,7 @@ class FactionScreen: MenuScreen {
 
     func handleKeyDown(_ key: Int32) {
         if key == Int32(SDLK_ESCAPE.rawValue) {
-            session.currentScreen = DifficultyScreen()
+            app.currentScreen = DifficultyScreen()
         }
     }
 
@@ -226,12 +226,12 @@ class LaunchingScreen: MenuScreen {
         session.campaignState.completedMissions.removeAll()
 
         // Show mission briefing before starting
-        session.currentScreen = BriefingScreen()
+        app.currentScreen = BriefingScreen()
     }
 
     func handleKeyDown(_ key: Int32) {
         if key == Int32(SDLK_ESCAPE.rawValue) {
-            session.currentScreen = FactionScreen()
+            app.currentScreen = FactionScreen()
         }
     }
 }
@@ -245,20 +245,20 @@ class BriefingScreen: MenuScreen {
 
     func handleKeyDown(_ key: Int32) {
         if key == Int32(SDLK_ESCAPE.rawValue) {
-            session.currentScreen = MainMenuScreen()
+            app.currentScreen = MainMenuScreen()
             return
         }
         if key == Int32(SDLK_RETURN.rawValue) || key == Int32(SDLK_SPACE.rawValue) {
             // Launch the mission
             if session.campaign.startNextMission() {
                 applyAutoFitCameraAndZoom()
-                session.lastTickTime = 0
-                session.tickAccumulator = 0
+                app.lastTickTime = 0
+                app.tickAccumulator = 0
                 session.missionScore.reset()
                 session.triggerWinState = .playing
-                session.currentScreen = PlayingScreen()
+                app.currentScreen = PlayingScreen()
             } else {
-                session.currentScreen = MainMenuScreen()
+                app.currentScreen = MainMenuScreen()
             }
         }
     }
@@ -280,7 +280,7 @@ class LoadMissionFactionScreen: MenuScreen {
 
     func handleKeyDown(_ key: Int32) {
         if key == Int32(SDLK_ESCAPE.rawValue) {
-            session.currentScreen = MainMenuScreen()
+            app.currentScreen = MainMenuScreen()
         }
     }
 
@@ -416,7 +416,7 @@ class LoadMissionListScreen: MenuScreen {
 
     func handleKeyDown(_ key: Int32) {
         if key == Int32(SDLK_ESCAPE.rawValue) {
-            session.currentScreen = LoadMissionFactionScreen()
+            app.currentScreen = LoadMissionFactionScreen()
         } else if key == Int32(SDLK_UP.rawValue) {
             scrollOffset = max(0, scrollOffset - 1)
         } else if key == Int32(SDLK_DOWN.rawValue) {
@@ -451,10 +451,10 @@ class LoadMissionListScreen: MenuScreen {
         session.campaignState.isActive = true
         session.campaignState.carryOverCredits = 0
         session.campaignState.completedMissions.removeAll()
-        session.selectedDifficulty = .normal
+        app.selectedDifficulty = .normal
 
         // Launch directly via the briefing screen
-        session.currentScreen = BriefingScreen()
+        app.currentScreen = BriefingScreen()
     }
 }
 
@@ -462,15 +462,15 @@ class LoadMissionListScreen: MenuScreen {
 
 class SoundTestScreen: MenuScreen {
     func render(_ renderer: OpaquePointer?) {
-        session.soundTest.render(renderer)
+        app.soundTest.render(renderer)
     }
 
     func handleKeyDown(_ key: Int32) {
         if key == Int32(SDLK_ESCAPE.rawValue) {
-            session.currentScreen = MainMenuScreen()
+            app.currentScreen = MainMenuScreen()
             return
         }
-        session.soundTest.handleKey(key)
+        app.soundTest.handleKey(key)
     }
 }
 
@@ -484,7 +484,7 @@ class MapViewerScreen: MenuScreen {
         // HUD overlay
         let cellX = renderState.cameraX / 24
         let cellY = renderState.cameraY / 24
-        let scenarioLabel = "\(session.scenarioList[session.scenarioIndex]) (\(session.scenarioIndex + 1)/\(session.scenarioList.count))"
+        let scenarioLabel = "\(app.scenarioList[app.scenarioIndex]) (\(app.scenarioIndex + 1)/\(app.scenarioList.count))"
         drawText(renderer, "Map Viewer - \(scenarioLabel)", centerX: renderState.windowWidth / 2, centerY: 15, color: .amber, scale: 2)
         let zoomPct = String(format: "%.0f%%", renderState.zoomLevel * 100)
         drawText(renderer, "Camera: \(cellX) \(cellY)  Zoom: \(zoomPct)", centerX: renderState.windowWidth / 2, centerY: 35, color: .green, scale: 1)
@@ -497,15 +497,15 @@ class MapViewerScreen: MenuScreen {
 
     func handleKeyDown(_ key: Int32) {
         if key == Int32(SDLK_ESCAPE.rawValue) {
-            session.currentScreen = MainMenuScreen()
+            app.currentScreen = MainMenuScreen()
             return
         }
         if key == Int32(SDLK_RIGHTBRACKET.rawValue) {
-            session.scenarioIndex = (session.scenarioIndex + 1) % session.scenarioList.count
-            loadMapViewerData(session.scenarioList[session.scenarioIndex])
+            app.scenarioIndex = (app.scenarioIndex + 1) % app.scenarioList.count
+            loadMapViewerData(app.scenarioList[app.scenarioIndex])
         } else if key == Int32(SDLK_LEFTBRACKET.rawValue) {
-            session.scenarioIndex = (session.scenarioIndex - 1 + session.scenarioList.count) % session.scenarioList.count
-            loadMapViewerData(session.scenarioList[session.scenarioIndex])
+            app.scenarioIndex = (app.scenarioIndex - 1 + app.scenarioList.count) % app.scenarioList.count
+            loadMapViewerData(app.scenarioList[app.scenarioIndex])
         } else if key == Int32(SDLK_EQUALS.rawValue) {
             renderState.zoomLevel = min(3.0, renderState.zoomLevel + 0.25)
         } else if key == Int32(SDLK_MINUS.rawValue) {
@@ -520,7 +520,7 @@ class MapViewerScreen: MenuScreen {
             renderState.showBaseList = !renderState.showBaseList
         } else if key == Int32(SDLK_p.rawValue) {
             if let sd = scenarioData {
-                let scenName = session.scenarioList[session.scenarioIndex]
+                let scenName = app.scenarioList[app.scenarioIndex]
 
                 // Simulator launch: detach from any active campaign so handleWin/score
                 // don't try to advance to the next mission afterward.
@@ -540,15 +540,15 @@ class MapViewerScreen: MenuScreen {
 
                 // Match the briefing path's setup so end-screen + score work.
                 session.missionScore.reset()
-                session.lastTickTime = 0
-                session.tickAccumulator = 0
+                app.lastTickTime = 0
+                app.tickAccumulator = 0
                 session.triggerWinState = .playing
                 applyAutoFitCameraAndZoom()
 
-                session.currentScreen = PlayingScreen()
+                app.currentScreen = PlayingScreen()
             }
         } else if key == Int32(SDLK_m.rawValue) {
-            audioManager.toggleMusic()
+            gameAudio.toggleMusic()
         } else if key >= Int32(SDLK_0.rawValue) && key <= Int32(SDLK_9.rawValue) {
             let wpId = Int(key - Int32(SDLK_0.rawValue))
             if let sd = scenarioData,
@@ -651,7 +651,7 @@ class PlayingScreen: MenuScreen {
         // Start gameplay music on first render
         if !musicStarted {
             musicStarted = true
-            audioManager.startGameplayMusic()
+            gameAudio.startGameplayMusic()
         }
         renderGame(renderer)
 
@@ -791,11 +791,11 @@ class PlayingScreen: MenuScreen {
                     session.missionScore.elapsedTicks = session.world?.tickCount ?? 0
                     session.campaign.handleWin()
                     if session.campaignState.isComplete {
-                        session.currentScreen = MainMenuScreen()
+                        app.currentScreen = MainMenuScreen()
                     } else {
                         // Map selection between win and briefing — shown even
                         // for a single choice, like the original (MAPSEL.CPP:268).
-                        session.currentScreen = MapSelectionScreen(choices: session.campaign.pendingChoices)
+                        app.currentScreen = MapSelectionScreen(choices: session.campaign.pendingChoices)
                     }
                 case "replay", "retry":
                     session.campaign.restart()
@@ -804,7 +804,7 @@ class PlayingScreen: MenuScreen {
                     endScreenTimer = 0
                     endScreenButtons = []
                 case "menu":
-                    session.currentScreen = MainMenuScreen()
+                    app.currentScreen = MainMenuScreen()
                 default:
                     break
                 }
@@ -817,7 +817,7 @@ class PlayingScreen: MenuScreen {
         // When end screen is showing, block most input
         if showingEndScreen {
             if key == Int32(SDLK_ESCAPE.rawValue) {
-                session.currentScreen = MainMenuScreen()
+                app.currentScreen = MainMenuScreen()
             }
             return
         }
@@ -836,7 +836,7 @@ class PlayingScreen: MenuScreen {
             } else if let world = session.world, !world.selectedObjects().isEmpty {
                 world.deselectAll()
             } else {
-                session.currentScreen = MapViewerScreen()
+                app.currentScreen = MapViewerScreen()
                 SDL_ShowCursor(SDL_ENABLE)
                 renderState.systemCursorHidden = false
             }
@@ -866,10 +866,10 @@ class PlayingScreen: MenuScreen {
         } else if key == Int32(SDLK_RETURN.rawValue) || key == Int32(SDLK_SPACE.rawValue) {
             if session.triggerWinState == .won {
                 session.missionScore.elapsedTicks = session.world?.tickCount ?? 0
-                session.currentScreen = ScoreScreen(won: true)
+                app.currentScreen = ScoreScreen(won: true)
             } else if session.triggerWinState == .lost {
                 session.missionScore.elapsedTicks = session.world?.tickCount ?? 0
-                session.currentScreen = ScoreScreen(won: false)
+                app.currentScreen = ScoreScreen(won: false)
             }
         } else if key == Int32(SDLK_s.rawValue) {
             // Stop/halt selected units
@@ -924,7 +924,7 @@ class PlayingScreen: MenuScreen {
                         obj.mission = .guard_
                     }
                 }
-                audioManager.play(audioManager.unitAcknowledgeSound())
+                gameAudio.play(gameAudio.unitAcknowledgeSound())
             }
         } else if key == Int32(SDLK_g.rawValue) {
             // Guard mode: stand ground, attack enemies in range
@@ -991,9 +991,9 @@ class PlayingScreen: MenuScreen {
             }
         } else if key == Int32(SDLK_m.rawValue) {
             // M key: toggle music on/off
-            audioManager.toggleMusic()
-            if audioManager.musicEnabled && !audioManager.isMusicPlaying {
-                audioManager.startGameplayMusic()
+            gameAudio.toggleMusic()
+            if gameAudio.musicEnabled && !gameAudio.isMusicPlaying {
+                gameAudio.startGameplayMusic()
             }
         } else if isNumberKey(key) {
             // Control groups: Ctrl+0-9 to assign, 0-9 to recall, double-tap to center
@@ -1126,7 +1126,7 @@ class PlayingScreen: MenuScreen {
                         obj.moveWaypoints = []
                         obj.groupMoveSpeed = groupSpeed
                     }
-                    audioManager.play(audioManager.unitAcknowledgeSound())
+                    gameAudio.play(gameAudio.unitAcknowledgeSound())
                 }
             } else {
                 let shiftHeld = (SDL_GetModState().rawValue & UInt32(KMOD_SHIFT.rawValue)) != 0
@@ -1459,20 +1459,20 @@ class ScoreScreen: MenuScreen {
 
     func handleKeyDown(_ key: Int32) {
         if key == Int32(SDLK_ESCAPE.rawValue) {
-            session.currentScreen = MainMenuScreen()
+            app.currentScreen = MainMenuScreen()
             return
         }
         if key == Int32(SDLK_n.rawValue) && won && session.campaignState.isActive {
             session.campaign.handleWin()
             if !session.campaignState.isComplete {
-                session.currentScreen = MapSelectionScreen(choices: session.campaign.pendingChoices)
+                app.currentScreen = MapSelectionScreen(choices: session.campaign.pendingChoices)
             } else {
-                session.currentScreen = MainMenuScreen()
+                app.currentScreen = MainMenuScreen()
             }
         } else if key == Int32(SDLK_r.rawValue) {
             session.campaign.restart()
             session.triggerWinState = .playing
-            session.currentScreen = PlayingScreen()
+            app.currentScreen = PlayingScreen()
         }
     }
 }

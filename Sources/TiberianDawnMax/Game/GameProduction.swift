@@ -1,4 +1,3 @@
-import CSDL2
 import Foundation
 
 // MARK: - Build Data (derived from type data tables)
@@ -320,12 +319,10 @@ func spawnProducedUnit(_ typeName: String, world: GameWorld) {
 
 // MARK: - Structure Placement
 
-func handleStructurePlacement(_ x: Int32, _ y: Int32) {
+/// Place the pending structure with its top-left at the given cell, if the
+/// footprint is clear and touches one of the player's buildings.
+func placeStructure(cellX: Int, cellY: Int) {
     guard let world = session.world, let pType = session.placementType else { return }
-    let worldPos = gameScreenToWorld(x, y)
-
-    let cellX = Int(worldPos.worldX) / 24
-    let cellY = Int(worldPos.worldY) / 24
     let size = buildingSize(pType)
 
     // Check if area is passable

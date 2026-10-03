@@ -208,8 +208,6 @@ class CampaignManager {
             scenarioData = scenario
             initGameWorld(scenario: scenario, scenarioName: scenName)
             score.reset()
-            session.lastTickTime = 0
-            session.tickAccumulator = 0
             print("Campaign: Restarted mission \(scenName)")
         }
     }
@@ -275,8 +273,6 @@ class CampaignManager {
 
         // Reset score for new mission
         score.reset()
-        session.lastTickTime = 0
-        session.tickAccumulator = 0
 
         print("Campaign: Started mission \(scenName) with \(state.carryOverCredits) carry-over credits")
         return true
@@ -787,8 +783,8 @@ func saveGame(slot: Int, description: String = "") -> Bool {
         scoreCreditsHarvested: session.missionScore.creditsHarvested,
         scoreElapsedTicks: session.missionScore.elapsedTicks,
         triggers: savedTriggers,
-        cameraX: renderState.gameCameraX,
-        cameraY: renderState.gameCameraY
+        cameraX: saveView.current().cameraX,
+        cameraY: saveView.current().cameraY
     )
     // V2 fields
     saveData.controlGroups = world.controlGroups
@@ -935,8 +931,10 @@ func loadGame(slot: Int) -> Bool {
 
         session.world = world
         session.sidebarCredits = saveData.credits
-        renderState.gameCameraX = saveData.cameraX
-        renderState.gameCameraY = saveData.cameraY
+        var view = saveView.current()
+        view.cameraX = saveData.cameraX
+        view.cameraY = saveData.cameraY
+        saveView.restore(view)
         session.currentScenarioName = scenName
 
         // Restore campaign state
@@ -1068,15 +1066,6 @@ func loadGame(slot: Int) -> Bool {
             session.aiTickCounter = saveData.aiTickCounter ?? 0
             session.scenarioBuildLevel = saveData.scenarioBuildLevel ?? 99
         }
-
-        // Reload palette for theater
-        let palName: String
-        switch world.theater {
-        case .temperate: palName = "TEMPERAT.PAL"
-        case .desert: palName = "DESERT.PAL"
-        case .winter: palName = "WINTER.PAL"
-        }
-        renderState.gamePalette = loadPalette(palName)
 
         print("LoadGame: Loaded slot \(slot) v\(saveData.version) - '\(saveData.description)' (\(world.objects.count) objects)")
         return true

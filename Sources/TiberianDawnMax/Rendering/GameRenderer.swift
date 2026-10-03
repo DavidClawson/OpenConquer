@@ -153,6 +153,7 @@ func pickStructureFrame(_ obj: GameObject) -> Int {
 
 func renderGame(_ renderer: OpaquePointer?) {
     guard let world = session.world else { return }
+    syncPresentationWithWorld()  // a world can be drawn before its first tick
     let tileSize = 24
     let mapSize = 64
     let theater = world.theater
@@ -481,7 +482,7 @@ func renderGame(_ renderer: OpaquePointer?) {
     }
 
     // Draw mobile game objects (units and infantry) from interpolated positions
-    let interp = session.renderInterpolation
+    let interp = app.renderInterpolation
     for obj in mobileObjects {
         // Skip enemy objects on non-visible cells (fog of war)
         if obj.house != world.playerHouse && !isCellVisible(obj.cell) { continue }
@@ -940,7 +941,7 @@ func renderGame(_ renderer: OpaquePointer?) {
     // Show the mission ACTUALLY being played (not the menu browser index, which
     // stayed at SCG01EA). Derive the mission number + faction from the current
     // scenario name so the friendly title can't drift out of sync.
-    let scenarioCode = (session.currentScenarioName ?? session.scenarioList[session.scenarioIndex]).uppercased()
+    let scenarioCode = (session.currentScenarioName ?? app.scenarioList[app.scenarioIndex]).uppercased()
     let missionNum = Int(scenarioCode.dropFirst(3).prefix(2)) ?? 0
     let nameTable = scenarioCode.hasPrefix("SCB") ? nodMissionNames : gdiMissionNames
     let missionTitle = nameTable[missionNum] ?? scenarioCode

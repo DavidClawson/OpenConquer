@@ -174,7 +174,7 @@ extension GameObject {
             if let aId = attackerId, let attacker = findObjectById(aId) {
                 attacker.killCount += 1
                 if attacker.isCommando, let world = session.world {
-                    noteCommandoKill(attacker, tick: world.tickCount)  // cosmetic quip only
+                    audioManager.commandoMadeKill(attacker, tick: world.tickCount)  // cosmetic quip only
                 }
             }
             // Emit destruction event

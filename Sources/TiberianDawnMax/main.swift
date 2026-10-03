@@ -435,9 +435,9 @@ func discoverScenarios() -> [String] {
     return found
 }
 
-session.scenarioList = discoverScenarios()
+app.scenarioList = discoverScenarios()
 
-print("Discovered \(session.scenarioList.count) scenarios: \(session.scenarioList.joined(separator: ", "))")
+print("Discovered \(app.scenarioList.count) scenarios: \(app.scenarioList.joined(separator: ", "))")
 
 // MARK: - App
 
@@ -500,8 +500,19 @@ do {
 }
 
 // Initialize audio system
-audioManager.initialize()
-audioManager.soundLibrary = SoundLibrary(assetManager: assetManager)
+gameAudio.initialize()
+audioManager = gameAudio  // the sim plays sounds through this
+subscribeScreenEffects()
+saveView = (
+    current: { SavedView(cameraX: renderState.gameCameraX, cameraY: renderState.gameCameraY,
+                         zoom: renderState.gameZoomLevel) },
+    restore: { v in
+        renderState.gameCameraX = v.cameraX
+        renderState.gameCameraY = v.cameraY
+        renderState.gameZoomLevel = v.zoom
+    }
+)
+gameAudio.soundLibrary = SoundLibrary(assetManager: assetManager)
 
 var event = SDL_Event()
 
@@ -511,12 +522,12 @@ var event = SDL_Event()
 // black window with no explanation. SetupScreen draws with the built-in pixel
 // font, so it works with zero assets present.
 if assetManager.mixManager.totalEntries == 0 {
-    session.currentScreen = SetupScreen()
+    app.currentScreen = SetupScreen()
 }
 
 // MARK: - Main Loop
 
-while session.running {
+while app.running {
     perf.beginFrame()
 
     // Events
@@ -524,7 +535,7 @@ while session.running {
         let eventType = SDL_EventType(rawValue: event.type)
         switch eventType {
         case SDL_QUIT:
-            session.running = false
+            app.running = false
         case SDL_KEYDOWN:
             handleKeyDown(event.key.keysym.sym)
         case SDL_MOUSEMOTION:
@@ -546,7 +557,7 @@ while session.running {
     handleContinuousInput()
 
     // Update game logic in playing state
-    if session.isPlaying {
+    if app.isPlaying {
         perf.beginSection("Logic")
         updateGame()
         perf.endSection("Logic")
@@ -554,7 +565,7 @@ while session.running {
 
     // Tick audio system (mix and queue output)
     perf.beginSection("Audio")
-    audioManager.tick()
+    gameAudio.tick()
     perf.endSection("Audio")
 
     // Render
@@ -581,7 +592,7 @@ while session.running {
     SDL_Delay(16) // ~60fps
 }
 
-audioManager.shutdown()
+gameAudio.shutdown()
 SDL_DestroyRenderer(renderer)
 SDL_DestroyWindow(window)
 SDL_Quit()

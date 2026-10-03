@@ -1,24 +1,6 @@
 import CSDL2
 import Foundation
 
-// MARK: - Building Hit Test
-
-/// Test if a world position is within a building's clickable area.
-/// Building sprites are taller than their footprint (anchored at the bottom),
-/// so the hit area extends upward beyond the footprint center to cover the
-/// visible sprite region that users naturally click on.
-func isWorldPosOnBuilding(worldX: Double, worldY: Double, building: GameObject) -> Bool {
-    let size = buildingSize(building.typeName)
-    let halfW = Double(size.w * 24) / 2.0
-    let halfH = Double(size.h * 24) / 2.0
-    // Horizontal: match footprint width
-    guard abs(worldX - building.worldX) <= halfW else { return false }
-    // Vertical: building sprite is bottom-anchored — it can extend above the footprint.
-    // Accept clicks within the footprint (±halfH) plus extra above for the visible sprite.
-    let dy = worldY - building.worldY
-    return dy >= -halfH - 24.0 && dy <= halfH
-}
-
 // MARK: - Coordinate Conversion
 
 func gameScreenToWorld(_ screenX: Int32, _ screenY: Int32) -> (worldX: Double, worldY: Double) {
@@ -188,7 +170,7 @@ func handleGameLeftUp(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
            clicked.house == world.playerHouse,
            clicked.mission != .unload {
             clicked.mission = .unload
-            audioManager.play(audioManager.unitAcknowledgeSound())
+            gameAudio.play(gameAudio.unitAcknowledgeSound())
             // Clear selection state
             input.selectionBoxStartX = nil
             input.selectionBoxStartY = nil
@@ -206,7 +188,7 @@ func handleGameLeftUp(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
             transport.moveTargetX = nil
             transport.moveTargetY = nil
             transport.movePath = []
-            audioManager.play(audioManager.unitAcknowledgeSound())
+            gameAudio.play(gameAudio.unitAcknowledgeSound())
             input.selectionBoxStartX = nil
             input.selectionBoxStartY = nil
             input.selectionBoxEndX = nil
@@ -222,7 +204,7 @@ func handleGameLeftUp(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
         if let obj = nearest {
             obj.isSelected = !obj.isSelected || !shiftHeld
             if obj.isSelected && obj.house == world.playerHouse {
-                audioManager.play(audioManager.selectResponse(for: obj))
+                gameAudio.play(gameAudio.selectResponse(for: obj))
             }
         }
     }
@@ -316,7 +298,7 @@ func handleGameRightClick(_ x: Int32, _ y: Int32, shiftHeld: Bool = false) {
                 obj.isAttackMoving = false
                 obj.moveWaypoints = []
             }
-            audioManager.play(audioManager.unitAcknowledgeSound())
+            gameAudio.play(gameAudio.unitAcknowledgeSound())
         }
         session.isPatrolMode = false
         session.patrolModeWaypoints = []
@@ -336,7 +318,7 @@ func handleGameRightClick(_ x: Int32, _ y: Int32, shiftHeld: Bool = false) {
             obj.rallyPointX = worldPos.worldX
             obj.rallyPointY = worldPos.worldY
         }
-        audioManager.play(audioManager.unitAcknowledgeSound())
+        gameAudio.play(gameAudio.unitAcknowledgeSound())
         return
     }
 
@@ -370,9 +352,9 @@ func handleGameRightClick(_ x: Int32, _ y: Int32, shiftHeld: Bool = false) {
         // (Vanilla Response_Sabotage). Otherwise the attack reply.
         let attackers = selected.filter { $0.kind != .structure }
         if enemy.kind == .structure && attackers.first?.isCommando == true {
-            audioManager.play(.ramboPresent)
+            gameAudio.play(.ramboPresent)
         } else {
-            audioManager.play(audioManager.attackResponse(for: attackers))
+            gameAudio.play(gameAudio.attackResponse(for: attackers))
         }
         return
     }
@@ -398,7 +380,7 @@ func handleGameRightClick(_ x: Int32, _ y: Int32, shiftHeld: Bool = false) {
             ordered = true
         }
         if ordered {
-            audioManager.play(audioManager.unitAcknowledgeSound())
+            gameAudio.play(gameAudio.unitAcknowledgeSound())
             return
         }
     }
@@ -431,7 +413,7 @@ func handleGameRightClick(_ x: Int32, _ y: Int32, shiftHeld: Bool = false) {
                 ordered = true
             }
             if ordered {
-                audioManager.play(audioManager.unitAcknowledgeSound())
+                gameAudio.play(gameAudio.unitAcknowledgeSound())
                 return
             }
         } else if bType == "FIX" {
@@ -448,7 +430,7 @@ func handleGameRightClick(_ x: Int32, _ y: Int32, shiftHeld: Bool = false) {
                 ordered = true
             }
             if ordered {
-                audioManager.play(audioManager.unitAcknowledgeSound())
+                gameAudio.play(gameAudio.unitAcknowledgeSound())
                 return
             }
         }
@@ -550,5 +532,13 @@ func handleGameRightClick(_ x: Int32, _ y: Int32, shiftHeld: Bool = false) {
             obj.groupMoveSpeed = groupSpeed
         }
     }
-    audioManager.play(audioManager.moveResponse(for: movable))
+    gameAudio.play(gameAudio.moveResponse(for: movable))
+}
+
+// MARK: - Structure Placement
+
+/// A placement click: convert the screen point to the cell under it.
+func handleStructurePlacement(_ x: Int32, _ y: Int32) {
+    let worldPos = gameScreenToWorld(x, y)
+    placeStructure(cellX: Int(worldPos.worldX) / 24, cellY: Int(worldPos.worldY) / 24)
 }

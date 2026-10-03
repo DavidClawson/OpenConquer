@@ -88,17 +88,6 @@ class CombatState {
 // MARK: - GameSession
 
 class GameSession {
-    // MARK: - Menu / UI State
-    var currentScreen: MenuScreen = MainMenuScreen()
-    var running: Bool = true
-    var isPlaying: Bool { currentScreen is PlayingScreen }
-    var selectedDifficulty: Difficulty = .normal
-    var selectedFaction: Faction = .gdi
-    var scenarioList: [String] = []
-    var scenarioIndex: Int = 0
-    var soundTest = SoundTestState()
-    var spritePlayground = SpritePlaygroundState()
-
     // MARK: - Game World
     var world: GameWorld? = nil
     var scenarioBuildLevel: Int = 99  // Tech level cap (from scenario INI)
@@ -112,11 +101,6 @@ class GameSession {
     // it (e.g. to .enhanced for veterancy). The headless harness uses this
     // default, so classic1995's digests are the pinned baselines in CLAUDE.md.
     var rules: Ruleset = .classic1995
-
-    // MARK: - Game Tick Timing
-    var tickAccumulator: UInt32 = 0
-    var lastTickTime: UInt32 = 0
-    var renderInterpolation: Double = 0.0
 
     // MARK: - Sub-Containers
     var production = ProductionState()

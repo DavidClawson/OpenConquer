@@ -18,20 +18,20 @@ func handleKeyDown(_ key: Int32) {
         screenshotPending = true
         return
     }
-    session.currentScreen.handleKeyDown(key)
+    app.currentScreen.handleKeyDown(key)
 }
 
 func handleMouseMotion(_ event: SDL_Event) {
     input.mouseX = event.motion.x
     input.mouseY = event.motion.y
-    session.currentScreen.handleMouseMotion(
+    app.currentScreen.handleMouseMotion(
         event.motion.x, event.motion.y,
         xrel: event.motion.xrel, yrel: event.motion.yrel
     )
 }
 
 func handleMouseButtonDown(_ event: SDL_Event) {
-    session.currentScreen.handleMouseDown(
+    app.currentScreen.handleMouseDown(
         event.button.x, event.button.y,
         button: event.button.button
     )
@@ -39,7 +39,7 @@ func handleMouseButtonDown(_ event: SDL_Event) {
 
 func handleMouseButtonUp(_ event: SDL_Event) {
     input.isPanning = false
-    session.currentScreen.handleMouseUp(
+    app.currentScreen.handleMouseUp(
         event.button.x, event.button.y,
         button: event.button.button
     )
@@ -50,7 +50,7 @@ func handleMouseWheel(_ event: SDL_Event) {
     // emit fractions but SDL clamps to 1 minimum on a meaningful scroll).
     let dy = event.wheel.y
     if dy == 0 { return }
-    session.currentScreen.handleMouseWheel(
+    app.currentScreen.handleMouseWheel(
         Int32(dy),
         atX: input.mouseX, atY: input.mouseY
     )
@@ -87,7 +87,7 @@ func handleWindowEvent(_ event: SDL_Event) {
 /// Only applies while a mission is playing — menus already lay out from
 /// `renderState.windowWidth/Height` each frame so they're already responsive.
 private func applyWindowResizeSideEffects() {
-    guard session.isPlaying else { return }
+    guard app.isPlaying else { return }
     // Empty space outside the map is allowed (matches the original game's
     // look on bounded missions). Just clamp the camera so it doesn't drift
     // into negative coords when a resize widens the viewport.
@@ -95,5 +95,5 @@ private func applyWindowResizeSideEffects() {
 }
 
 func handleContinuousInput() {
-    session.currentScreen.handleContinuousInput()
+    app.currentScreen.handleContinuousInput()
 }

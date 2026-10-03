@@ -76,7 +76,6 @@ func resolveStrength(typeName: String, kind: ObjectKind, scenarioStrength: Int) 
 // MARK: - Game World Initialization
 
 func initGameWorld(scenario: ScenarioData, scenarioName: String) {
-    resetClassicSidebarState()
     let world = GameWorld()
     world.theater = scenario.theater
     world.mapBounds = scenario.mapBounds
@@ -112,10 +111,6 @@ func initGameWorld(scenario: ScenarioData, scenarioName: String) {
     session.production.patrolModeWaypoints.removeAll()
     session.sidebarCredits = scenario.credits
     session.production.displayedCredits = scenario.credits
-
-    // Clear stale texture caches (theater may differ between scenarios/viewer)
-    renderState.objectFailedSHPs.removeAll()
-    renderState.terrainFailedSHPs.removeAll()
 
     // Tier-1 mission flags: [ObjectFlags] section maps cell -> flag set.
     // Classic scenarios have no such section, so this is empty and inert there.
@@ -252,15 +247,6 @@ func initGameWorld(scenario: ScenarioData, scenarioName: String) {
         print("GameInit: Warning - \(binName) not found, using empty map cells")
         mapCells = (0..<4096).map { _ in MapCell(templateType: 0xFF, iconIndex: 0) }
     }
-
-    // Load palette for theater
-    let palName: String
-    switch scenario.theater {
-    case .temperate: palName = "TEMPERAT.PAL"
-    case .desert: palName = "DESERT.PAL"
-    case .winter: palName = "WINTER.PAL"
-    }
-    renderState.gamePalette = loadPalette(palName)
 
     // Build static passability map
     buildPassabilityMap()

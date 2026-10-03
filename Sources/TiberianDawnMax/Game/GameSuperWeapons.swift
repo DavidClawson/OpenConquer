@@ -253,16 +253,8 @@ func deployIonCannon(worldX: Double, worldY: Double) {
     // Play ion cannon sound
     audioManager.play(.ionCannon, worldX: worldX, worldY: worldY)
 
-    // Screen flash (white-blue)
-    renderState.screenFlashAlpha = 200
-    renderState.screenFlashR = 180
-    renderState.screenFlashG = 220
-    renderState.screenFlashB = 255
-
-    // Ion beam visual effect
-    renderState.ionBeamWorldX = worldX
-    renderState.ionBeamWorldY = worldY
-    renderState.ionBeamTimer = 30  // ~2 seconds at 15 FPS
+    // Beam and flash (drawn by the app)
+    eventBus.emit(.ionCannonStrike(worldX: worldX, worldY: worldY))
 
     // Spawn ion cannon animation
     spawnAnimation(.ionCannon, worldX: worldX, worldY: worldY)
@@ -305,15 +297,8 @@ func deployNuclearStrike(worldX: Double, worldY: Double) {
     audioManager.speak(.nukeLaunched)
     audioManager.play(.nukeExplode, worldX: worldX, worldY: worldY)
 
-    // Screen flash (bright white)
-    renderState.screenFlashAlpha = 255
-    renderState.screenFlashR = 255
-    renderState.screenFlashG = 255
-    renderState.screenFlashB = 240
-
-    // Screen shake
-    renderState.screenShakeDuration = 45  // ~3 seconds
-    renderState.screenShakeIntensity = 8.0
+    // Flash and shake (drawn by the app)
+    eventBus.emit(.nuclearDetonation(worldX: worldX, worldY: worldY))
 
     // Spawn nuclear explosion animation
     spawnAnimation(.atomBlast, worldX: worldX, worldY: worldY)
@@ -431,38 +416,6 @@ func deployAirStrike(worldX: Double, worldY: Double) {
     }
 }
 
-// MARK: - Screen Effects Tick
-
-/// Tick screen flash and shake effects (call each game tick)
-func tickScreenEffects() {
-    // Fade screen flash
-    if renderState.screenFlashAlpha > 0 {
-        let decay: UInt8 = 12
-        if renderState.screenFlashAlpha > decay {
-            renderState.screenFlashAlpha -= decay
-        } else {
-            renderState.screenFlashAlpha = 0
-        }
-    }
-
-    // Tick screen shake
-    if renderState.screenShakeDuration > 0 {
-        renderState.screenShakeDuration -= 1
-        let progress = Double(renderState.screenShakeDuration) / 45.0
-        let intensity = renderState.screenShakeIntensity * progress
-        renderState.screenShakeOffsetX = Int32(rndDouble(-intensity...intensity))
-        renderState.screenShakeOffsetY = Int32(rndDouble(-intensity...intensity))
-    } else {
-        renderState.screenShakeOffsetX = 0
-        renderState.screenShakeOffsetY = 0
-    }
-
-    // Tick ion beam visual
-    if renderState.ionBeamTimer > 0 {
-        renderState.ionBeamTimer -= 1
-    }
-}
-
 // MARK: - AI Super Weapon Usage
 
 /// Fire any enemy-owned superweapon that's ready. Called from the effectful part
@@ -522,14 +475,7 @@ func deployAIIonCannon(worldX: Double, worldY: Double, house: House) {
     session.speakEVA(.incomingMissile)
     audioManager.play(.ionCannon, worldX: worldX, worldY: worldY)
 
-    // Screen effects
-    renderState.screenFlashAlpha = 200
-    renderState.screenFlashR = 180
-    renderState.screenFlashG = 220
-    renderState.screenFlashB = 255
-    renderState.ionBeamWorldX = worldX
-    renderState.ionBeamWorldY = worldY
-    renderState.ionBeamTimer = 30
+    eventBus.emit(.ionCannonStrike(worldX: worldX, worldY: worldY))
 
     spawnAnimation(.ionCannon, worldX: worldX, worldY: worldY)
 
@@ -558,13 +504,7 @@ func deployAINukeStrike(worldX: Double, worldY: Double, house: House) {
     session.speakEVA(.incomingNuke)
     audioManager.play(.nukeExplode, worldX: worldX, worldY: worldY)
 
-    // Screen effects
-    renderState.screenFlashAlpha = 255
-    renderState.screenFlashR = 255
-    renderState.screenFlashG = 255
-    renderState.screenFlashB = 240
-    renderState.screenShakeDuration = 45
-    renderState.screenShakeIntensity = 8.0
+    eventBus.emit(.nuclearDetonation(worldX: worldX, worldY: worldY))
 
     spawnAnimation(.atomBlast, worldX: worldX, worldY: worldY)
 

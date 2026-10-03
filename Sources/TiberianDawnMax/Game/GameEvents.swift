@@ -17,6 +17,9 @@ enum GameEvent {
     case superWeaponReady(house: House, weaponType: String)
     case superWeaponFired(house: House, weaponType: String, targetX: Double, targetY: Double)
     case cratePickedUp(objectId: Int, house: House, effect: String)
+    // Presentation cues: the sim doesn't draw, it announces.
+    case ionCannonStrike(worldX: Double, worldY: Double)
+    case nuclearDetonation(worldX: Double, worldY: Double)
 }
 
 class GameEventBus {

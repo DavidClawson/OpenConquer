@@ -1,38 +1,9 @@
-import CSDL2
 import Foundation
 
 // MARK: - Game Tick Timing
 
 let ticksPerSecond = 15
 let tickDurationMs: UInt32 = 66  // ~15 FPS (1000/15)
-
-/// Interpolation factor 0.0-1.0 between game ticks for smooth rendering.
-/// 0.0 = at previous tick position, 1.0 = at current tick position.
-
-// MARK: - Game Update
-
-func updateGame() {
-    let now = SDL_GetTicks()
-    if session.lastTickTime == 0 {
-        session.lastTickTime = now
-        return
-    }
-
-    let elapsed = now - session.lastTickTime
-    session.lastTickTime = now
-    session.tickAccumulator += elapsed
-
-    // Run game ticks at fixed 15 FPS rate
-    while session.tickAccumulator >= tickDurationMs {
-        session.tickAccumulator -= tickDurationMs
-        gameTick()
-    }
-
-    tickCommandoQuips()
-
-    // Compute interpolation factor for smooth rendering between ticks
-    session.renderInterpolation = Double(session.tickAccumulator) / Double(tickDurationMs)
-}
 
 // MARK: - Game Tick
 
@@ -77,9 +48,6 @@ func gameTick() {
 
     // Tick super weapons
     tickSuperWeapons()
-
-    // Tick screen effects (flash, shake, beam)
-    tickScreenEffects()
 
     // Tick AI
     tickAI()

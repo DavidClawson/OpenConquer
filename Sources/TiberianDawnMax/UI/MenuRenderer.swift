@@ -47,28 +47,28 @@ func makeMainButtons() -> [Button] {
 
     return [
         Button(label: "Start New Game", x: cx, y: startY, w: bw, h: bh) {
-            session.currentScreen = DifficultyScreen()
+            app.currentScreen = DifficultyScreen()
         },
         Button(label: "Load Mission", x: cx, y: startY + 60, w: bw, h: bh) {
-            session.currentScreen = LoadMissionFactionScreen()
+            app.currentScreen = LoadMissionFactionScreen()
         },
         Button(label: "Sprite Playground", x: cx, y: startY + 120, w: bw, h: bh) {
-            session.spritePlayground.initialize()
-            session.currentScreen = SpritePlaygroundScreen()
+            app.spritePlayground.initialize()
+            app.currentScreen = SpritePlaygroundScreen()
         },
         Button(label: "Sound Test", x: cx, y: startY + 180, w: bw, h: bh) {
-            session.soundTest.initialize()
-            session.currentScreen = SoundTestScreen()
+            app.soundTest.initialize()
+            app.currentScreen = SoundTestScreen()
         },
         Button(label: "Map Viewer", x: cx, y: startY + 240, w: bw, h: bh) {
-            loadMapViewerData(session.scenarioList[session.scenarioIndex])
-            session.currentScreen = MapViewerScreen()
+            loadMapViewerData(app.scenarioList[app.scenarioIndex])
+            app.currentScreen = MapViewerScreen()
         },
         Button(label: "Options", x: cx, y: startY + 300, w: bw, h: bh) {
-            session.currentScreen = OptionsScreen()
+            app.currentScreen = OptionsScreen()
         },
         Button(label: "Exit Game", x: cx, y: startY + 360, w: bw, h: bh) {
-            session.running = false
+            app.running = false
         },
     ]
 }
@@ -153,8 +153,8 @@ func makeDifficultyButtons() -> [Button] {
 
     return Difficulty.allCases.enumerated().map { i, diff in
         Button(label: diff.rawValue, x: cx, y: startY + Int32(i) * 60, w: bw, h: bh) {
-            session.selectedDifficulty = diff
-            session.currentScreen = FactionScreen()
+            app.selectedDifficulty = diff
+            app.currentScreen = FactionScreen()
         }
     }
 }
@@ -169,12 +169,12 @@ func makeFactionButtons() -> [Button] {
 
     return [
         Button(label: "GDI", x: startX, y: cy, w: bw, h: bh) {
-            session.selectedFaction = .gdi
-            session.currentScreen = LaunchingScreen(faction: .gdi, difficulty: session.selectedDifficulty)
+            app.selectedFaction = .gdi
+            app.currentScreen = LaunchingScreen(faction: .gdi, difficulty: app.selectedDifficulty)
         },
         Button(label: "NOD", x: startX + bw + gap, y: cy, w: bw, h: bh) {
-            session.selectedFaction = .nod
-            session.currentScreen = LaunchingScreen(faction: .nod, difficulty: session.selectedDifficulty)
+            app.selectedFaction = .nod
+            app.currentScreen = LaunchingScreen(faction: .nod, difficulty: app.selectedDifficulty)
         },
     ]
 }
@@ -189,10 +189,10 @@ func makeLoadMissionFactionButtons() -> [Button] {
 
     return [
         Button(label: "GDI", x: startX, y: cy, w: bw, h: bh) {
-            session.currentScreen = LoadMissionListScreen(faction: "GDI")
+            app.currentScreen = LoadMissionListScreen(faction: "GDI")
         },
         Button(label: "NOD", x: startX + bw + gap, y: cy, w: bw, h: bh) {
-            session.currentScreen = LoadMissionListScreen(faction: "NOD")
+            app.currentScreen = LoadMissionListScreen(faction: "NOD")
         },
     ]
 }
@@ -200,7 +200,7 @@ func makeLoadMissionFactionButtons() -> [Button] {
 // MARK: - Menu State Rendering
 
 func renderMenuState(_ renderer: OpaquePointer?) {
-    session.currentScreen.render(renderer)
+    app.currentScreen.render(renderer)
 }
 
 // MARK: - Mission Briefing Screen

@@ -644,3 +644,21 @@ func findPath(fromX: Int, fromY: Int, toX: Int, toY: Int,
     // No path found
     return []
 }
+
+// MARK: - Building Hit Test
+
+/// Test if a world position is within a building's clickable area.
+/// Building sprites are taller than their footprint (anchored at the bottom),
+/// so the hit area extends upward beyond the footprint center to cover the
+/// visible sprite region that users naturally click on.
+func isWorldPosOnBuilding(worldX: Double, worldY: Double, building: GameObject) -> Bool {
+    let size = buildingSize(building.typeName)
+    let halfW = Double(size.w * 24) / 2.0
+    let halfH = Double(size.h * 24) / 2.0
+    // Horizontal: match footprint width
+    guard abs(worldX - building.worldX) <= halfW else { return false }
+    // Vertical: building sprite is bottom-anchored — it can extend above the footprint.
+    // Accept clicks within the footprint (±halfH) plus extra above for the visible sprite.
+    let dy = worldY - building.worldY
+    return dy >= -halfH - 24.0 && dy <= halfH
+}

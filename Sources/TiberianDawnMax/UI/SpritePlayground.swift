@@ -218,18 +218,18 @@ class SpritePlaygroundState {
         guard let item = selectedItem else { return }
         let weapon = findPrimaryWeapon(item.name)
         guard let weapon = weapon else { return }
-        let voc = audioManager.weaponFireSound(weapon)
-        audioManager.playSoundEffect(voc)
+        let voc = gameAudio.weaponFireSound(weapon)
+        gameAudio.playSoundEffect(voc)
     }
 
     private func playAcknowledgeSound() {
-        let voc = audioManager.unitAcknowledgeSound()
-        audioManager.playSoundEffect(voc)
+        let voc = gameAudio.unitAcknowledgeSound()
+        gameAudio.playSoundEffect(voc)
     }
 
     private func playReportSound() {
-        let voc = audioManager.unitReportSound()
-        audioManager.playSoundEffect(voc)
+        let voc = gameAudio.unitReportSound()
+        gameAudio.playSoundEffect(voc)
     }
 
     // MARK: - Data Lookups
@@ -783,14 +783,14 @@ class SpritePlaygroundState {
 
 class SpritePlaygroundScreen: MenuScreen {
     func render(_ renderer: OpaquePointer?) {
-        session.spritePlayground.render(renderer)
+        app.spritePlayground.render(renderer)
     }
 
     func handleKeyDown(_ key: Int32) {
         if key == Int32(SDLK_ESCAPE.rawValue) {
-            session.currentScreen = MainMenuScreen()
+            app.currentScreen = MainMenuScreen()
             return
         }
-        session.spritePlayground.handleKey(key)
+        app.spritePlayground.handleKey(key)
     }
 }

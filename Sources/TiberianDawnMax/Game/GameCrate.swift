@@ -1,4 +1,3 @@
-import CSDL2
 import Foundation
 
 // MARK: - Crate Pickup System
@@ -313,72 +312,5 @@ private func tickCrateBuffs() {
             obj.crateBuff.firepowerMultiplier = 1.0
             obj.crateBuff.expirationTick = 0
         }
-    }
-}
-
-// MARK: - Crate Rendering
-
-/// Render all active crates in the game world.
-/// Called between terrain and unit passes in GameRenderer.swift.
-func renderCrates(_ renderer: OpaquePointer?, camX: Int, camY: Int, vw: Int32, vh: Int32) {
-    guard let world = session.world else { return }
-
-    for crate in world.crateState.crates {
-        guard !crate.isCollected else { continue }
-
-        // Don't render crates in unexplored fog
-        if world.map.fogState[crate.cell] == .unexplored { continue }
-
-        let screenX = Int32(crate.worldX) - Int32(camX)
-        let screenY = Int32(crate.worldY) - Int32(camY)
-
-        // Cull off-screen
-        if screenX + 12 < 0 || screenY + 12 < 0 || screenX - 12 > vw || screenY - 12 > vh { continue }
-
-        // Apply fog dimming for explored-but-not-visible cells
-        let isVisible = world.map.fogState[crate.cell] == .visible
-        let dimFactor: UInt8 = isVisible ? 255 : 140
-
-        // Draw procedural crate: brown box with lighter top
-        let crateW: Int32 = 10
-        let crateH: Int32 = 10
-        let cx = screenX - crateW / 2
-        let cy = screenY - crateH / 2
-
-        // Shadow
-        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 60)
-        var shadowRect = SDL_Rect(x: cx + 2, y: cy + 2, w: crateW, h: crateH)
-        SDL_RenderFillRect(renderer, &shadowRect)
-
-        // Main box body (brown)
-        let bodyR = UInt8(min(255, Int(140) * Int(dimFactor) / 255))
-        let bodyG = UInt8(min(255, Int(90) * Int(dimFactor) / 255))
-        let bodyB = UInt8(min(255, Int(40) * Int(dimFactor) / 255))
-        SDL_SetRenderDrawColor(renderer, bodyR, bodyG, bodyB, 255)
-        var bodyRect = SDL_Rect(x: cx, y: cy, w: crateW, h: crateH)
-        SDL_RenderFillRect(renderer, &bodyRect)
-
-        // Highlight top strip (lighter brown)
-        let topR = UInt8(min(255, Int(180) * Int(dimFactor) / 255))
-        let topG = UInt8(min(255, Int(130) * Int(dimFactor) / 255))
-        let topB = UInt8(min(255, Int(60) * Int(dimFactor) / 255))
-        SDL_SetRenderDrawColor(renderer, topR, topG, topB, 255)
-        var topRect = SDL_Rect(x: cx, y: cy, w: crateW, h: 3)
-        SDL_RenderFillRect(renderer, &topRect)
-
-        // Cross detail on crate face
-        let crossR = UInt8(min(255, Int(100) * Int(dimFactor) / 255))
-        let crossG = UInt8(min(255, Int(60) * Int(dimFactor) / 255))
-        let crossB = UInt8(min(255, Int(20) * Int(dimFactor) / 255))
-        SDL_SetRenderDrawColor(renderer, crossR, crossG, crossB, 255)
-        // Horizontal line
-        SDL_RenderDrawLine(renderer, cx + 1, cy + crateH / 2, cx + crateW - 2, cy + crateH / 2)
-        // Vertical line
-        SDL_RenderDrawLine(renderer, cx + crateW / 2, cy + 3, cx + crateW / 2, cy + crateH - 2)
-
-        // Border
-        SDL_SetRenderDrawColor(renderer, 60, 40, 20, dimFactor)
-        SDL_RenderDrawRect(renderer, &bodyRect)
     }
 }

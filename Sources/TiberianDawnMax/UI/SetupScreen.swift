@@ -105,7 +105,7 @@ final class SetupScreen: MenuScreen {
         let y = textBlockBottom() + 26 * bodyScale
         return [
             Button(label: "QUIT", x: cx - m.w - m.gap / 2, y: y, w: m.w, h: m.h) {
-                session.running = false
+                app.running = false
             },
             Button(label: "RETRY", x: cx + m.gap / 2, y: y, w: m.w, h: m.h) { [weak self] in
                 self?.retry()
@@ -165,8 +165,8 @@ final class SetupScreen: MenuScreen {
         }
         loadDataOverrides()
         initRemasteredSprites()
-        audioManager.soundLibrary = SoundLibrary(assetManager: assetManager)
-        session.currentScreen = MainMenuScreen()
+        gameAudio.soundLibrary = SoundLibrary(assetManager: assetManager)
+        app.currentScreen = MainMenuScreen()
     }
 
     /// Break a long path across lines without a word-boundary assumption —
@@ -187,7 +187,7 @@ final class SetupScreen: MenuScreen {
 
     func handleKeyDown(_ key: Int32) {
         if key == Int32(SDLK_ESCAPE.rawValue) || key == Int32(SDLK_q.rawValue) {
-            session.running = false
+            app.running = false
         } else if key == Int32(SDLK_RETURN.rawValue) || key == Int32(SDLK_r.rawValue) {
             retry()
         }

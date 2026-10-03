@@ -32,9 +32,9 @@ extension AudioManager {
         return unitAcknowledgeSound()
     }
 
-    /// Death cry: the commando's own yell (INFANTRY.CPP, VOC_RAMBO_YELL).
-    func deathScream(for obj: GameObject) -> VocType {
-        obj.isCommando ? .ramboYell : infantryDeathScream()
+    /// The sim reports commando kills; the quip plays a little later.
+    func commandoMadeKill(_ commando: GameObject, tick: Int) {
+        noteCommandoKill(commando, tick: tick)
     }
 }
 
@@ -67,6 +67,6 @@ func tickCommandoQuips() {
         if commando.moveTargetX != nil { continue }  // wait until he's standing still
         commandoQuipPending[id] = nil
         let quip: VocType = [.ramboLefty, .ramboLaugh, .ramboComin, .ramboTuff].randomElement()!
-        audioManager.play(quip, worldX: commando.worldX, worldY: commando.worldY)
+        gameAudio.play(quip, worldX: commando.worldX, worldY: commando.worldY)
     }
 }

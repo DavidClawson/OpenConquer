@@ -474,9 +474,9 @@ private func stepClassicAnimations(_ world: GameWorld) {
         frame = 0
     } else if playerRadarOnline(world) {
         if frame < 22 { frame += 1 } else if frame > 22 { frame -= 1 }
-        if frame == 22 && classicState.radarFrame != 22 { audioManager.play(.radarOn) }
+        if frame == 22 && classicState.radarFrame != 22 { gameAudio.play(.radarOn) }
     } else {
-        if frame == 22 { audioManager.play(.radarOff) }
+        if frame == 22 { gameAudio.play(.radarOff) }
         if frame < 22 && frame > 0 { frame += 1 }  // finish powering up, then shut down
         if frame >= 22 && frame < 41 { frame += 1 }
         if frame == 0 { frame = 41 }
@@ -590,7 +590,7 @@ private func classicCameoAction(_ cameo: ClassicCameo, left: Bool) {
             if superWeapon(type).isReady {
                 startSuperWeaponTargeting(type)
             } else {
-                audioManager.speak(.notReady)
+                gameAudio.speak(.notReady)
             }
         } else if session.superWeaponTargeting == type {
             session.superWeaponTargeting = nil
@@ -611,10 +611,10 @@ private func classicQueueAction(_ queue: ProductionQueue, name: String, cost: In
         }
         if !queue.isComplete && !queue.isOnHold {
             queue.isOnHold = true
-            audioManager.speak(.suspended)
+            gameAudio.speak(.suspended)
         } else {
             session.sidebarCredits += queue.cancel()  // full cost was paid up front
-            audioManager.speak(.canceled)
+            gameAudio.speak(.canceled)
         }
         return
     }
@@ -625,19 +625,19 @@ private func classicQueueAction(_ queue: ProductionQueue, name: String, cost: In
             session.placementType = name
         } else if queue.isOnHold {
             queue.isOnHold = false
-            audioManager.speak(.building)
+            gameAudio.speak(.building)
         }
         return
     }
     if queue.item != nil {
-        audioManager.speak(.unableToBuild)  // this factory is busy with something else
+        gameAudio.speak(.unableToBuild)  // this factory is busy with something else
         return
     }
     guard session.sidebarCredits >= cost else {
-        audioManager.speak(.noCash)
+        gameAudio.speak(.noCash)
         return
     }
     queue.start(typeName: name, cost: cost, buildTime: buildTicks)
     session.sidebarCredits -= cost
-    audioManager.speak(.building)
+    gameAudio.speak(.building)
 }
