@@ -243,6 +243,8 @@ class CampaignManager {
 
         scenarioData = scenario
         initGameWorld(scenario: scenario, scenarioName: scenName)
+        // Record it: the HUD title and restart() both key off this name.
+        currentScenarioName = scenName
 
         // GDI mission 7: the building type sabotaged in mission 6 (if it
         // wasn't the airstrip — that skips mission 7 entirely) starts the
