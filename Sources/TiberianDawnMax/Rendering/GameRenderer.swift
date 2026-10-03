@@ -194,25 +194,6 @@ func renderGame(_ renderer: OpaquePointer?) {
         }
     }
 
-    // === Pass 3.5: Fog of War Overlay ===
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
-    for cellY in startCellY...endCellY {
-        for cellX in startCellX...endCellX {
-            let cellIndex = cellY * mapSize + cellX
-            let fog = fogState[cellIndex]
-            if fog == .visible { continue }
-            let screenX = Int32(cellX * tileSize - camX)
-            let screenY = Int32(cellY * tileSize - camY)
-            var rect = SDL_Rect(x: screenX, y: screenY, w: Int32(tileSize), h: Int32(tileSize))
-            if fog == .unexplored {
-                SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255)
-            } else {
-                SDL_SetRenderDrawColor(renderer, 0, 0, 0, 128)
-            }
-            SDL_RenderFillRect(renderer, &rect)
-        }
-    }
-
     // === Pass 3.75: Crates ===
     renderCrates(renderer, camX: camX, camY: camY, vw: vw, vh: vh)
 
@@ -562,6 +543,28 @@ func renderGame(_ renderer: OpaquePointer?) {
     // === Pass 4c: Ion Cannon Beam Effect ===
     renderIonBeam(renderer, camX: camX, camY: camY)
 
+    // === Pass 4d: Fog of War Overlay ===
+    // Over the objects, as the original's shroud is: a building that is only
+    // partly explored is cut off at the shroud edge, and structures in
+    // unexplored cells aren't seen at all.
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
+    for cellY in startCellY...endCellY {
+        for cellX in startCellX...endCellX {
+            let cellIndex = cellY * mapSize + cellX
+            let fog = fogState[cellIndex]
+            if fog == .visible { continue }
+            let screenX = Int32(cellX * tileSize - camX)
+            let screenY = Int32(cellY * tileSize - camY)
+            var rect = SDL_Rect(x: screenX, y: screenY, w: Int32(tileSize), h: Int32(tileSize))
+            if fog == .unexplored {
+                SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255)
+            } else {
+                SDL_SetRenderDrawColor(renderer, 0, 0, 0, 128)
+            }
+            SDL_RenderFillRect(renderer, &rect)
+        }
+    }
+
     // === Pass 5: Selection highlights ===
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
     for obj in world.objects {
@@ -797,18 +800,16 @@ func renderGame(_ renderer: OpaquePointer?) {
 
     // === HUD ===
     let gameViewportCenter = (renderState.windowWidth - sidebarWidth) / 2
-    let selectedCount = world.selectedObjects().count
-    // Show the mission ACTUALLY being played (not the menu browser index, which
-    // stayed at SCG01EA). Derive the mission number + faction from the current
-    // scenario name so the friendly title can't drift out of sync.
-    let scenarioCode = (session.currentScenarioName ?? app.scenarioList[app.scenarioIndex]).uppercased()
-    let missionNum = Int(scenarioCode.dropFirst(3).prefix(2)) ?? 0
-    let nameTable = scenarioCode.hasPrefix("SCB") ? nodMissionNames : gdiMissionNames
-    let missionTitle = nameTable[missionNum] ?? scenarioCode
-    drawText(renderer, "PLAYING - \(missionTitle)", centerX: gameViewportCenter, centerY: 15, color: .amber, scale: 2)
-
-    if selectedCount > 0 {
-        drawText(renderer, "\(selectedCount) SELECTED", centerX: gameViewportCenter, centerY: 35, color: .green, scale: 1)
+    // The original has no in-game title or key help; ours shows the mission
+    // name and the keys for the first eight seconds only (120 ticks at 15 FPS).
+    let showIntroText = world.tickCount < 120
+    if showIntroText {
+        // Show the mission ACTUALLY being played (not the menu browser index).
+        let scenarioCode = (session.currentScenarioName ?? app.scenarioList[app.scenarioIndex]).uppercased()
+        let missionNum = Int(scenarioCode.dropFirst(3).prefix(2)) ?? 0
+        let nameTable = scenarioCode.hasPrefix("SCB") ? nodMissionNames : gdiMissionNames
+        let missionTitle = nameTable[missionNum] ?? scenarioCode
+        drawText(renderer, missionTitle, centerX: gameViewportCenter, centerY: 15, color: .amber, scale: 2)
     }
 
     // Win/Lose state display
@@ -820,9 +821,11 @@ func renderGame(_ renderer: OpaquePointer?) {
         drawText(renderer, "Press Enter for Score  R: Restart", centerX: gameViewportCenter, centerY: renderState.windowHeight / 2 + 20, color: .amber, scale: 2)
     }
 
-    let commandHint = UserSettings.controlScheme == .classic ? "Click: Select/Move/Attack" : "RClick: Move/Attack"
-    drawText(renderer, "\(commandHint)  F3: Perf  F5: Save  F9: Load  Esc: Menu",
-             centerX: gameViewportCenter, centerY: renderState.windowHeight - 15, color: .gray, scale: 1)
+    if showIntroText {
+        let commandHint = UserSettings.controlScheme == .classic ? "Click: Select/Move/Attack" : "RClick: Move/Attack"
+        drawText(renderer, "\(commandHint)  F3: Perf  F5: Save  F9: Load  Esc: Menu",
+                 centerX: gameViewportCenter, centerY: renderState.windowHeight - 15, color: .gray, scale: 1)
+    }
 
     // === Screen Flash Overlay ===
     if renderState.screenFlashAlpha > 0 {
