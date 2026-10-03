@@ -146,6 +146,23 @@ func makeSidebarSizeButtons() -> [Button] {
     }
 }
 
+/// Off / Pixels / Smooth / Enhanced movie playback, below the sidebar rows.
+func makeMovieModeButtons() -> [Button] {
+    let bw: Int32 = 150
+    let bh: Int32 = 40
+    let gap: Int32 = 16
+    let modes = MovieMode.allCases
+    let totalW = bw * Int32(modes.count) + gap * Int32(modes.count - 1)
+    let startX = renderState.windowWidth / 2 - totalW / 2
+    let y = rulesetDescriptionY() + 440
+
+    return modes.enumerated().map { i, mode in
+        Button(label: mode.rawValue, x: startX + Int32(i) * (bw + gap), y: y, w: bw, h: bh) {
+            UserSettings.movieMode = mode
+        }
+    }
+}
+
 func makeDifficultyButtons() -> [Button] {
     let bw: Int32 = 200
     let bh: Int32 = 44

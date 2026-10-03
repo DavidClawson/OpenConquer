@@ -38,7 +38,56 @@ func runVQADiagnosticsIfRequested() -> Int32? {
         }
         return dumpVQA(args[i + 1], to: URL(fileURLWithPath: args[i + 2]), raw: args.contains("--raw"), ima: ima)
     }
+    if let i = args.firstIndex(of: "--test-movie-enhance") {
+        guard i + 1 < args.count else {
+            print("usage: --test-movie-enhance NAME [OUT.png]")
+            return 2
+        }
+        let out = i + 2 < args.count && !args[i + 2].hasPrefix("--") ? args[i + 2] : nil
+        return testMovieEnhance(args[i + 1], snapshot: out)
+    }
     return nil
+}
+
+/// Run a movie through the Enhanced mode's super-resolution scaler: report
+/// per-frame cost (it runs on the render thread, so it must stay well under
+/// the 66 ms frame budget) and optionally save frame 45 upscaled.
+private func testMovieEnhance(_ name: String, snapshot: String?) -> Int32 {
+    guard let (label, data) = loadVQAData(name), let dec = VQADecoder(data: data) else {
+        print("FAIL: cannot load \(name)")
+        return 1
+    }
+    guard let enhancer = makeMovieFrameEnhancer(width: dec.width, height: dec.height) else {
+        print("SKIP: super-resolution unavailable here (needs macOS 26+)")
+        return 0
+    }
+    var times: [Double] = []
+    var outSize = (0, 0)
+    while let frame = dec.nextFrame(), frame.index < 150 {
+        let t0 = DispatchTime.now().uptimeNanoseconds
+        guard let out = enhancer.enhance(frame) else {
+            print("FAIL: frame \(frame.index) not enhanced")
+            return 1
+        }
+        times.append(Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e6)
+        outSize = (out.width, out.height)
+        if frame.index == 45, let snapshot {
+            // BGRA rows → packed RGBA for the PNG writer.
+            var rgba = [UInt8](repeating: 255, count: out.width * out.height * 4)
+            for y in 0..<out.height {
+                for x in 0..<out.width {
+                    let s = y * out.bytesPerRow + x * 4, d = (y * out.width + x) * 4
+                    rgba[d] = out.pixels[s + 2]; rgba[d + 1] = out.pixels[s + 1]; rgba[d + 2] = out.pixels[s]
+                }
+            }
+            _ = writePNG(rgba: rgba, width: out.width, height: out.height, to: URL(fileURLWithPath: snapshot))
+        }
+    }
+    let sorted = times.dropFirst().sorted()  // frame 0 includes session warm-up
+    let median = sorted[sorted.count / 2], worst = sorted.last ?? 0
+    print(String(format: "%@: %dx%d -> %dx%d, %d frames, warm-up %.1f ms, median %.1f ms, worst %.1f ms",
+                 label, dec.width, dec.height, outSize.0, outSize.1, times.count, times[0], median, worst))
+    return worst < 66 ? 0 : 1
 }
 
 private func loadVQAData(_ name: String) -> (name: String, data: Data)? {

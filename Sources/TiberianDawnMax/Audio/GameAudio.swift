@@ -181,6 +181,15 @@ class AudioManager: SimAudio {
     // bright tracks. SFX (22050) now UPSAMPLE to 44100, which is clean.
     let outputSampleRate = 44100
 
+    // Movie soundtrack (VQA audio): interleaved mono or stereo, mixed unpanned.
+    // Its play position is the movie clock (`movieClock`).
+    private(set) var movieSamples: [Int16] = []
+    private(set) var movieChannels = 1
+    private(set) var movieSampleRate = 22050
+    private(set) var moviePos: Double = 0  // source sample frames mixed so far
+    private(set) var isMoviePlaying = false
+    var movieVolume: Float = 1.0
+
     // EVA speech queue
     var speechQueue: [VoxType] = []
     var activeSpeech: ActiveSound? = nil
@@ -524,7 +533,7 @@ class AudioManager: SimAudio {
 
         // Only queue audio when there's something to play — avoids latency buildup
         let hasAudio = !activeSounds.isEmpty || activeSpeech != nil ||
-                       (isMusicPlaying && !musicSamples.isEmpty)
+                       (isMusicPlaying && !musicSamples.isEmpty) || isMoviePlaying
         // Keep ticking even while music is loading so the queue doesn't drain
         guard hasAudio || musicLoading else { return }
 
@@ -601,6 +610,10 @@ class AudioManager: SimAudio {
             musicOffsetFrac = srcPos - Double(musicOffset)
         }
 
+        if isMoviePlaying {
+            mixMovieInto(&mixBuffer, frameCount: frameCount)
+        }
+
         // Convert to Int16 interleaved stereo and queue
         var output = [Int16](repeating: 0, count: stereoSampleCount)
         for i in 0..<stereoSampleCount {
@@ -610,6 +623,66 @@ class AudioManager: SimAudio {
 
         _ = output.withUnsafeBufferPointer { buf in
             SDL_QueueAudio(audioDevice, buf.baseAddress, UInt32(stereoSampleCount * 2))
+        }
+    }
+
+    // MARK: - Movie Soundtrack
+
+    /// Start a movie's soundtrack. Music stops, as in Play_Movie
+    /// (`Theme.Queue_Song(THEME_NONE)`, CONQUER.CPP); the screen after the
+    /// movie restarts whatever music it wants. Anything still queued from
+    /// before is dropped so the movie clock starts at zero.
+    func startMovieAudio(samples: [Int16], channels: Int, sampleRate: Int) {
+        stopMusic()
+        if audioDevice > 0 { SDL_ClearQueuedAudio(audioDevice) }
+        movieSamples = samples
+        movieChannels = max(1, channels)
+        movieSampleRate = max(1, sampleRate)
+        moviePos = 0
+        isMoviePlaying = isInitialized && !samples.isEmpty
+    }
+
+    func stopMovieAudio() {
+        guard isMoviePlaying || !movieSamples.isEmpty else { return }
+        isMoviePlaying = false
+        movieSamples = []
+        moviePos = 0
+        if audioDevice > 0 { SDL_ClearQueuedAudio(audioDevice) }
+    }
+
+    /// Seconds of the movie soundtrack the listener has actually heard: what
+    /// has been mixed minus what is still waiting in the device queue. Nil
+    /// when no soundtrack is playing (the player then falls back to a wall
+    /// clock). Mirrors Westwood's player timing frames off the audio
+    /// position (VQA_SelectFrame).
+    var movieClock: Double? {
+        guard isMoviePlaying || (!movieSamples.isEmpty && audioDevice > 0) else { return nil }
+        let queuedSeconds = Double(SDL_GetQueuedAudioSize(audioDevice)) / Double(outputSampleRate * 4)
+        return max(0, moviePos / Double(movieSampleRate) - queuedSeconds)
+    }
+
+    /// Length of the loaded soundtrack in seconds.
+    var movieDuration: Double {
+        Double(movieSamples.count / movieChannels) / Double(movieSampleRate)
+    }
+
+    private func mixMovieInto(_ buffer: inout [Float], frameCount: Int) {
+        let vol = movieVolume * masterVolume
+        let ratio = Double(movieSampleRate) / Double(outputSampleRate)
+        let total = movieSamples.count / movieChannels
+        let ch = movieChannels
+        movieSamples.withUnsafeBufferPointer { src in
+            for i in 0..<frameCount {
+                let idx = Int(moviePos)
+                guard idx < total else { isMoviePlaying = false; break }
+                let frac = Float(moviePos - Double(idx))
+                let next = min(idx + 1, total - 1)
+                let l0 = Float(src[idx * ch]), l1 = Float(src[next * ch])
+                let r0 = Float(src[idx * ch + ch - 1]), r1 = Float(src[next * ch + ch - 1])
+                buffer[i * 2] += (l0 + (l1 - l0) * frac) * vol
+                buffer[i * 2 + 1] += (r0 + (r1 - r0) * frac) * vol
+                moviePos += ratio
+            }
         }
     }
 

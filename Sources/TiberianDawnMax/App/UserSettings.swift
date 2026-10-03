@@ -47,10 +47,42 @@ enum SidebarSize: String, CaseIterable {
     var scale: Int32 { self == .standard ? 2 : 3 }
 }
 
+/// Whether and how the VQA movies play.
+enum MovieMode: String, CaseIterable {
+    case off = "Off"
+    /// The 320x200 frame scaled with hard pixel edges.
+    case pixels = "Pixels"
+    /// Bilinear scaling — closest to the Win95 build's interpolated 2x.
+    case smooth = "Smooth"
+    /// Apple's low-latency super-resolution (macOS 26+); Smooth elsewhere.
+    case enhanced = "Enhanced"
+
+    var summary: String {
+        switch self {
+        case .off:      return "Skip the briefing and story movies."
+        case .pixels:   return "Original 320x200 frames with hard pixel edges."
+        case .smooth:   return "Original frames, smoothly scaled."
+        case .enhanced: return movieEnhancementAvailable
+            ? "Apple super-resolution upscaling, live (macOS 26+)."
+            : "Needs macOS 26 - using Smooth."
+        }
+    }
+}
+
 enum UserSettings {
     private static let controlSchemeKey = "TDMax.controlScheme"
     private static let sidebarStyleKey = "TDMax.sidebarStyle"
     private static let sidebarSizeKey = "TDMax.sidebarSize"
+    private static let movieModeKey = "TDMax.movieMode"
+
+    /// Defaults to `.smooth`.
+    static var movieMode: MovieMode {
+        get {
+            UserDefaults.standard.string(forKey: movieModeKey)
+                .flatMap(MovieMode.init(rawValue:)) ?? .smooth
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: movieModeKey) }
+    }
 
     /// Defaults to 2x (320px wide). Cached like `sidebarStyle`.
     static var sidebarSize: SidebarSize = UserDefaults.standard.string(forKey: sidebarSizeKey)

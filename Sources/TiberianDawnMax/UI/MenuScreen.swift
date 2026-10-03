@@ -147,6 +147,14 @@ class OptionsScreen: MenuScreen {
             }
         }
 
+        drawText(renderer, "Movies", centerX: renderState.windowWidth / 2, centerY: descY + 410, color: .green, scale: 2)
+        let movieMode = UserSettings.movieMode
+        for btn in makeMovieModeButtons() {
+            let selected = btn.label == movieMode.rawValue
+            btn.draw(renderer, highlighted: selected || btn.contains(input.mouseX, input.mouseY))
+        }
+        drawText(renderer, movieMode.summary, centerX: renderState.windowWidth / 2, centerY: descY + 505, color: .gray, scale: 1)
+
         drawText(renderer, "Esc: Back", centerX: renderState.windowWidth / 2, centerY: renderState.windowHeight - 40, color: .gray, scale: 1)
     }
 
@@ -159,7 +167,8 @@ class OptionsScreen: MenuScreen {
     func handleMouseDown(_ x: Int32, _ y: Int32, button: UInt8) {
         guard button == UInt8(SDL_BUTTON_LEFT) else { return }
         let sizeButtons = UserSettings.sidebarStyle == .classic ? makeSidebarSizeButtons() : []
-        for btn in makeRulesetButtons() + makeControlSchemeButtons() + makeSidebarStyleButtons() + sizeButtons {
+        for btn in makeRulesetButtons() + makeControlSchemeButtons() + makeSidebarStyleButtons() + sizeButtons
+            + makeMovieModeButtons() {
             if btn.contains(input.mouseX, input.mouseY) {
                 btn.action()
                 break
@@ -227,8 +236,8 @@ class LaunchingScreen: MenuScreen {
         session.campaignState.carryOverCredits = 0
         session.campaignState.completedMissions.removeAll()
 
-        // Show mission briefing before starting
-        app.currentScreen = BriefingScreen()
+        // Intro/briefing/action movies, then the mission briefing
+        showPreMissionMovies()
     }
 
     func handleKeyDown(_ key: Int32) {
@@ -239,6 +248,14 @@ class LaunchingScreen: MenuScreen {
 }
 
 // MARK: - Briefing Screen
+
+/// Start_Scenario's movies for the mission about to load (SCENARIO.CPP:94-104),
+/// then the briefing screen that launches it.
+func showPreMissionMovies() {
+    MoviePlayerScreen.play(session.campaign.preMissionMovies()) {
+        app.currentScreen = BriefingScreen()
+    }
+}
 
 class BriefingScreen: MenuScreen {
     func render(_ renderer: OpaquePointer?) {
@@ -455,8 +472,8 @@ class LoadMissionListScreen: MenuScreen {
         session.campaignState.completedMissions.removeAll()
         app.selectedDifficulty = .normal
 
-        // Launch directly via the briefing screen
-        app.currentScreen = BriefingScreen()
+        // Movies, then the briefing screen
+        showPreMissionMovies()
     }
 }
 
@@ -640,6 +657,7 @@ class PlayingScreen: MenuScreen {
     private var musicStarted = false
     private var endScreenTimer: Int = 0
     private var showingEndScreen: Bool = false
+    private var endMoviePlayed = false
     private var endScreenButtons: [(label: String, x: Int32, y: Int32, w: Int32, h: Int32, action: String)] = []
 
     // Dwell counter for right-edge pan. Counts consecutive frames the
@@ -664,6 +682,15 @@ class PlayingScreen: MenuScreen {
     }
 
     // MARK: - End Screen Overlay
+
+    /// The mission's Win or Lose movie (Do_Win / Do_Lose, SCENARIO.CPP:393/601),
+    /// played once as the end screen comes up, then back to it.
+    private func playEndMovie() {
+        guard session.campaignState.isActive, !endMoviePlayed else { return }
+        endMoviePlayed = true
+        guard let movie = session.campaign.endMovie(won: session.triggerWinState == .won) else { return }
+        MoviePlayerScreen.play([movie]) { [self] in app.currentScreen = self }
+    }
 
     private func renderEndScreen(_ renderer: OpaquePointer?) {
         let winW = renderState.windowWidth
@@ -800,11 +827,17 @@ class PlayingScreen: MenuScreen {
                         app.currentScreen = MapSelectionScreen(choices: session.campaign.pendingChoices)
                     }
                 case "replay", "retry":
-                    session.campaign.restart()
-                    session.triggerWinState = .playing
-                    showingEndScreen = false
-                    endScreenTimer = 0
-                    endScreenButtons = []
+                    // A restart replays the intro and action movies but not
+                    // the briefing (Start_Scenario(name, false), SCENARIO.CPP:617).
+                    MoviePlayerScreen.play(session.campaign.restartMovies()) { [self] in
+                        session.campaign.restart()
+                        session.triggerWinState = .playing
+                        showingEndScreen = false
+                        endScreenTimer = 0
+                        endMoviePlayed = false
+                        endScreenButtons = []
+                        app.currentScreen = self
+                    }
                 case "menu":
                     app.currentScreen = MainMenuScreen()
                 default:
@@ -1136,6 +1169,7 @@ class PlayingScreen: MenuScreen {
             if endScreenTimer >= 45 {  // ~3 seconds at 15 FPS
                 showingEndScreen = true
                 buildEndScreenButtons()
+                playEndMovie()
             }
         }
 

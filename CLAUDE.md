@@ -85,8 +85,10 @@ check is the regression net for AI/pathfinding work: a change that perturbs the
 simulation shows up as a changed digest. (Other diagnostic flags: `--test-mix`,
 `--dump-scenario <NAME>`, `--test-gfx` / `--dump-gfx NAME OUTDIR [PAL]` for the
 CPS/WSA/PAL decoders — `Headless/GfxDiagnostics.swift`; `--test-vqa NAME...` /
-`--dump-vqa NAME OUTDIR [--raw] [--ffmpeg-ima]` for the VQA movie decoder —
-`Headless/VQADiagnostics.swift`.) Implementation: `TiberianDawnMax/Headless/GameHeadless.swift`
+`--dump-vqa NAME OUTDIR [--raw] [--ffmpeg-ima]` for the VQA movie decoder and
+`--test-movie-enhance NAME [OUT.png]` for the Enhanced movie mode's per-frame cost —
+`Headless/VQADiagnostics.swift`; `--play-movie NAME...` opens the window on the
+movie player, then the menu.) Implementation: `TiberianDawnMax/Headless/GameHeadless.swift`
 (scenario-backed tools) and `OpenConquerCore/SelfTests/` (the ASSET-FREE self-tests).
 
 **`swift test`** runs every ASSET-FREE self-test above (incl. `--test-synthetic 500`,
@@ -217,6 +219,13 @@ When reimplementing a behavior, grep the C++ for the relevant `Mission_*`,
   - `session.campaign` → mission progression
   App-only state (current screen, menus, frame clock) is `app: AppState`
   (`TiberianDawnMax/App/AppState.swift`); the sim never refers to it.
+- **Movies:** `UI/MoviePlayerScreen.swift` plays VQA sequences timed off the
+  soundtrack (`AudioManager.movieClock`), then runs a completion. Which movies
+  play is Core (`Game/GameCampaignMovies.swift`: the scenario's `[Basic]`
+  Intro/Brief/Action/Win/Lose and Start_Scenario's rules). The `movieMode`
+  user setting (Off/Pixels/Smooth/Enhanced) gates them; Enhanced runs Apple's
+  low-latency super-resolution per frame (`Rendering/MovieFrameEnhancer.swift`,
+  macOS 26+, Smooth elsewhere).
 - **Player commands:** input never edits the world. Clicks and keys become a
   `PlayerCommand` (`OpenConquerCore/Game/PlayerCommands.swift`) passed to
   `issue(_:)`; `gameTick` applies the queue first thing and appends each to

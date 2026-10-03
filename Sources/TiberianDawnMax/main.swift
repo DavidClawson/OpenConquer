@@ -507,6 +507,14 @@ var event = SDL_Event()
 if assetManager.mixManager.totalEntries == 0 {
     app.currentScreen = SetupScreen()
 }
+else if let i = CommandLine.arguments.firstIndex(of: "--play-movie") {
+    // Debug: --play-movie NAME [NAME...] plays those movies, then the menu.
+    let names = CommandLine.arguments[(i + 1)...].prefix { !$0.hasPrefix("--") }
+    MoviePlayerScreen.play(Array(names)) { app.currentScreen = MainMenuScreen() }
+} else {
+    // The Westwood logo on startup (Play_Intro(true), INIT.CPP:1823).
+    MoviePlayerScreen.play(["LOGO"]) { app.currentScreen = MainMenuScreen() }
+}
 
 // MARK: - Main Loop
 

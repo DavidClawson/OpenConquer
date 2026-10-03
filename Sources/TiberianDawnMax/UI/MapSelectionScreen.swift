@@ -36,7 +36,7 @@ class MapSelectionScreen: MenuScreen {
             result.append(Button(label: label, x: cx, y: y, w: bw, h: bh) {
                 session.campaignState.advance(choosing: choice)
                 session.campaign.pendingChoices = []
-                app.currentScreen = BriefingScreen()
+                showPreMissionMovies()
             })
             y += bh + gap
         }
@@ -69,7 +69,7 @@ class MapSelectionScreen: MenuScreen {
         if idx >= 0 && idx < choices.count {
             session.campaignState.advance(choosing: choices[idx])
             session.campaign.pendingChoices = []
-            app.currentScreen = BriefingScreen()
+            showPreMissionMovies()
         }
     }
 }
