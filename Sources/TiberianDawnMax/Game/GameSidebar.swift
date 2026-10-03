@@ -374,12 +374,12 @@ func handleRepairSellGameClick(worldX: Double, worldY: Double) -> Bool {
                     obj.isRepairing = true
                     obj.mission = .repair
                 }
-                session.isRepairMode = false
+                // Stays in repair mode (classic: only right-click or the button
+                // ends it — DISPLAY.CPP Mouse_Right_Press / Repair_Mode_Control).
                 return true
             } else if session.isSellMode {
-                // Sell this building
+                // Sell this building; sell mode stays on, same as repair.
                 obj.mission = .selling
-                session.isSellMode = false
                 return true
             }
         }

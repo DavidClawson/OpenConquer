@@ -57,6 +57,10 @@ func handleGameLeftDrag(_ x: Int32, _ y: Int32) {
 
 func handleGameLeftUp(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
     guard let world = session.world else { return }
+    // Only a release that pairs with handleGameLeftDown is a selection. Mode
+    // clicks (repair/sell, attack-move, superweapon) are consumed on mouse-down
+    // and never start a box, so their release must not reselect or deselect.
+    guard input.selectionBoxStartX != nil else { return }
 
     if input.isDragging, let sx = input.selectionBoxStartX, let sy = input.selectionBoxStartY {
         // Box select: find all units/infantry within the screen-space rectangle
@@ -67,6 +71,27 @@ func handleGameLeftUp(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
 
         let topLeft = gameScreenToWorld(Int32(minSX), Int32(minSY))
         let bottomRight = gameScreenToWorld(Int32(maxSX), Int32(maxSY))
+
+        // Classic controls: a small drag that boxes none of our units is a
+        // shaky click, so it commands the selection rather than clearing it.
+        if UserSettings.controlScheme == .classic && maxSX - minSX < 24 && maxSY - minSY < 24 {
+            let boxesOwnUnit = world.objects.contains { obj in
+                obj.kind != .structure && obj.house == world.playerHouse && obj.strength > 0 &&
+                obj.worldX >= topLeft.worldX && obj.worldX <= bottomRight.worldX &&
+                obj.worldY >= topLeft.worldY && obj.worldY <= bottomRight.worldY
+            }
+            let clickPos = gameScreenToWorld(x, y)
+            if !boxesOwnUnit &&
+               classicClickIsCommand(worldX: clickPos.worldX, worldY: clickPos.worldY, world: world) {
+                handleGameRightClick(x, y, shiftHeld: shiftHeld)
+                input.selectionBoxStartX = nil
+                input.selectionBoxStartY = nil
+                input.selectionBoxEndX = nil
+                input.selectionBoxEndY = nil
+                input.isDragging = false
+                return
+            }
+        }
 
         if !shiftHeld {
             world.deselectAll()
@@ -95,20 +120,7 @@ func handleGameLeftUp(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
                 if obj.house != world.playerHouse { continue }
                 if obj.strength <= 0 { continue }
                 if isWorldPosOnBuilding(worldX: clickWorldPos.worldX, worldY: clickWorldPos.worldY, building: obj) {
-                    if session.isRepairMode {
-                        if obj.strength < obj.maxStrength {
-                            if obj.isRepairing {
-                                obj.isRepairing = false
-                                obj.mission = .guard_
-                            } else {
-                                obj.isRepairing = true
-                                obj.mission = .repair
-                            }
-                        }
-                        session.isRepairMode = false
-                    } else {
-                        obj.isSelected = true
-                    }
+                    obj.isSelected = true
                     break
                 }
             }
@@ -118,7 +130,21 @@ func handleGameLeftUp(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
         let worldPos = gameScreenToWorld(x, y)
         let hitRadius = 14.0 / renderState.gameZoomLevel
 
-        // Check if clicking on a friendly building → select it (or toggle repair in repair mode)
+        // Classic controls: with units selected, a plain left-click is the
+        // context command (move/attack/enter/dock) that Modern puts on the
+        // right button.
+        if UserSettings.controlScheme == .classic,
+           classicClickIsCommand(worldX: worldPos.worldX, worldY: worldPos.worldY, world: world) {
+            handleGameRightClick(x, y, shiftHeld: shiftHeld)
+            input.selectionBoxStartX = nil
+            input.selectionBoxStartY = nil
+            input.selectionBoxEndX = nil
+            input.selectionBoxEndY = nil
+            input.isDragging = false
+            return
+        }
+
+        // Check if clicking on a friendly building → select it
         var clickedBuilding: GameObject? = nil
         for obj in world.objects {
             if obj.kind != .structure { continue }
@@ -131,23 +157,8 @@ func handleGameLeftUp(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
         }
 
         if let building = clickedBuilding {
-            if session.isRepairMode {
-                // Repair mode: toggle repair on damaged buildings
-                if building.strength < building.maxStrength {
-                    if building.isRepairing {
-                        building.isRepairing = false
-                        building.mission = .guard_
-                    } else {
-                        building.isRepairing = true
-                        building.mission = .repair
-                    }
-                }
-                session.isRepairMode = false
-            } else {
-                // Normal click: select the building
-                if !shiftHeld { world.deselectAll() }
-                building.isSelected = true
-            }
+            if !shiftHeld { world.deselectAll() }
+            building.isSelected = true
             input.selectionBoxStartX = nil
             input.selectionBoxStartY = nil
             input.selectionBoxEndX = nil
@@ -205,6 +216,60 @@ func handleGameLeftUp(_ x: Int32, _ y: Int32, shiftHeld: Bool) {
     input.selectionBoxEndX = nil
     input.selectionBoxEndY = nil
     input.isDragging = false
+}
+
+/// Our own live transport (APC, Chinook) under a world position. The hit
+/// area follows the sprite: the Chinook is ~2 cells long, so its 14px unit
+/// radius missed most clicks on its body. Aircraft are drawn `altitude` px
+/// above their ground position, so the test is against the drawn spot.
+func ownTransport(atWorldX worldX: Double, worldY: Double, world: GameWorld) -> GameObject? {
+    world.objects.first { obj in
+        guard obj.kind == .unit, obj.house == world.playerHouse, obj.strength > 0,
+              !obj.isInLimbo, obj.isTransporter else { return false }
+        let radius = obj.isAircraft ? 24.0 : 14.0
+        let drawnY = obj.worldY - Double(obj.altitude)
+        return abs(obj.worldX - worldX) < radius && abs(drawnY - worldY) < radius
+    }
+}
+
+/// Classic (1995) controls: does a left-click here command the current
+/// selection rather than select something? Mirrors What_Action: with player
+/// units selected, enemies, open ground, and service targets (refinery for a
+/// harvester, repair bay for a vehicle, transport for infantry) are commands;
+/// any other object of ours is ACTION_SELECT. A selected MCV clicked on itself
+/// falls through to the deploy path in handleGameLeftUp.
+func classicClickIsCommand(worldX: Double, worldY: Double, world: GameWorld) -> Bool {
+    let movable = world.selectedObjects().filter {
+        $0.kind != .structure && $0.house == world.playerHouse && $0.strength > 0
+    }
+    if movable.isEmpty { return false }
+
+    if findEnemyAtWorldPos(worldX: worldX, worldY: worldY) != nil { return true }
+
+    if let building = world.objects.first(where: {
+        $0.kind == .structure && $0.house == world.playerHouse && $0.strength > 0 &&
+        isWorldPosOnBuilding(worldX: worldX, worldY: worldY, building: $0)
+    }) {
+        switch building.typeName.uppercased() {
+        case "PROC": return movable.contains { $0.isHarvester }
+        case "FIX":  return movable.contains { $0.kind == .unit && !$0.isAircraft }
+        default:     return false
+        }
+    }
+
+    if let transport = ownTransport(atWorldX: worldX, worldY: worldY, world: world) {
+        return !transport.isSelected && movable.contains { $0.kind == .infantry }
+    }
+
+    let hitRadius = 14.0 / renderState.gameZoomLevel
+    if world.objects.contains(where: { obj in
+        obj.kind != .structure && obj.house == world.playerHouse && obj.strength > 0 &&
+        !obj.isInLimbo && hypot(obj.worldX - worldX, obj.worldY - worldY) < hitRadius
+    }) {
+        return false
+    }
+
+    return true
 }
 
 /// Check if a building type is a production structure (can have rally points)
@@ -292,11 +357,7 @@ func handleGameRightClick(_ x: Int32, _ y: Int32, shiftHeld: Bool = false) {
     // selected orders them aboard (classic ACTION_ENTER). Boarding is what
     // drives the civ-evac missions: a civilian entering a transport aircraft
     // makes it fly off the map (AIRCRAFT.CPP:2530-2542).
-    if let transport = world.objects.first(where: { obj in
-        obj.kind == .unit && obj.house == world.playerHouse && obj.strength > 0 &&
-        !obj.isInLimbo && obj.isTransporter &&
-        abs(obj.worldX - worldPos.worldX) < 14.0 && abs(obj.worldY - worldPos.worldY) < 14.0
-    }) {
+    if let transport = ownTransport(atWorldX: worldPos.worldX, worldY: worldPos.worldY, world: world) {
         var ordered = false
         var slots = transport.maxPassengers - transport.passengerCount
         for obj in selected where obj.kind == .infantry && obj.house == world.playerHouse {

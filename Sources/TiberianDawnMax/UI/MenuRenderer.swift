@@ -89,6 +89,28 @@ func makeRulesetButtons() -> [Button] {
     }
 }
 
+/// Y of the ruleset description line — the Controls section stacks below it.
+func rulesetDescriptionY() -> Int32 {
+    220 + Int32(Ruleset.presets.count) * 60 + 10
+}
+
+/// Side-by-side Classic / Modern control-scheme toggle on the Options screen.
+func makeControlSchemeButtons() -> [Button] {
+    let bw: Int32 = 200
+    let bh: Int32 = 44
+    let gap: Int32 = 20
+    let schemes = ControlScheme.allCases
+    let totalW = bw * Int32(schemes.count) + gap * Int32(schemes.count - 1)
+    let startX = renderState.windowWidth / 2 - totalW / 2
+    let y = rulesetDescriptionY() + 90
+
+    return schemes.enumerated().map { i, scheme in
+        Button(label: scheme.rawValue, x: startX + Int32(i) * (bw + gap), y: y, w: bw, h: bh) {
+            UserSettings.controlScheme = scheme
+        }
+    }
+}
+
 func makeDifficultyButtons() -> [Button] {
     let bw: Int32 = 200
     let bh: Int32 = 44

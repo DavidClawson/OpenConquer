@@ -107,10 +107,32 @@ func renderGameCursor(_ renderer: OpaquePointer?, world: GameWorld) {
                 }
                 break
             }
+            // Our own transport with infantry selected → board it (MOUSE_ENTER chevrons)
+            if serviceCursor == nil,
+               let transport = ownTransport(atWorldX: worldPos.worldX, worldY: worldPos.worldY, world: world),
+               !transport.isSelected,
+               selected.contains(where: { $0.kind == .infantry && $0.house == world.playerHouse }) {
+                serviceCursor = cursorEnter
+            }
         }
+
+        // Classic controls: hovering one of our own objects that the selection
+        // can't act on shows the select cursor — a click there selects it.
+        let classicSelectHover = UserSettings.controlScheme == .classic && !selected.isEmpty &&
+            serviceCursor == nil && !session.isRepairMode &&
+            !classicClickIsCommand(worldX: worldPos.worldX, worldY: worldPos.worldY, world: world) &&
+            world.objects.contains { obj in
+                obj.house == world.playerHouse && obj.strength > 0 && !obj.isInLimbo &&
+                !(obj.isSelected && (obj.isMCV || (obj.isTransporter && obj.hasCargo))) &&  // deploy/unload cursor instead
+                (obj.kind == .structure
+                    ? isWorldPosOnBuilding(worldX: worldPos.worldX, worldY: worldPos.worldY, building: obj)
+                    : hypot(obj.worldX - worldPos.worldX, obj.worldY - worldPos.worldY) < 14.0 / renderState.gameZoomLevel)
+            }
 
         if let svc = serviceCursor {
             cursor = svc
+        } else if classicSelectHover {
+            cursor = cursorCanSelect
         } else if !hoveringDamagedBuilding && !selected.isEmpty {
             // Check if hovering over a selected MCV -> deploy cursor
             var isHoveringMCV = false

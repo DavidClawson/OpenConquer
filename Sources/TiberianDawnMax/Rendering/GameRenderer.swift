@@ -932,7 +932,8 @@ func renderGame(_ renderer: OpaquePointer?) {
         drawText(renderer, "Press Enter for Score  R: Restart", centerX: gameViewportCenter, centerY: renderState.windowHeight / 2 + 20, color: .amber, scale: 2)
     }
 
-    drawText(renderer, "RClick: Move/Attack  F3: Perf  F5: Save  F9: Load  Esc: Menu",
+    let commandHint = UserSettings.controlScheme == .classic ? "Click: Select/Move/Attack" : "RClick: Move/Attack"
+    drawText(renderer, "\(commandHint)  F3: Perf  F5: Save  F9: Load  Esc: Menu",
              centerX: gameViewportCenter, centerY: renderState.windowHeight - 15, color: .gray, scale: 1)
 
     // === Screen Flash Overlay ===
@@ -1291,6 +1292,16 @@ func renderIonBeam(_ renderer: OpaquePointer?, camX: Int, camY: Int) {
 
 // MARK: - Game Minimap
 
+/// Player owns a Communications Center (HQ) or Advanced Comm. Center (EYE).
+func playerHasCommsCenter(_ world: GameWorld) -> Bool {
+    world.hasBuilding(type: "HQ", house: world.playerHouse) ||
+        world.hasBuilding(type: "EYE", house: world.playerHouse)
+}
+
+/// Radar is usable: a comms center and enough power.
+func playerRadarOnline(_ world: GameWorld) -> Bool {
+    playerHasCommsCenter(world) && !getHouseState(world.playerHouse).isLowPower
+}
 func renderGameMinimap(_ renderer: OpaquePointer?, world: GameWorld) {
     let minimapCellSize: Int32 = 2
     let minimapSize: Int32 = 64 * minimapCellSize
@@ -1302,13 +1313,14 @@ func renderGameMinimap(_ renderer: OpaquePointer?, world: GameWorld) {
 
     guard let scenario = scenarioData else { return }
 
-    // Power gating: disable minimap when player has no Communications Center or low power
+    // Power gating: no Communications Center → no radar panel at all (it sits
+    // over the battlefield, so an empty box would only hide units). Low power
+    // with a comms center shows the offline panel.
     let playerHouse = world.playerHouse
     let playerState = getHouseState(playerHouse)
-    let hasCommsCenter = world.hasBuilding(type: "HQ", house: playerHouse) ||
-                         world.hasBuilding(type: "EYE", house: playerHouse)
+    if !playerHasCommsCenter(world) { return }
 
-    if !hasCommsCenter || playerState.isLowPower {
+    if playerState.isLowPower {
         // Render disabled minimap: dark background with static noise
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND)
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 180)
@@ -1332,9 +1344,7 @@ func renderGameMinimap(_ renderer: OpaquePointer?, world: GameWorld) {
             SDL_RenderFillRect(renderer, &dot)
         }
 
-        // "LOW POWER" or "NO RADAR" text overlay
-        let label = playerState.isLowPower ? "LOW POWER" : "NO RADAR"
-        drawText(renderer, label,
+        drawText(renderer, "LOW POWER",
                  centerX: minimapX + minimapSize / 2,
                  centerY: minimapY + minimapSize / 2,
                  color: .red, scale: 1)

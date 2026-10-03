@@ -117,8 +117,16 @@ class OptionsScreen: MenuScreen {
         }
 
         // Describe the currently-selected preset.
-        let descY: Int32 = 220 + Int32(Ruleset.presets.count) * 60 + 10
+        let descY = rulesetDescriptionY()
         drawText(renderer, session.rules.summary, centerX: renderState.windowWidth / 2, centerY: descY, color: .gray, scale: 1)
+
+        drawText(renderer, "Controls", centerX: renderState.windowWidth / 2, centerY: descY + 60, color: .green, scale: 2)
+        let scheme = UserSettings.controlScheme
+        for btn in makeControlSchemeButtons() {
+            let selected = btn.label == scheme.rawValue
+            btn.draw(renderer, highlighted: selected || btn.contains(input.mouseX, input.mouseY))
+        }
+        drawText(renderer, scheme.summary, centerX: renderState.windowWidth / 2, centerY: descY + 160, color: .gray, scale: 1)
 
         drawText(renderer, "Esc: Back", centerX: renderState.windowWidth / 2, centerY: renderState.windowHeight - 40, color: .gray, scale: 1)
     }
@@ -131,7 +139,7 @@ class OptionsScreen: MenuScreen {
 
     func handleMouseDown(_ x: Int32, _ y: Int32, button: UInt8) {
         guard button == UInt8(SDL_BUTTON_LEFT) else { return }
-        for btn in makeRulesetButtons() {
+        for btn in makeRulesetButtons() + makeControlSchemeButtons() {
             if btn.contains(input.mouseX, input.mouseY) {
                 btn.action()
                 break
@@ -1042,11 +1050,9 @@ class PlayingScreen: MenuScreen {
             } else if session.isPlacingStructure {
                 handleStructurePlacement(x, y)
             } else if session.isRepairMode || session.isSellMode {
+                // A miss leaves the mode on (classic ACTION_NO_REPAIR/NO_SELL is a no-op)
                 let worldPos = gameScreenToWorld(x, y)
-                if !handleRepairSellGameClick(worldX: worldPos.worldX, worldY: worldPos.worldY) {
-                    session.isRepairMode = false
-                    session.isSellMode = false
-                }
+                _ = handleRepairSellGameClick(worldX: worldPos.worldX, worldY: worldPos.worldY)
             } else if session.isPatrolMode {
                 // Patrol mode: left-click adds a waypoint
                 let worldPos = gameScreenToWorld(x, y)
@@ -1107,6 +1113,10 @@ class PlayingScreen: MenuScreen {
             } else if session.isPlacingStructure {
                 session.isPlacingStructure = false
                 session.placementType = nil
+            } else if UserSettings.controlScheme == .classic && !session.isPatrolMode {
+                // Classic: right-click deselects (DISPLAY.CPP Mouse_Right_Press).
+                // Patrol mode still commits its waypoints via handleGameRightClick.
+                session.world?.deselectAll()
             } else {
                 let shiftHeld = (SDL_GetModState().rawValue & UInt32(KMOD_SHIFT.rawValue)) != 0
                 handleGameRightClick(x, y, shiftHeld: shiftHeld)
@@ -1402,6 +1412,8 @@ private func handleMinimapClick(_ screenX: Int32, _ screenY: Int32) {
 
 /// Check if a screen coordinate is within the minimap area
 private func isInMinimap(_ x: Int32, _ y: Int32) -> Bool {
+    // Offline radar doesn't navigate — the click goes to the battlefield.
+    guard let world = session.world, playerRadarOnline(world) else { return false }
     let mm = minimapRect()
     return x >= mm.x && x < mm.x + mm.size && y >= mm.y && y < mm.y + mm.size
 }
