@@ -277,7 +277,7 @@ package func initHouseStates() {
     }
 
     for house in housesPresent {
-        let isHuman = (house == world.playerHouse)
+        let isHuman = world.isHuman(house)
         let credits = isHuman ? session.sidebarCredits : 5000  // AI gets default credits
         let state = HouseState(type: house, credits: credits, isHuman: isHuman)
         state.initialCredits = credits

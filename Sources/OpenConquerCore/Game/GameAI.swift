@@ -75,7 +75,7 @@ package func tickAI() {
 
     for obj in world.objects {
         // Only control enemy (non-player) units
-        if obj.house == world.playerHouse { continue }
+        if world.isHuman(obj.house) { continue }
         // Original targeting: missions do all acquisition (guard, area
         // guard, hunt); these wider periodic scans are enhanced-only.
         if usesOriginalTargeting && (obj.isArmed || obj.kind == .structure) && !obj.isHarvester { continue }
@@ -203,7 +203,7 @@ package func decideRally(world: GameWorld) -> [GameObject]? {
     // Gather idle enemy combat units
     var idleUnits: [GameObject] = []
     for obj in world.objects {
-        if obj.house == world.playerHouse || obj.house == .neutral { continue }
+        if world.isHuman(obj.house) || obj.house == .neutral { continue }
         if obj.kind == .structure { continue }
         if obj.strength <= 0 { continue }
         if obj.isHarvester || obj.isMCV { continue }
@@ -242,7 +242,7 @@ package func escalateAI(world: GameWorld) {
 package func decideEscalation(world: GameWorld) -> [GameObject] {
     var idleUnits: [GameObject] = []
     for obj in world.objects {
-        if obj.house == world.playerHouse || obj.house == .neutral { continue }
+        if world.isHuman(obj.house) || obj.house == .neutral { continue }
         if obj.kind == .structure { continue }
         if obj.strength <= 0 { continue }
         if obj.isHarvester || obj.isMCV { continue }
@@ -269,7 +269,7 @@ package func tickAIProduction() {
     for house in session.houseStates.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
         guard let state = session.houseStates[house] else { continue }
         // Skip player and neutral houses
-        if house == world.playerHouse || house == .neutral { continue }
+        if world.isHuman(house) || house == .neutral { continue }
         // Must have production enabled via the Production trigger — classic
         // production starts ONLY that way (HOUSE.CPP:1892 IsStarted). The
         // 3-minute auto-enable timeout is an enhanced-only safety net.
@@ -589,7 +589,7 @@ package func tickAIStructureProduction() {
 
     for house in session.houseStates.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
         guard let state = session.houseStates[house] else { continue }
-        if house == world.playerHouse || house == .neutral { continue }
+        if world.isHuman(house) || house == .neutral { continue }
         if !state.productionEnabled { continue }
 
         // Must have a construction yard to build structures
@@ -616,7 +616,7 @@ package func tickAIBuilding() {
 
     for house in session.houseStates.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
         guard let state = session.houseStates[house] else { continue }
-        if house == world.playerHouse || house == .neutral { continue }
+        if world.isHuman(house) || house == .neutral { continue }
         if !state.productionEnabled { continue }
 
         let owned = state.ownedBuildingTypes()
@@ -993,7 +993,7 @@ package struct AttackWavePlan { package let units: [GameObject]; package let tar
 package func tickAIAttackWaves(world: GameWorld) {
     for house in session.houseStates.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
         guard let state = session.houseStates[house] else { continue }
-        if house == world.playerHouse || house == .neutral { continue }
+        if world.isHuman(house) || house == .neutral { continue }
         if !state.productionEnabled { continue }
 
         if let plan = decideAttackWave(house: house, state: state, world: world) {
@@ -1093,7 +1093,7 @@ package func applyAttackWave(_ plan: AttackWavePlan, house: House, state: HouseS
 /// Retreat damaged AI units below 30% health to their base.
 package func tickAIDamagedRetreat(world: GameWorld) {
     for obj in world.objects {
-        if obj.house == world.playerHouse || obj.house == .neutral { continue }
+        if world.isHuman(obj.house) || obj.house == .neutral { continue }
         if obj.kind == .structure { continue }
         if obj.strength <= 0 { continue }
         if obj.isHarvester || obj.isMCV { continue }
@@ -1135,7 +1135,7 @@ package func tickAIHarvesterManagement() {
 
     for house in session.houseStates.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
         guard let state = session.houseStates[house] else { continue }
-        if house == world.playerHouse || house == .neutral { continue }
+        if world.isHuman(house) || house == .neutral { continue }
         if !state.productionEnabled { continue }
 
         let owned = state.ownedBuildingTypes()

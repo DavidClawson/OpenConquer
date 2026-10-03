@@ -47,7 +47,7 @@ package func tickAITactics() {
 
     for house in session.houseStates.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
         guard let state = session.houseStates[house] else { continue }
-        if house == world.playerHouse || house == .neutral { continue }
+        if world.isHuman(house) || house == .neutral { continue }
         if !state.productionEnabled { continue }
 
         // Expire stale enemy position memory (older than 2700 ticks = 3 minutes)

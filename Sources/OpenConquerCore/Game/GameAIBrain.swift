@@ -109,7 +109,7 @@ package struct AIBrain: Equatable {
 
 /// True if `house` is an AI-controlled combatant (not the player, not neutral).
 package func isAIHouse(_ house: House, _ world: GameWorld) -> Bool {
-    guard house != .neutral, house != world.playerHouse else { return false }
+    guard house != .neutral, !world.isHuman(house) else { return false }
     return !getHouseState(house).isHuman
 }
 

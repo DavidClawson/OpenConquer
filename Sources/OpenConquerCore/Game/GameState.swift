@@ -428,6 +428,11 @@ package class GameWorld {
     package var occupancy: [Int: [Int]] = [:]
     package var occupiedPads: Set<Int> = []  // object IDs of helipads/airstrips currently occupied by a landing/landed aircraft
     package var playerHouse: House = .goodGuy
+
+    /// Whether a person, not the AI, plays `house` (HouseClass::IsHuman).
+    /// Today that is only the player's house; with more players it comes
+    /// from the player list (docs/MULTIPLAYER.md).
+    package func isHuman(_ house: House) -> Bool { house == playerHouse }
     package var map: GameMap = GameMap()
     package var crateState: CrateState = CrateState()
 
