@@ -87,7 +87,9 @@ simulation shows up as a changed digest. (Other diagnostic flags: `--test-mix`,
 CPS/WSA/PAL decoders — `Headless/GfxDiagnostics.swift`; `--test-vqa NAME...` /
 `--dump-vqa NAME OUTDIR [--raw] [--ffmpeg-ima]` for the VQA movie decoder and
 `--test-movie-enhance NAME [OUT.png]` for the Enhanced movie mode's per-frame cost —
-`Headless/VQADiagnostics.swift`; `--play-movie NAME...` opens the window on the
+`Headless/VQADiagnostics.swift`; `--test-fonts` / `--dump-font NAME OUT.png "TEXT"
+[--colors]` for the CONQUER.ENG string table and .FNT fonts —
+`Headless/FontDiagnostics.swift`; `--play-movie NAME...` opens the window on the
 movie player, then the menu.) Implementation: `TiberianDawnMax/Headless/GameHeadless.swift`
 (scenario-backed tools) and `OpenConquerCore/SelfTests/` (the ASSET-FREE self-tests).
 
@@ -250,7 +252,7 @@ When reimplementing a behavior, grep the C++ for the relevant `Mission_*`,
 
 | Folder | What's there |
 |--------|--------------|
-| `OpenConquerAssets/` | MIX/SHP/ICN/INI/AUD/CPS/WSA/PAL parsers (shared LCW + XOR-delta in `WestwoodCodec`), streaming VQA movie decoder (`VQAFile.swift`), asset manager |
+| `OpenConquerAssets/` | MIX/SHP/ICN/INI/AUD/CPS/WSA/PAL parsers (shared LCW + XOR-delta in `WestwoodCodec`), streaming VQA movie decoder (`VQAFile.swift`), CONQUER.ENG `StringTable` + `.FNT` `WWFont`, asset manager |
 | `OpenConquerCore/Data/` | static type tables: units, buildings, infantry, aircraft, weapons, houses, sound IDs, facing tables |
 | `OpenConquerCore/Game/` | all simulation: loop, state, missions, AI, combat, economy, map/pathfinding, triggers, teams, save/load, campaign |
 | `OpenConquerCore/Scenario/` | INI scenario + map loaders |
