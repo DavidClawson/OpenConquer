@@ -99,7 +99,7 @@ private func dumpFont(_ name: String, to url: URL, text: String) -> Int32 {
             rgba[d] = rgb.0; rgba[d + 1] = rgb.1; rgba[d + 2] = rgb.2; rgba[d + 3] = 255
         }
     }
-    guard writeFontPNG(rgba: rgba, width: w * scale, height: h * scale, to: url) else {
+    guard writeRGBAPNG(rgba: rgba, width: w * scale, height: h * scale, to: url) else {
         print("FAIL: cannot write \(url.path)")
         return 1
     }
@@ -107,15 +107,3 @@ private func dumpFont(_ name: String, to url: URL, text: String) -> Int32 {
     return 0
 }
 
-private func writeFontPNG(rgba: [UInt8], width: Int, height: Int, to url: URL) -> Bool {
-    let info = CGImageAlphaInfo.premultipliedLast.rawValue
-    guard let provider = CGDataProvider(data: Data(rgba) as CFData),
-          let image = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
-                              bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
-                              bitmapInfo: CGBitmapInfo(rawValue: info), provider: provider,
-                              decode: nil, shouldInterpolate: false, intent: .defaultIntent),
-          let dest = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil)
-    else { return false }
-    CGImageDestinationAddImage(dest, image, nil)
-    return CGImageDestinationFinalize(dest)
-}

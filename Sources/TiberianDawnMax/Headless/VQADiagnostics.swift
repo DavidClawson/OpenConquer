@@ -80,7 +80,7 @@ private func testMovieEnhance(_ name: String, snapshot: String?) -> Int32 {
                     rgba[d] = out.pixels[s + 2]; rgba[d + 1] = out.pixels[s + 1]; rgba[d + 2] = out.pixels[s]
                 }
             }
-            _ = writePNG(rgba: rgba, width: out.width, height: out.height, to: URL(fileURLWithPath: snapshot))
+            _ = writeRGBAPNG(rgba: rgba, width: out.width, height: out.height, to: URL(fileURLWithPath: snapshot))
         }
     }
     let sorted = times.dropFirst().sorted()  // frame 0 includes session warm-up
@@ -180,7 +180,7 @@ private func dumpVQA(_ name: String, to dir: URL, raw: Bool, ima: IMAArithmetic)
     var written = 0
     while let frame = decoder.nextFrame() {
         let url = dir.appendingPathComponent(String(format: "frame_%05d.png", frame.index))
-        guard writePNG(rgba: frame.rgba(), width: frame.width, height: frame.height, to: url) else {
+        guard writeRGBAPNG(rgba: frame.rgba(), width: frame.width, height: frame.height, to: url) else {
             print("failed writing \(url.path)")
             return 1
         }
@@ -202,18 +202,6 @@ private func dumpVQA(_ name: String, to dir: URL, raw: Bool, ima: IMAArithmetic)
     return 0
 }
 
-private func writePNG(rgba: [UInt8], width: Int, height: Int, to url: URL) -> Bool {
-    guard let provider = CGDataProvider(data: Data(rgba) as CFData),
-          let image = CGImage(
-            width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
-            provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent),
-          let dest = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil)
-    else { return false }
-    CGImageDestinationAddImage(dest, image, nil)
-    return CGImageDestinationFinalize(dest)
-}
 
 private func writeWAV(_ samples: [Int16], sampleRate: Int, channels: Int, to url: URL) {
     var d = Data()

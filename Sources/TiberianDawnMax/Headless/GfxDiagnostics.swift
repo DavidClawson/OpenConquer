@@ -67,18 +67,6 @@ private func defaultPalette(for name: String) -> VGAPalette? {
     }
 }
 
-private func writePNG(rgba: [UInt8], width: Int, height: Int, to url: URL) -> Bool {
-    let info = CGImageAlphaInfo.premultipliedLast.rawValue
-    guard let provider = CGDataProvider(data: Data(rgba) as CFData),
-          let image = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
-                              bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
-                              bitmapInfo: CGBitmapInfo(rawValue: info), provider: provider,
-                              decode: nil, shouldInterpolate: false, intent: .defaultIntent),
-          let dest = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil)
-    else { return false }
-    CGImageDestinationAddImage(dest, image, nil)
-    return CGImageDestinationFinalize(dest)
-}
 
 /// Lays indexed frames out in a grid (1px gutter of index 0).
 private func contactSheet(_ frames: [[UInt8]], w: Int, h: Int, columns: Int) -> (pixels: [UInt8], w: Int, h: Int) {
@@ -128,7 +116,7 @@ func runDumpGfx(name: String, outDir: String, paletteName: String?) -> Int32 {
             let cps = try CPSFile(data: Data(data))
             let (pal, src) = pick(cps.palette)
             let url = dir.appendingPathComponent("\(base).png")
-            guard writePNG(rgba: pal.rgba(cps.pixels), width: cps.width, height: cps.height, to: url) else {
+            guard writeRGBAPNG(rgba: pal.rgba(cps.pixels), width: cps.width, height: cps.height, to: url) else {
                 print("dump-gfx: failed writing \(url.path)"); return 1
             }
             print("\(upper): \(cps.width)x\(cps.height) palette=\(src) -> \(url.path)")
@@ -138,7 +126,7 @@ func runDumpGfx(name: String, outDir: String, paletteName: String?) -> Int32 {
             let frames = wsa.decodeAllFrames()
             for (i, f) in frames.enumerated() {
                 let url = dir.appendingPathComponent(String(format: "%@_%03d.png", base, i))
-                guard writePNG(rgba: pal.rgba(f), width: wsa.width, height: wsa.height, to: url) else {
+                guard writeRGBAPNG(rgba: pal.rgba(f), width: wsa.width, height: wsa.height, to: url) else {
                     print("dump-gfx: failed writing \(url.path)"); return 1
                 }
             }
@@ -147,14 +135,14 @@ func runDumpGfx(name: String, outDir: String, paletteName: String?) -> Int32 {
             let sampled = stride(from: 0, to: frames.count, by: step).map { frames[$0] }
             let sheet = contactSheet(sampled, w: wsa.width, h: wsa.height, columns: wsa.width <= 160 ? 8 : 4)
             let sheetURL = dir.appendingPathComponent("\(base)_sheet.png")
-            _ = writePNG(rgba: pal.rgba(sheet.pixels), width: sheet.w, height: sheet.h, to: sheetURL)
+            _ = writeRGBAPNG(rgba: pal.rgba(sheet.pixels), width: sheet.w, height: sheet.h, to: sheetURL)
             print("\(upper): \(frames.count) frames \(wsa.width)x\(wsa.height) at (\(wsa.x),\(wsa.y)) palette=\(src) -> \(dir.path)/\(base)_NNN.png + \(base)_sheet.png (every \(step) frame(s))")
         case "SHP":
             let shp = try SHPFile(data: Data(data))
             let (pal, src) = pick(nil)
             for (i, f) in shp.frames.enumerated() where f.width > 0 && f.height > 0 {
                 let url = dir.appendingPathComponent(String(format: "%@_%03d.png", base, i))
-                _ = writePNG(rgba: pal.rgba(f.pixels, transparentIndex: 0), width: f.width, height: f.height, to: url)
+                _ = writeRGBAPNG(rgba: pal.rgba(f.pixels, transparentIndex: 0), width: f.width, height: f.height, to: url)
             }
             print("\(upper): \(shp.frames.count) frames palette=\(src) -> \(dir.path)/\(base)_NNN.png")
         default:
