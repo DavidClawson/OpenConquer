@@ -103,7 +103,14 @@ package class GameObject {
     package var missionQueue: Mission? = nil         // Queued next mission
     package var suspendedMission: Mission? = nil     // Saved mission for resume
     package var missionStatus: Int = 0               // Sub-state within current mission
-    package var isSelected: Bool = false
+    /// Whether the local player has this selected. Not simulation state: it
+    /// lives in `session.selection` (the sim never reads it); this is a view.
+    package var isSelected: Bool {
+        get { session.selection.ids.contains(id) }
+        set {
+            if newValue { session.selection.ids.insert(id) } else { session.selection.ids.remove(id) }
+        }
+    }
 
     // Movement (VC FootClass)
     package var moveTargetX: Double? = nil
@@ -403,6 +410,11 @@ package class GameObject {
 // MARK: - Game World
 
 package class GameWorld {
+    /// A new world starts with nothing selected and no control groups.
+    package init() {
+        session.selection = SelectionState()
+    }
+
     package var objects: [GameObject] = []
     package var nextObjectId: Int = 0
     package var tickCount: Int = 0
@@ -419,8 +431,11 @@ package class GameWorld {
     package var map: GameMap = GameMap()
     package var crateState: CrateState = CrateState()
 
-    // Control groups (0-9), each can hold multiple object IDs
-    package var controlGroups: [[Int]] = Array(repeating: [], count: 10)
+    /// Control groups (0-9) — the local player's, kept in `session.selection`.
+    package var controlGroups: [[Int]] {
+        get { session.selection.controlGroups }
+        set { session.selection.controlGroups = newValue }
+    }
     /// Player orders waiting for the next tick, and every order applied so far
     /// (Game/PlayerCommands.swift).
     package var pendingCommands: [QueuedCommand] = []
@@ -440,14 +455,14 @@ package class GameWorld {
         return id
     }
 
+    /// The local player's selection, in object order.
     package func selectedObjects() -> [GameObject] {
-        objects.filter { $0.isSelected }
+        let ids = session.selection.ids
+        return ids.isEmpty ? [] : objects.filter { ids.contains($0.id) }
     }
 
     package func deselectAll() {
-        for obj in objects {
-            obj.isSelected = false
-        }
+        session.selection.ids.removeAll()
     }
 
     /// Find an object by ID — O(1) dictionary lookup
@@ -506,7 +521,5 @@ package class GameWorld {
         objects.contains { $0.kind == .structure && $0.house == house &&
             $0.strength > 0 && $0.typeName.caseInsensitiveCompare(type) == .orderedSame }
     }
-
-    package init() {}
 }
 

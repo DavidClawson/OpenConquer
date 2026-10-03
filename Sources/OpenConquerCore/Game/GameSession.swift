@@ -85,6 +85,20 @@ package class CombatState {
     package var previousBuildOptionCount: Int = 0
 }
 
+// MARK: - Selection
+
+/// The local player's selection and control groups. UI state, not simulation
+/// state: orders reach the world only as PlayerCommands, so in a networked
+/// game each machine keeps just its own player's selection, like the
+/// original (IsSelected never travels in an EventClass). Reset with every
+/// new GameWorld; saves still record it (GameSaveLoad / GameCampaignSave).
+package final class SelectionState {
+    package var ids: Set<Int> = []
+    package var controlGroups: [[Int]] = Array(repeating: [], count: 10)
+
+    package init() {}
+}
+
 // MARK: - GameSession
 
 package class GameSession {
@@ -106,6 +120,7 @@ package class GameSession {
     package var production = ProductionState()
     package var scripting = ScriptingState()
     package var combat = CombatState()
+    package var selection = SelectionState()
 
     // MARK: - Campaign
     package var campaign = CampaignManager()
