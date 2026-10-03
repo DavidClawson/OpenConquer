@@ -17,32 +17,29 @@ window, with the original 1995 art or the Remastered Collection's HD art.
 ## Requirements
 
 - **macOS 13 (Ventura) or later.** The optional *Enhanced* movie mode needs macOS 26.
-- **Your own copy of the C&C Remastered Collection** (Steam or the EA app). It is
-  Windows-only to play, but it only needs to be installed somewhere a Mac can read,
-  for example via CrossOver, or copied over from a PC.
-- **Python 3 with Pillow** (`pip3 install Pillow`) for the one-time asset install.
+- **The game data, from either of these:**
+  - **Your own copy of the C&C Remastered Collection** (Steam or the EA app), which also gives you the HD art and audio. It's a Windows game, but OpenConquer only needs to read its files: install it with CrossOver or Whisky, or copy its folder over from a PC.
+  - **The original game's GDI and Nod discs.** EA made these free in 2007. They give you the 1995 art only. The app can take you to a site that still hosts them.
 
 ## Install
 
 1. Open `OpenConquer.dmg` and drag **OpenConquer** to Applications. The DMG is
    signed with a Developer ID and notarized by Apple, so it opens normally.
-2. Install the game data from your own Remastered Collection, from a checkout of
-   the repository:
+2. Launch OpenConquer. With no game data yet, it opens the import screen, which:
+   - finds your Remastered Collection, or lets you choose its folder or drag it onto the window;
+   - offers **Get Free Game** for the freeware discs, and picks up `GDI95.zip` / `NOD95.zip` from your Downloads folder once they finish;
+   - shows which parts it found.
+3. Press **Import**. It copies the classic archives and extracts the HD art and audio into
+   `~/Library/Application Support/Vanilla-Conquer/vanillatd/` in under a minute.
+   It never redistributes anything.
 
-   ```bash
-   ./install-assets.sh /path/to/CnCRemastered
-   ```
+No terminal or Python is needed. If you installed assets with `install-assets.sh` before,
+run Developer Tools → Import Game Data once. That adds the Win95 archives (`CCLOCAL`,
+`UPDATE`, `UPDATA`, `TRANSIT.MIX`) behind the title screen, choose-your-side and hi-res
+fonts, and the HD repair wrench.
 
-   This copies the classic archives and extracts the HD art and audio into
-   `~/Library/Application Support/Vanilla-Conquer/vanillatd/`. It never downloads
-   or redistributes anything. If you launch the app first, it shows a setup screen
-   with the exact command to run.
-3. Launch OpenConquer.
-
-If you installed assets with an earlier version of the script, run it again: it
-now also installs the Win95 archives (`CCLOCAL`, `UPDATE`, `UPDATA`, `TRANSIT.MIX`)
-behind the title screen, choose-your-side and hi-res fonts, and the HD repair wrench.
-It is safe to re-run.
+Earlier versions of the script also wrote classic WAVs to `extracted/audio/`, and those
+override the game's own decoding. It's better to delete that folder.
 
 ## What works
 

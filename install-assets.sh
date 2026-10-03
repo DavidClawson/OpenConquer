@@ -115,10 +115,10 @@ ${BOLD}Options:${RESET}
 
 ${BOLD}What it does (in order):${RESET}
   1. Install classic MIX archives from CNCDATA into the engine data dir.
-  2. Extract classic audio (AUD -> WAV) from those MIX archives.
-  3. Extract remastered HD sprites (units/structures/vfx) + UI (cursors,
+  2. Extract remastered HD sprites (units/structures/vfx) + UI (cursors,
      sidebar meters).
-  4. Extract remastered HD audio (music, sfx, voices).
+  3. Extract remastered HD audio (music, sfx, voices).
+  (Classic audio is decoded from the MIX archives by the game itself.)
 
 ${BOLD}Output:${RESET}
   Data dir:   $VANILLA_DIR
@@ -300,7 +300,7 @@ EOF
 # ---------------------------------------------------------------------------
 
 install_classic_mix() {
-  step "Step 1/4: Install classic MIX archives -> $VANILLA_DIR"
+  step "Step 1/3: Install classic MIX archives -> $VANILLA_DIR"
 
   local cd1="$DATA_DIR/CNCDATA/TIBERIAN_DAWN/CD1"
   local cd2="$DATA_DIR/CNCDATA/TIBERIAN_DAWN/CD2"
@@ -331,22 +331,20 @@ install_classic_mix() {
 }
 
 # ---------------------------------------------------------------------------
-# Steps 2-4: run the existing python extractors
+# Steps 2-3: run the existing python extractors
 # ---------------------------------------------------------------------------
-
-extract_classic_audio() {
-  step "Step 2/4: Extract classic audio (AUD -> WAV)"
-  run python3 "$TOOLS_DIR/extract_audio.py" --data-dir "$VANILLA_DIR"
-}
+# (No classic AUD -> WAV step: tools/extract_audio.py restarts the IMA decoder
+# every chunk, and its WAVs would override the game's own, faithful decode of
+# the AUD files in the MIX archives.)
 
 extract_remastered_sprites() {
-  step "Step 3/4: Extract remastered HD sprites + UI (cursors, sidebar meters)"
+  step "Step 2/3: Extract remastered HD sprites + UI (cursors, sidebar meters)"
   run python3 "$TOOLS_DIR/extract_remastered_sprites.py" \
       --remastered-dir "$DATA_DIR" --category all
 }
 
 extract_remastered_audio() {
-  step "Step 4/4: Extract remastered HD audio (music, sfx, voices)"
+  step "Step 3/3: Extract remastered HD audio (music, sfx, voices)"
   run python3 "$TOOLS_DIR/extract_remastered_audio.py" \
       --remastered-dir "$DATA_DIR"
 }
@@ -365,7 +363,6 @@ summary() {
 Assets installed from: $DATA_DIR
 
   Classic MIX archives  -> $VANILLA_DIR
-  Classic audio (WAV)   -> $EXTRACTED_DIR/audio
   HD sprites + UI (PNG) -> $EXTRACTED_DIR/sprites_remastered
   HD audio (WAV)        -> $EXTRACTED_DIR/audio_remastered
 
@@ -384,7 +381,6 @@ locate_install
 check_tooling
 preflight
 install_classic_mix
-extract_classic_audio
 extract_remastered_sprites
 extract_remastered_audio
 summary

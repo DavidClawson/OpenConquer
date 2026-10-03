@@ -63,47 +63,45 @@ Expect rough edges and missing features — see [`docs/PARITY.md`](docs/PARITY.m
 - **macOS 13+**
 - **SDL2** — `brew install sdl2 pkg-config`
 - **Swift toolchain** (Xcode or the swift.org toolchain; the package targets swift-tools 5.9)
-- **A legally-owned copy of the C&C Remastered Collection** (for game assets)
+- **The game data**: the C&C Remastered Collection (for the HD art), or EA's free 1995 GDI and Nod discs (see [Assets](#assets))
 
 ## Assets
 
-OpenConquer ships **no game data** — you extract it from your own legally-owned copy of the Remastered Collection.
+OpenConquer ships **no game data** — it imports it from your own copy of the game.
 
-### One-command install (recommended)
+### In the app (recommended)
+
+Launch OpenConquer. With no game data yet, it opens the import screen, which lists the two things the game can use:
+
+1. **The classic 1995 game data (required).** It comes from either of these sources:
+   - **The [C&C Remastered Collection](https://store.steampowered.com/app/1213210/).** The app finds it in the usual places, including CrossOver and Whisky bottles and external drives.
+   - **The original game's GDI and Nod discs.** EA made these free in 2007 and no longer hosts them, but fan sites such as [CnCNZ](https://cncnz.com/features/freeware-classic-command-conquer-games/) do. **Get Free Game** opens that page in your browser. The import screen watches your Downloads folder and picks up `GDI95.zip` and `NOD95.zip` (or the `.iso` inside) when they finish downloading. It also accepts a disc folder or image you choose or drag onto the window.
+2. **The Remastered Collection's HD art and audio (optional).** This only comes from the Remastered Collection. If your copy is only partly downloaded, the screen names the missing files.
+
+**Import** copies the classic archives and extracts the HD art and audio, which takes under a minute. To run it again later, choose **Developer Tools → Import Game Data** on the title screen.
+
+Everything lands in the engine's data directory, the same one [Vanilla-Conquer](https://github.com/TheAssemblyArmada/Vanilla-Conquer) uses:
+- the classic MIX archives in `~/Library/Application Support/Vanilla-Conquer/vanillatd/`;
+- the extracted HD art and audio in `…/vanillatd/extracted/`.
+
+### From a terminal (developers)
+
+`install-assets.sh` does the same import from a Remastered Collection install with the original Python extractors:
 
 ```bash
 pip3 install Pillow            # one-time: needed for HD sprite extraction
 ./install-assets.sh /path/to/CnCRemastered
-```
-
-`install-assets.sh` is a guided installer that does the whole setup in one shot: it installs the classic MIX archives (including the Win95 release's archives with its hi-res fonts, title art and choose-your-side screen), then extracts the classic audio and all the remastered HD art (sprites, cursors, sidebar meters) and audio. Point it at your Remastered Collection install — either the folder that contains `Data/` or the `Data/` folder itself. If you omit the path it probes the usual macOS locations (Steam, `~/CnCRemastered`, `/Applications`, EA app).
-
-It's safe to re-run, and it never downloads or bundles game data — it only orchestrates the `tools/` extractors against **your** copy. Useful flags:
-
-```bash
 ./install-assets.sh --dry-run   # show exactly what it would do, run nothing
-./install-assets.sh --help      # full usage
 ```
 
-Everything lands in the engine's data directory, `~/Library/Application Support/Vanilla-Conquer/vanillatd/` (classic MIX archives) and `…/vanillatd/extracted/` (extracted art & audio) — the same data directory [Vanilla-Conquer](https://github.com/TheAssemblyArmada/Vanilla-Conquer) uses. When it finishes, just `swift run`.
+The app's own importer is the same code path as `--extract-assets` (see the headless harness below).
 
-### Manual extraction (fallback)
-
-If you prefer to run the steps yourself, there are two asset sources:
-
-1. **Classic game data (MIX archives)** — the original sprites, maps, audio, and scenarios. The engine reads these from
-   `~/Library/Application Support/Vanilla-Conquer/vanillatd/`.
-   (The classic `.MIX` files from the Remastered Collection's `CNCDATA/TIBERIAN_DAWN/CD1` (GDI/shared) and `CD2` (Nod) go here — the shared archives in the root (including `UPDATEC.MIX` and `TEMPICNH`/`DESEICNH`/`WINTICNH.MIX`, the hi-res UI art and build cameos for the classic sidebar; `CCLOCAL`/`UPDATE`/`UPDATA.MIX`, the Win95 hi-res fonts and title art; and `TRANSIT.MIX`, the choose-your-side screen), the side-specific `GENERAL.MIX`/`SCORES.MIX`/`MOVIES.MIX` in `gdi/` and `nod/`.)
-
-2. **Remastered HD art & audio (optional but recommended)** — extracted from the Remastered Collection's `.MEG` archives into `…/vanillatd/extracted/`. With the Remastered install downloaded to `~/CnCRemastered/Data`:
-
-   ```bash
-   pip install Pillow
-   python3 tools/extract_remastered_sprites.py            # HD units/structures/vfx
-   python3 tools/extract_remastered_sprites.py --category ui   # HD cursors + sidebar meters
-   python3 tools/extract_remastered_audio.py              # HD music & sound
-   python3 tools/extract_audio.py                         # classic AUD → WAV (from MIX)
-   ```
+The classic archives go in the data directory as follows:
+- **Shared archives from `CNCDATA/TIBERIAN_DAWN/CD1`, at its root:**
+  - `UPDATEC.MIX` and `TEMPICNH`/`DESEICNH`/`WINTICNH.MIX`: the hi-res UI art and build cameos;
+  - `CCLOCAL`/`UPDATE`/`UPDATA.MIX`: the Win95 fonts and title art;
+  - `TRANSIT.MIX`: the choose-your-side screen.
+- **Side-specific archives:** `GENERAL.MIX`, `SCORES.MIX` and `MOVIES.MIX` go in `gdi/` (from CD1) and `nod/` (from CD2).
 
 ## Build & run
 

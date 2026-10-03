@@ -16,6 +16,11 @@ import OpenConquerCore
 /// the classic archives and extracts the HD art and audio — what
 /// install-assets.sh does, with no terminal or Python.
 ///
+/// Without the Remastered Collection, Get Free Game opens the fan site that
+/// still hosts EA's freeware disc images in the player's browser, and the
+/// screen watches Downloads: it shows a download in progress and picks the
+/// finished GDI95.zip / NOD95.zip (or .iso) up by itself.
+///
 /// This screen must render with **zero assets**: on a first launch there is no
 /// palette, SHP or font yet, so everything is SDL primitives plus the built-in
 /// 5x7 pixel font (`TextRenderer`). A Finder-launched app has no stdout, so
@@ -32,12 +37,19 @@ final class SetupScreen: MenuScreen {
     fileprivate var remastered: RemasteredInstall?
     /// Original game discs, one per side.
     fileprivate var discs: [OriginalDisc] = []
+    /// Disc images (.zip or .iso), one per side, opened at import.
+    fileprivate var images: [DiscImage] = []
+    /// Disc downloads still in progress in Downloads.
+    private var downloading: [String] = []
+    private var lastDownloadsCheck: UInt64 = 0
     /// A note under the choice: why a picked folder was refused, etc.
     private var note: String?
     /// From the title's tools menu: Back instead of Quit, and the game data is
     /// already there.
     private let reimport: Bool
     private var job: ImportJob?
+    /// Where disc images are unzipped and mounted during an import.
+    private var importScratch: URL { dataPath.appendingPathComponent(".import") }
 
     /// What the failure screen says, if the import failed.
     var failureMessage: String? {
@@ -53,10 +65,26 @@ final class SetupScreen: MenuScreen {
     private func search() {
         remastered = RemasteredLocator.search().first
         discs = remastered == nil ? RemasteredLocator.searchDiscs() : []
+        images = []
+        checkDownloads()
         note = nil
     }
 
-    private var hasClassic: Bool { remastered != nil || discs.contains { $0.side == .gdi } }
+    /// Picks up finished disc downloads and notes ones in progress, for the
+    /// sides no disc covers yet.
+    private func checkDownloads() {
+        guard remastered == nil else { downloading = []; return }
+        for image in DiscImage.searchDownloads() where !has(image.side) {
+            images.append(image)
+        }
+        downloading = DiscImage.downloadsInProgress()
+    }
+
+    private func has(_ side: OriginalDisc.Side?) -> Bool {
+        discs.contains { $0.side == side } || images.contains { $0.side == side }
+    }
+
+    private var hasClassic: Bool { remastered != nil || has(.gdi) }
 
     /// The Remastered Collection's Steam page, for players without it.
     private static let storeURL = URL(string: "https://store.steampowered.com/app/1213210/")!
@@ -115,7 +143,7 @@ final class SetupScreen: MenuScreen {
                 Line("IMPORTING", .amber, b + 1, gapAfter: 14 * b),
                 Line(p.stepTitle, .white, b, gapAfter: 6 * b),
                 Line(p.item.isEmpty ? " " : String(p.item.uppercased().suffix(46)), .gray, b, gapAfter: 40 * b),
-                Line("THIS TAKES A FEW MINUTES.", .gray, b, gapAfter: 0),
+                Line("THIS TAKES UP TO A MINUTE.", .gray, b, gapAfter: 0),
             ]
         case .failed(let message):
             lines.append(Line("THE IMPORT DIDN'T FINISH", .red, b + 1, gapAfter: 14 * b))
@@ -135,25 +163,40 @@ final class SetupScreen: MenuScreen {
         if let remastered {
             lines.append(Line("FOUND IN YOUR REMASTERED COLLECTION:", .green, b, gapAfter: 4 * b))
             lines += pathLines(remastered.dataDir, gapAfter: 16 * b)
-        } else if !discs.isEmpty {
-            for disc in discs.sorted(by: { $0.side.rawValue < $1.side.rawValue }) {
-                lines.append(Line("FOUND THE \(disc.side == .gdi ? "GDI" : "NOD") DISC:", .green, b, gapAfter: 4 * b))
-                lines += pathLines(disc.folder, gapAfter: 8 * b)
+        } else if !discs.isEmpty || !images.isEmpty {
+            for side in [OriginalDisc.Side.gdi, .nod] {
+                let label = side == .gdi ? "GDI" : "NOD"
+                if let disc = discs.first(where: { $0.side == side }) {
+                    lines.append(Line("FOUND THE \(label) DISC:", .green, b, gapAfter: 4 * b))
+                    lines += pathLines(disc.folder, gapAfter: 8 * b)
+                } else if let image = images.first(where: { $0.side == side }) {
+                    lines.append(Line("FOUND THE \(label) DISC IMAGE:", .green, b, gapAfter: 4 * b))
+                    lines += pathLines(image.file, gapAfter: 8 * b)
+                }
             }
-            if !discs.contains(where: { $0.side == .gdi }) {
+            lines += downloadingLines()
+            if !has(.gdi) {
                 lines.append(Line("STILL NEEDED: THE GDI DISC.", .amber, b, gapAfter: 8 * b))
-            } else if !discs.contains(where: { $0.side == .nod }) {
+            } else if !has(.nod) && downloading.isEmpty {
                 lines.append(Line("ADD THE NOD DISC TOO FOR THE NOD CAMPAIGN.", .amber, b, gapAfter: 8 * b))
             }
             lines[lines.count - 1] = Line(lines[lines.count - 1].text, lines[lines.count - 1].color, b, gapAfter: 16 * b)
         } else {
             lines += [
                 Line("NOT FOUND. IT COMES WITH THE REMASTERED", .red, b, gapAfter: 4 * b),
-                Line("COLLECTION, OR USE THE ORIGINAL GAME'S DISCS", .gray, b, gapAfter: 4 * b),
-                Line("(THE 1995 CDS OR THE FREE 2007 RELEASE).", .gray, b, gapAfter: 16 * b),
+                Line("COLLECTION, OR GET THE ORIGINAL GAME FREE:", .gray, b, gapAfter: 4 * b),
+                Line("EA RELEASED ITS GDI AND NOD DISCS IN 2007.", .gray, b, gapAfter: 4 * b),
+                Line("GET FREE GAME OPENS A SITE THAT HAS THEM.", .gray, b, gapAfter: 4 * b),
+                Line("DOWNLOAD BOTH AND THEY'LL SHOW UP HERE.", .gray, b, gapAfter: 8 * b),
             ]
+            lines += downloadingLines()
+            lines[lines.count - 1] = Line(lines[lines.count - 1].text, lines[lines.count - 1].color, b, gapAfter: 16 * b)
         }
         return lines
+    }
+
+    private func downloadingLines() -> [Line] {
+        downloading.map { Line("DOWNLOADING \($0.uppercased()) ...", .amber, bodyScale, gapAfter: 4 * bodyScale) }
     }
 
     /// The HD art and audio: found, incomplete, or how to get it.
@@ -196,6 +239,9 @@ final class SetupScreen: MenuScreen {
         switch phase {
         case .choose:
             specs = [leave, ("CHOOSE FOLDER", { [weak self] in self?.chooseFolder() })]
+            if remastered == nil && !(has(.gdi) && has(.nod)) {
+                specs.append(("GET FREE GAME", { NSWorkspace.shared.open(DiscImage.freewarePage) }))
+            }
             if !(remastered?.hasHD ?? false) {
                 specs.append(("GET HD ART", { NSWorkspace.shared.open(Self.storeURL) }))
             }
@@ -232,6 +278,13 @@ final class SetupScreen: MenuScreen {
 
     func render(_ renderer: OpaquePointer?) {
         pollJob()
+        if case .choose = phase {
+            let now = SDL_GetTicks64()
+            if now - lastDownloadsCheck > 2000 {
+                lastDownloadsCheck = now
+                checkDownloads()
+            }
+        }
         let cx = renderState.windowWidth / 2
         var y = textBlockTop()
         let lines = makeLines()
@@ -275,9 +328,10 @@ final class SetupScreen: MenuScreen {
     private func chooseFolder() {
         let panel = NSOpenPanel()
         panel.title = "Choose your game data"
-        panel.message = "Choose the C&C Remastered Collection's install folder, or a folder with the original game's files (a 1995 CD or the 2007 freeware release)."
+        panel.message = "Choose the C&C Remastered Collection's install folder, or the original game: a disc folder, or the freeware GDI95.zip / NOD95.zip (or .iso)."
         panel.canChooseDirectories = true
-        panel.canChooseFiles = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.zip, .diskImage, .folder]
         panel.allowsMultipleSelection = false
         panel.showsHiddenFiles = true
         let response = panel.runModal()
@@ -300,7 +354,22 @@ final class SetupScreen: MenuScreen {
         } else if let disc = OriginalDisc.resolve(url) {
             remastered = nil
             discs.removeAll { $0.side == disc.side }
+            images.removeAll { $0.side == disc.side }
             discs.append(disc)
+        } else if var image = DiscImage.identify(url) {
+            if image.side == nil {
+                // An .iso not named for its side: open it to see which it is.
+                guard let opened = try? image.open(scratch: importScratch, progress: { _ in }, isCancelled: { false }) else {
+                    note = "THAT DISC IMAGE ISN'T A C&C GDI OR NOD DISC."
+                    return
+                }
+                image = DiscImage(file: url, side: opened.disc.side)
+                opened.close()
+            }
+            remastered = nil
+            discs.removeAll { $0.side == image.side }
+            images.removeAll { $0.side == image.side }
+            images.append(image)
         } else {
             note = "THAT FOLDER HAS NO C&C GAME DATA IN IT."
         }
@@ -311,6 +380,7 @@ final class SetupScreen: MenuScreen {
     func startImport() {
         guard hasClassic else { return }
         let plan: [(URL, URL)]
+        var images: [DiscImage] = []
         if let remastered {
             let missing = ClassicArchiveImport.missing(in: remastered)
             guard missing.isEmpty else {
@@ -321,8 +391,10 @@ final class SetupScreen: MenuScreen {
             plan = ClassicArchiveImport.plan(from: remastered, to: dataPath)
         } else {
             plan = ClassicArchiveImport.plan(from: discs, to: dataPath)
+            images = self.images
         }
-        let job = ImportJob(plan: plan, hd: remastered?.hasHD == true ? remastered : nil, dataDir: dataPath)
+        let job = ImportJob(plan: plan, discs: discs, images: images, scratch: importScratch,
+                            hd: remastered?.hasHD == true ? remastered : nil, dataDir: dataPath)
         self.job = job
         phase = .importing
         job.start()
@@ -335,7 +407,8 @@ final class SetupScreen: MenuScreen {
         case .success:
             finish()
         case .failure(let error):
-            if (error as? CocoaError)?.code == .userCancelled {
+            if (error as? CocoaError)?.code == .userCancelled || error is CancellationError
+                || { if case .cancelled? = error as? AssetImportError { return true }; return false }() {
                 phase = .choose
                 note = "IMPORT CANCELLED."
             } else {
@@ -419,27 +492,58 @@ final class ImportJob {
         var result: Result<Void, Error>?
     }
 
+    private enum Step: CaseIterable {
+        case openImages, copy, hdSprites, hdUI, hdAudio
+
+        var title: String {
+            switch self {
+            case .openImages: return "UNPACKING THE DISC IMAGES"
+            case .copy: return "COPYING THE CLASSIC GAME FILES"
+            case .hdSprites: return "EXTRACTING THE HD UNITS AND BUILDINGS"
+            case .hdUI: return "EXTRACTING THE HD INTERFACE"
+            case .hdAudio: return "EXTRACTING THE HD MUSIC AND SOUNDS"
+            }
+        }
+
+        /// Roughly how long each takes, for the bar.
+        var weight: Double {
+            switch self {
+            case .openImages: return 4
+            case .copy: return 1
+            case .hdSprites: return 2.6
+            case .hdUI: return 0.2
+            case .hdAudio: return 1.4
+            }
+        }
+    }
+
     private let plan: [(URL, URL)]
+    private let discs: [OriginalDisc]
+    private let images: [DiscImage]
+    private let scratch: URL
     /// The install to extract the HD art and audio from, if it has them.
     private let hd: RemasteredInstall?
     private let dataDir: URL
+    private let steps: [Step]
     private let lock = NSLock()
     private var state = Snapshot()
     private var cancelled = false
 
-    /// Each step's share of the bar, roughly by how long it takes.
-    private static let weights: [(title: String, share: Double)] = [
-        ("COPYING THE CLASSIC GAME FILES", 0.25),
-        ("CONVERTING THE CLASSIC AUDIO", 0.10),
-        ("EXTRACTING THE HD UNITS AND BUILDINGS", 0.40),
-        ("EXTRACTING THE HD INTERFACE", 0.05),
-        ("EXTRACTING THE HD MUSIC AND SOUNDS", 0.20),
-    ]
-
-    init(plan: [(URL, URL)], hd: RemasteredInstall?, dataDir: URL) {
+    init(plan: [(URL, URL)], discs: [OriginalDisc], images: [DiscImage], scratch: URL,
+         hd: RemasteredInstall?, dataDir: URL) {
         self.plan = plan
+        self.discs = discs
+        self.images = images
+        self.scratch = scratch
         self.hd = hd
         self.dataDir = dataDir
+        steps = Step.allCases.filter {
+            switch $0 {
+            case .openImages: return !images.isEmpty
+            case .copy: return true
+            case .hdSprites, .hdUI, .hdAudio: return hd != nil
+            }
+        }
     }
 
     func snapshot() -> Snapshot { lock.withLock { state } }
@@ -448,35 +552,56 @@ final class ImportJob {
 
     private var isCancelled: Bool { lock.withLock { cancelled } }
 
-    private func report(step: Int, fraction: Double, item: String) {
-        let before = Self.weights.prefix(step).reduce(0) { $0 + $1.share }
+    private func report(_ step: Step, fraction: Double, item: String) {
+        let total = steps.reduce(0) { $0 + $1.weight }
+        let before = steps.prefix { $0 != step }.reduce(0) { $0 + $1.weight }
         lock.withLock {
-            state.stepTitle = Self.weights[step].title
+            state.stepTitle = step.title
             state.item = item
-            state.overall = before + Self.weights[step].share * min(1, max(0, fraction))
+            state.overall = (before + step.weight * min(1, max(0, fraction))) / total
         }
     }
 
     func start() {
         DispatchQueue.global(qos: .userInitiated).async { [self] in
-            let result = Result<Void, Error> {
-                try ClassicArchiveImport.run(plan, to: dataDir, progress: { done, total, name in
-                    self.report(step: 0, fraction: total > 0 ? Double(done) / Double(total) : 1, item: name)
-                }, isCancelled: { self.isCancelled })
-                guard let hd else { return }
-                try extractRemasteredAssets(remasteredData: hd.dataDir, dataDir: dataDir, progress: { p in
-                    let step: Int
-                    switch p.step {
-                    case .classicAudio: step = 1
-                    case .hdSprites: step = 2
-                    case .hdUI: step = 3
-                    case .hdAudio: step = 4
-                    }
-                    self.report(step: step, fraction: p.total > 0 ? Double(p.done) / Double(p.total) : 1, item: p.item)
-                }, isCancelled: { self.isCancelled })
-            }
+            let result = Result<Void, Error> { try run() }
             lock.withLock { state.result = result }
         }
+    }
+
+    private func run() throws {
+        // The disc images, opened as disc folders for the copy.
+        var opened: [DiscImage.Opened] = []
+        defer {
+            opened.forEach { $0.close() }
+            try? FileManager.default.removeItem(at: scratch)
+        }
+        var plan = self.plan
+        if !images.isEmpty {
+            for (i, image) in images.enumerated() {
+                let share = 1 / Double(images.count)
+                let o = try image.open(scratch: scratch, progress: { f in
+                    self.report(.openImages, fraction: (Double(i) + f) * share, item: image.file.lastPathComponent)
+                }, isCancelled: { self.isCancelled })
+                opened.append(o)
+            }
+            plan = ClassicArchiveImport.plan(from: discs + opened.map(\.disc), to: dataDir)
+        }
+
+        try ClassicArchiveImport.run(plan, to: dataDir, progress: { done, total, name in
+            self.report(.copy, fraction: total > 0 ? Double(done) / Double(total) : 1, item: name)
+        }, isCancelled: { self.isCancelled })
+
+        guard let hd else { return }
+        try extractRemasteredAssets(remasteredData: hd.dataDir, dataDir: dataDir, progress: { p in
+            let step: Step
+            switch p.step {
+            case .hdSprites: step = .hdSprites
+            case .hdUI: step = .hdUI
+            case .hdAudio: step = .hdAudio
+            }
+            self.report(step, fraction: p.total > 0 ? Double(p.done) / Double(p.total) : 1, item: p.item)
+        }, isCancelled: { self.isCancelled })
     }
 }
 
@@ -490,5 +615,6 @@ extension SetupScreen {
     func testClear() {
         remastered = nil
         discs = []
+        images = []
     }
 }

@@ -17,9 +17,9 @@ package struct RemasteredInstall: Equatable {
     /// archives alone are enough to play).
     package let hasHD: Bool
 
-    /// The HD archives the extractors read.
-    package static let hdArchives = ["TEXTURES_TD_SRGB.MEG", "TEXTURES_SRGB.MEG", "TEXTURES_COMMON_SRGB.MEG",
-                                     "CONFIG.MEG", "SFX3D.MEG", "SFX2D_EN-US.MEG", "MUSIC.MEG"]
+    /// The HD archives the extractors need (TEXTURES_COMMON_SRGB.MEG, the
+    /// repair wrench, is optional).
+    package static var hdArchives: [String] { requiredRemasteredArchives }
 
     var classicDir: URL { dataDir.appendingPathComponent("CNCDATA/TIBERIAN_DAWN") }
 

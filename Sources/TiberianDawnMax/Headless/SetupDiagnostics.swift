@@ -138,6 +138,51 @@ func runSetupDiagnosticsIfRequested() -> Int32? {
     guard runImport(screen, shot: nil),
           check(ClassicArchiveImport.plan(from: discs, to: dataPath), "discs") else { return 1 }
 
+    // Disc images, as the freeware release comes: GDI95.iso and NOD95.zip
+    // (holding NOD95.iso), built from the install's CD1/CD2 with hdiutil and
+    // zip. Built once and kept under OUTDIR/fixtures; ~1.2 GB.
+    let isoGDI = outDir.appendingPathComponent("fixtures/GDI95.iso")
+    let zipNod = outDir.appendingPathComponent("fixtures/NOD95.zip")
+    func sh(_ cmd: String) -> Int32 {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", cmd]
+        p.standardOutput = FileHandle.nullDevice
+        try? p.run()
+        p.waitUntilExit()
+        return p.terminationStatus
+    }
+    let td = cncdata.appendingPathComponent("TIBERIAN_DAWN").path
+    if !fm.fileExists(atPath: isoGDI.path) {
+        print("building GDI95.iso")
+        _ = sh("hdiutil makehybrid -quiet -iso -joliet -o '\(isoGDI.path)' '\(td)/CD1'")
+    }
+    if !fm.fileExists(atPath: zipNod.path) {
+        print("building NOD95.zip")
+        let iso = outDir.appendingPathComponent("fixtures/NOD95.iso").path
+        _ = sh("hdiutil makehybrid -quiet -iso -joliet -o '\(iso)' '\(td)/CD2' && cd '\(outDir.path)/fixtures' && zip -q -0 NOD95.zip NOD95.iso && rm NOD95.iso")
+    }
+    let images = [isoGDI, zipNod].compactMap(DiscImage.identify)
+    print("images: " + images.map { "\($0.file.lastPathComponent) (\($0.side?.rawValue ?? "?"))" }.joined(separator: ", "))
+    guard images.count == 2 else { print("FAIL: didn't recognise both disc images"); return 1 }
+    let imageScreen = SetupScreen()
+    imageScreen.testClear()
+    imageScreen.testUse(isoGDI)
+    imageScreen.testUse(zipNod)
+    _ = snapshot(imageScreen, "setup-images.png")
+    print("importing from the disc images")
+    try? fm.removeItem(at: dataPath)
+    try? fm.createDirectory(at: dataPath, withIntermediateDirectories: true)
+    guard runImport(imageScreen, shot: "setup-unpacking.png") else { return 1 }
+    let copied = ClassicArchiveImport.shared.filter { fm.fileExists(atPath: dataPath.appendingPathComponent($0).path) }.count
+    let sides = ["gdi", "nod"].filter { fm.fileExists(atPath: dataPath.appendingPathComponent("\($0)/MOVIES.MIX").path) }
+    let leftovers = (try? fm.contentsOfDirectory(atPath: dataPath.appendingPathComponent(".import").path)) ?? []
+    print("  images: \(copied) shared archives, sides \(sides), scratch left: \(leftovers)")
+    guard copied == ClassicArchiveImport.shared.count, sides.count == 2, leftovers.isEmpty else {
+        print("FAIL: disc image import incomplete")
+        return 1
+    }
+
     print("importing from the Remastered Collection")
     try? fm.removeItem(at: dataPath)
     try? fm.createDirectory(at: dataPath, withIntermediateDirectories: true)

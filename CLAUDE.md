@@ -27,13 +27,30 @@ swift build            # or:  swift run
   `.app`. The override is also how you exercise the no-assets path —
   `homeDirectoryForCurrentUser` reads the passwd database, so setting `HOME` does not
   move it: `OPENCONQUER_DATA_DIR=/tmp/empty swift run`.
-- **`UI/SetupScreen.swift`** renders when `assetManager.mixManager.totalEntries == 0`
-  (wired at the bottom of `main.swift`, just before the main loop). It must stay
-  asset-free — SDL primitives and the built-in 5x7 font only — because it is what a
-  first launch shows before anything is extracted, and a Finder-launched app has no
-  stdout to print diagnostics to. Its RETRY re-runs discovery in place. Adding
-  punctuation to `TextRenderer`'s glyph table was part of this: unknown characters
-  render as a blank advance, so a path with `.` or `~` used to read as a hole.
+- **`UI/SetupScreen.swift`** is the in-app importer. It renders when
+  `assetManager.mixManager.totalEntries == 0`, wired at the bottom of `main.swift`
+  just before the main loop. It also opens from Developer Tools → Import Game Data.
+  - **What it shows:** two items, each with where it was found or how to get it:
+    - the classic data (required), from the Remastered Collection or the
+      original GDI/Nod discs (a folder, a mounted CD, or the freeware
+      `GDI95.zip`/`NOD95.zip`/`.iso`);
+    - the HD art (optional, Remastered only).
+  - **Getting the discs:** Get Free Game opens CnCNZ's freeware page in the
+    browser, and the screen polls ~/Downloads for the finished downloads.
+  - **Finding sources:** `OpenConquerAssets/Import/RemasteredLocator.swift` finds
+    installs (including CrossOver/Whisky bottles and /Volumes), recognises a disc's
+    side from its MOVIES.MIX header (GDI2/NOD2.VQA), and copies the classic
+    archives atomically. `DiscImages.swift` unzips and `hdiutil`-mounts the images
+    into `<data>/.import` for the copy.
+  - **HD art and audio:** `extractRemasteredAssets` then extracts them.
+  - **Folder sources:** the macOS picker (NSOpenPanel) or an SDL_DROPFILE.
+  - **Asset-free:** it must stay asset-free (SDL primitives and the built-in 5x7
+    font only), since it is what a first launch shows, and a Finder-launched app
+    has no stdout. Unknown glyphs (e.g. `;`) render blank.
+  - **Testing:** `--test-setup OUTDIR` (with `OPENCONQUER_DATA_DIR` set to a
+    scratch dir) snapshots each case and imports from discs, disc images it
+    builds under OUTDIR/fixtures (~1.2 GB, kept), and the Remastered
+    Collection (`Headless/SetupDiagnostics.swift`).
 - **`tools/make-app.sh`** vendors the SDL dylibs into `Contents/Frameworks`,
   rewrites their load paths to `@rpath`, ad-hoc signs (required on Apple Silicon
   after `install_name_tool` edits), and smoke-tests the bundle with
