@@ -65,6 +65,13 @@ if CommandLine.arguments.contains("--test-mix") {
     exit(0)
 }
 
+// CPS/WSA/PAL decoders (Headless/GfxDiagnostics.swift): --test-gfx, --dump-gfx NAME OUTDIR [PAL]
+if CommandLine.arguments.contains("--test-gfx") { exit(runTestGfx()) }
+if let i = CommandLine.arguments.firstIndex(of: "--dump-gfx"), i + 2 < CommandLine.arguments.count {
+    let a = CommandLine.arguments
+    exit(runDumpGfx(name: a[i + 1], outDir: a[i + 2], paletteName: i + 3 < a.count && !a[i + 3].hasPrefix("--") ? a[i + 3] : nil))
+}
+
 // Diagnostic: --dump-scenario <NAME>  prints map bounds, waypoints, etc.
 if let dumpIdx = CommandLine.arguments.firstIndex(of: "--dump-scenario"),
    dumpIdx + 1 < CommandLine.arguments.count {
