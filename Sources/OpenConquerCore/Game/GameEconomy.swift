@@ -409,6 +409,7 @@ extension GameObject {
         var creditsGained = load * tiberiumValue
         let houseState = getHouseState(house)
         let fullValue = creditsGained
+        houseState.harvestedCredits += fullValue
         // Enforce silo capacity: only store up to the capacity limit (faithful
         // to the original — a refinery holds 1000, each silo 1500; overflow is
         // wasted). This is why a lone refinery stops yielding credits after ~2

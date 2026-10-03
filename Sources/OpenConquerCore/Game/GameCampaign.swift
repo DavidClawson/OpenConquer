@@ -271,6 +271,9 @@ package class CampaignManager {
         // Set credits from scenario INI (+ carry-over from previous mission)
         session.sidebarCredits = scenario.credits + state.carryOverCredits
         session.displayedCredits = session.sidebarCredits
+        if let player = session.world?.playerHouse {
+            session.houseStates[player]?.initialCredits = session.sidebarCredits
+        }
 
         // Set build level from scenario INI
         session.scenarioBuildLevel = scenario.buildLevel

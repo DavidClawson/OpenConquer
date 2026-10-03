@@ -43,6 +43,12 @@ package class HouseState {
     package var unitsLost: Int = 0
     package var buildingsKilled: Int = 0
     package var buildingsLost: Int = 0
+    // Score-screen inputs (HOUSE.H HarvestedCredits / InitialCredits): every
+    // credit's worth of tiberium unloaded, before the silo clamp
+    // (HOUSE.CPP:1468), and the money the mission started with, carry-over
+    // included (HOUSE.CPP:4190, INI.CPP:368). Observational only.
+    package var harvestedCredits: Int = 0
+    package var initialCredits: Int = 0
 
     // Enemy-owned superweapons granted by a trigger (Nuke=BadGuy, Ion=GoodGuy).
     // The player's copies live on session.combat; this dict is only populated for
@@ -274,6 +280,7 @@ package func initHouseStates() {
         let isHuman = (house == world.playerHouse)
         let credits = isHuman ? session.sidebarCredits : 5000  // AI gets default credits
         let state = HouseState(type: house, credits: credits, isHuman: isHuman)
+        state.initialCredits = credits
         state.recalculatePower()
         session.houseStates[house] = state
     }

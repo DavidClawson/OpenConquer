@@ -291,6 +291,10 @@ package struct MidMissionSavedHouse: Codable {
     package let aiLastAttackTick: Int
     package let aiLastTeamFormTick: Int
     package let aiLastBuildCheckTick: Int
+
+    // Score-screen inputs (optional: older saves lack them)
+    package var harvestedCredits: Int? = nil
+    package var initialCredits: Int? = nil
 }
 
 // MARK: - Pending Reinforcement Snapshot
@@ -530,7 +534,9 @@ package func saveMission(slot: Int, description: String? = nil) -> Bool {
             aiBuildCycleCount: state.aiBuildCycleCount,
             aiLastAttackTick: state.aiLastAttackTick,
             aiLastTeamFormTick: state.aiLastTeamFormTick,
-            aiLastBuildCheckTick: state.aiLastBuildCheckTick
+            aiLastBuildCheckTick: state.aiLastBuildCheckTick,
+            harvestedCredits: state.harvestedCredits,
+            initialCredits: state.initialCredits
         ))
     }
 
@@ -957,6 +963,8 @@ package func loadMission(slot: Int) -> Bool {
             hs.unitsLost = sh.unitsLost
             hs.buildingsKilled = sh.buildingsKilled
             hs.buildingsLost = sh.buildingsLost
+            hs.harvestedCredits = sh.harvestedCredits ?? 0
+            hs.initialCredits = sh.initialCredits ?? sh.credits
             hs.isAlerted = sh.isAlerted
             hs.alertTimer = sh.alertTimer
             hs.productionEnabled = sh.productionEnabled
