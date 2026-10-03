@@ -8,6 +8,16 @@ func handleKeyDown(_ key: Int32) {
     if key == Int32(SDLK_F3.rawValue) {
         renderState.perfShowOverlay.toggle()
     }
+    // Global: F12 or Cmd+S saves a PNG of the next frame to the Desktop.
+    // Cmd+S exists because Mac keyboards send F12 as volume-up unless fn is
+    // held. Shift isn't required: in testing (sdl2-compat on SDL3) Shift never
+    // appeared in the mod state while Cmd was down, so Cmd+Shift+S never matched.
+    // Returns early so the in-game S (stop units) doesn't also fire.
+    let cmdHeld = (SDL_GetModState().rawValue & UInt32(KMOD_GUI.rawValue)) != 0
+    if key == Int32(SDLK_F12.rawValue) || (cmdHeld && key == Int32(SDLK_s.rawValue)) {
+        screenshotPending = true
+        return
+    }
     session.currentScreen.handleKeyDown(key)
 }
 

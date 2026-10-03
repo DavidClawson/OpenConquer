@@ -450,7 +450,7 @@ if let saved = WindowConfig.loadSaved() {
 }
 
 guard let window = SDL_CreateWindow(
-    "Tiberian Dawn Max",
+    "OpenConquer",
     Int32(SDL_WINDOWPOS_CENTERED_MASK),
     Int32(SDL_WINDOWPOS_CENTERED_MASK),
     renderState.windowWidth,
@@ -555,6 +555,13 @@ while session.running {
     renderMenuState(renderer)
 
     perf.endSection("Render")
+
+    // Screenshot (F12) — captured before the perf overlay so shots stay clean
+    if screenshotPending {
+        screenshotPending = false
+        captureScreenshot(renderer)
+    }
+    renderScreenshotToast(renderer)
 
     // Performance overlay (F3 to toggle)
     perf.renderOverlay(renderer)

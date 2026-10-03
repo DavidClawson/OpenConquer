@@ -15,5 +15,7 @@ they'll render automatically:
 | `options.png`  | The Options screen (Classic vs Enhanced ruleset) |
 
 Tips:
+- Press **⌘S** (or **fn+F12**) in-game to save a clean PNG of the current frame (full Retina
+  resolution, no F3 perf overlay) to `~/Desktop/OpenConquer-<timestamp>.png`.
 - Capture at a decent window size; the engine supports arbitrary resolutions.
 - PNG keeps the crisp pixel/HD art. Keep files reasonably sized (< ~1–2 MB each).

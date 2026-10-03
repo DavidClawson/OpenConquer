@@ -9,9 +9,9 @@ The phases map to three overlapping goals: **(A)** play it & build new missions,
 The phases below are the taxonomy; these milestones are the *order of attack* as of July 2026:
 
 - **M1 — Full campaign fidelity** *(complete — July 2026)* — closed out Phase 2's fidelity track: `IsPrebuilt` production gating (#6C), campaign branching (map selection + GDI sabotage skip), the 28-mission verification sweep and its 8 fix classes (incl. two real determinism breaks), reinforcement fidelity (Edge= entry, TeamType mission lists, loaner rules, A10 hunt, limbo untargetability), the civ-evac win model (SCG11/12 winnable), and the enhanced-AI ruleset gate (`classic1995` = scripted, trigger/teamtype-driven AI only).
-- **M2 — Contributor onramp** *(in progress — one item left)* — close out Phase 0 + start the parity doc: ~~issue templates~~ ✅, ~~`PARITY.md` verified-vs-approximated checklist~~ ✅, ~~labels + starter issues~~ ✅. Remaining: **README screenshots** (needs PNGs in `docs/screenshots/`).
+- **M2 — Contributor onramp** *(in progress — one item left)* — close out Phase 0 + start the parity doc: ~~issue templates~~ ✅, ~~`PARITY.md` verified-vs-approximated checklist~~ ✅, ~~labels + starter issues~~ ✅. Remaining: **README screenshots** (needs PNGs in `docs/screenshots/` — press **⌘S** in-game to capture).
 - **M3 — Linux port** — Phase 5: image-loading abstraction, data-dir abstraction, Linux CI leg.
-- **M4 — Polish & packaging** — Phase 4: HD sidebar meters, unsigned `.app` bundle.
+- **M4 — Polish & packaging** *(mostly done)* — Phase 4: ~~unsigned `.app` bundle~~ ✅, ~~first-run setup screen~~ ✅, ~~DMG~~ ✅ (Sept 2026). Remaining: HD sidebar meters (#1); notarization is blocked on a paid Apple Developer account.
 
 ---
 

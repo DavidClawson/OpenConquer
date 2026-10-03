@@ -36,8 +36,8 @@ class MainMenuScreen: MenuScreen {
             }
         }
 
-        drawText(renderer, "Command & Conquer", centerX: renderState.windowWidth / 2, centerY: 80, color: .amber, scale: 4)
-        drawText(renderer, "Tiberian Dawn Max", centerX: renderState.windowWidth / 2, centerY: 140, color: .green, scale: 3)
+        drawText(renderer, "OpenConquer", centerX: renderState.windowWidth / 2, centerY: 80, color: .amber, scale: 4)
+        drawText(renderer, "Unofficial fan reimplementation", centerX: renderState.windowWidth / 2, centerY: 140, color: .green, scale: 3)
 
         for btn in makeMainButtons() {
             btn.draw(renderer, highlighted: btn.contains(input.mouseX, input.mouseY))
