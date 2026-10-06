@@ -32,23 +32,31 @@ package func loadMap(_ name: String, from mixManager: MIXFileManager) -> [MapCel
         return nil
     }
 
-    guard data.count >= 8192 else {
+    guard let cells = decodeMap(data) else {
         print("MapLoader: \(name) too small (\(data.count) bytes, expected 8192)")
         return nil
     }
-
-    let baseIndex = data.startIndex
-    var cells = [MapCell]()
-    cells.reserveCapacity(4096)
-
-    for i in 0..<4096 {
-        let templateType = data[baseIndex + i * 2]
-        let iconIndex = data[baseIndex + i * 2 + 1]
-        cells.append(MapCell(templateType: templateType, iconIndex: iconIndex))
-    }
-
     print("MapLoader: Loaded \(name) - \(cells.count) cells")
     return cells
+}
+
+/// A BIN file's 4096 cells, or nil when it's too short to be one.
+package func decodeMap(_ data: Data) -> [MapCell]? {
+    guard data.count >= 8192 else { return nil }
+    let baseIndex = data.startIndex
+    return (0..<4096).map { i in
+        MapCell(templateType: data[baseIndex + i * 2], iconIndex: data[baseIndex + i * 2 + 1])
+    }
+}
+
+/// The BIN file for `cells` (the inverse of `decodeMap`).
+package func encodeMap(_ cells: [MapCell]) -> Data {
+    var data = Data(capacity: 8192)
+    for cell in cells.prefix(4096) {
+        data.append(cell.templateType)
+        data.append(cell.iconIndex)
+    }
+    return data
 }
 
 // MARK: - Template Table (216 entries from cdata.cpp)

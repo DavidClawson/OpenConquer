@@ -24,12 +24,22 @@ import OpenConquerAssets
 /// idempotence). Byte-identity to a hand-authored original is intentionally not
 /// a goal — the parser discards comments, so semantic equivalence is the bar.
 package final class EditorScenario {
-    package let name: String
+    package var name: String
     package var data: ScenarioData
+    /// The mission's other editable parts (see EditorMission.swift). Each is
+    /// written back only when it differs from what was loaded, so an
+    /// untouched section passes through exactly as the source had it.
+    package var mission: MissionState
+    private let loaded: MissionState
+    private let loadedWaypoints: [ScenarioWaypoint]
 
     package init(name: String, data: ScenarioData) {
         self.name = name
         self.data = data
+        let state = MissionState(ini: data.ini, name: name)
+        mission = state
+        loaded = state
+        loadedWaypoints = data.waypoints
     }
 
     /// Build the INIFile to save: a copy of the source INI with the editable
@@ -44,6 +54,15 @@ package final class EditorScenario {
         ini.setEntries("INFANTRY", infantryEntries(), display: "INFANTRY")
         ini.setEntries("CELLTRIGGERS", cellTriggerEntries(), display: "CellTriggers")
         ini.setEntries("BASE", baseEntries(), display: "Base")
+        if data.waypoints != loadedWaypoints {
+            ini.setEntries("WAYPOINTS", data.waypoints.map { (key: String($0.id), value: String($0.cell)) },
+                           display: "Waypoints")
+        }
+        mission.write(into: &ini, changedFrom: loaded)
+        // Outside the campaign's SCG/SCB names, Player= is what says the side.
+        if !name.uppercased().hasPrefix("SC") {
+            ini.setValue("Basic", "Player", mission.player.rawValue)
+        }
         return ini
     }
 

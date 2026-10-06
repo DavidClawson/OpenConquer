@@ -13,6 +13,8 @@ protocol MenuScreen: AnyObject {
     func handleMouseMotion(_ x: Int32, _ y: Int32, xrel: Int32, yrel: Int32)
     func handleMouseWheel(_ dy: Int32, atX: Int32, atY: Int32)
     func handleContinuousInput()
+    /// Typed text (SDL_TEXTINPUT), while a screen has SDL_StartTextInput on.
+    func handleTextInput(_ text: String)
 }
 
 // Default no-op implementations
@@ -22,6 +24,7 @@ extension MenuScreen {
     func handleMouseMotion(_ x: Int32, _ y: Int32, xrel: Int32, yrel: Int32) {}
     func handleMouseWheel(_ dy: Int32, atX: Int32, atY: Int32) {}
     func handleContinuousInput() {}
+    func handleTextInput(_ text: String) {}
 }
 
 // MARK: - Main Menu Screen

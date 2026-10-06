@@ -51,6 +51,21 @@ swift build            # or:  swift run
     scratch dir) snapshots each case and imports from discs, disc images it
     builds under OUTDIR/fixtures (~1.2 GB, kept), and the Remastered
     Collection (`Headless/SetupDiagnostics.swift`).
+- **Mission editor** (Developer Tools → Mission Editor, or `--mission-editor [SCEN|NAME]`):
+  `UI/MissionEditorScreen.swift` (document, objects, map input), `UI/MissionEditorPanel.swift`
+  (the FILE/UNITS/SETUP/GOALS/REINF. tabs) and `UI/PanelPen.swift` (immediate-mode panel
+  widgets; each control registers its label, rect and action, so a test can click by label).
+  - **Model:** Core's `EditorScenario` + `MissionState` (`Scenario/EditorMission.swift`):
+    player, per-house credits and edge, tech level, [Buildables] Allow/Deny, triggers,
+    team types and [ObjectFlags], kept as INI strings and written back only when changed,
+    so untouched sections pass through. Edits go through `edit { }` for undo/redo.
+  - **Engine support:** `ScenarioData.playerHouse` (SCG/SCB names as before, otherwise
+    [Basic] Player=), `initGameWorld(..., map:)` for a mission's own BIN, and
+    `session.buildAllow/buildDeny` in `playerCanBuild` (inert without [Buildables]).
+  - **Files:** `<data>/missions/NAME.INI` + `NAME.BIN`. Names can't start with SC (the
+    campaign's prefix decides the side). Play-test sets `app.playTestReturn`, which
+    `makeMainMenu()` hands back once, so leaving the game returns to the editor.
+  - **Testing:** `--test-mission-editor OUTDIR`.
 - **`tools/make-app.sh`** vendors the SDL dylibs into `Contents/Frameworks`,
   rewrites their load paths to `@rpath`, ad-hoc signs (required on Apple Silicon
   after `install_name_tool` edits), and smoke-tests the bundle with
@@ -95,6 +110,7 @@ watching the game. Run the built binary directly:
 ./.build/debug/TiberianDawnMax --test-fogpath <SCEN>           # player plans through unexplored, reroutes on discovery
 ./.build/debug/TiberianDawnMax --test-stacking <SCEN>          # units ordered to one point don't stack on a cell
 ./.build/debug/TiberianDawnMax --editor-roundtrip <SCEN>         # E1: scenario load→document→INI→reload is faithful, idempotent, edit-safe
+./.build/debug/TiberianDawnMax --test-mission-editor OUTDIR      # drives the mission editor's panel, saves, reopens, plays the mission headlessly
 ```
 
 e.g. `--headless SCG01EA 600` or `--determinism SCG01EA 2500`. The determinism

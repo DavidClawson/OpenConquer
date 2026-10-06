@@ -56,6 +56,8 @@ The campaign plays start to finish with the original's presentation, ported from
 - **Endings** — both campaign endings, including Nod's satellite target selection.
 - **In the game** — construction animations for placed and deployed buildings, the original's build-list rules on the sidebar, the classic 1995 sidebar or a modern one with the Remastered HD meters, and the original repair wrench.
 
+**Mission editor** (Developer Tools → Mission Editor) — start from any campaign map or an empty one and make your own mission: place, move and delete units, infantry, buildings, walls and tiberium; set each side's money, reinforcement edge and tech level, and switch individual units on or off in the build list; choose how the mission is won or lost (destroy everything or chosen targets, survive for a time, reach a spot, protect a unit); and add reinforcements that drive in, land by hovercraft or fly in by Chinook or cargo plane, once or on a timer. Play-test it in one click; missions save as ordinary scenario files in the `missions` folder of your game data.
+
 Expect rough edges and missing features — see [`docs/PARITY.md`](docs/PARITY.md) for exactly what matches the original and what doesn't. This is a work in progress and contributions are welcome.
 
 ## Requirements

@@ -23,7 +23,11 @@ import OpenConquerCore
 
 /// The main menu: the classic title screen when its art is installed.
 func makeMainMenu(fadeIn: Bool = false) -> MenuScreen {
-    TitleScreen(fadeIn: fadeIn) ?? ModernMainMenuScreen()
+    if let editor = app.playTestReturn {
+        app.playTestReturn = nil
+        return editor
+    }
+    return TitleScreen(fadeIn: fadeIn) ?? ModernMainMenuScreen()
 }
 
 final class TitleScreen: MenuScreen {
@@ -121,8 +125,12 @@ final class TitleScreen: MenuScreen {
                     app.soundTest.initialize()
                     app.currentScreen = SoundTestScreen()
                 },
-                button(3, "Import Game Data") { app.currentScreen = SetupScreen(reimport: true) },
-                back(5, "Back") { [unowned self] in show(.main) },
+                button(3, "Mission Editor") {
+                    app.currentScreen = MissionEditorScreen.openCampaign(app.scenarioList.first ?? "SCG01EA")
+                        ?? MissionEditorScreen.blank(.temperate)
+                },
+                button(4, "Import Game Data") { app.currentScreen = SetupScreen(reimport: true) },
+                back(6, "Back") { [unowned self] in show(.main) },
             ]
             focus = 0
         }

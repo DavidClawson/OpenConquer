@@ -193,25 +193,93 @@ private func playerStructFlags(_ owned: Set<String>) -> StructFlag {
 private enum BuildKind { case infantry(InfantryType), unit(UnitType), aircraft(AircraftType), structure(StructType) }
 
 /// Can_Build's legality test for the human player (HOUSE.CPP:449-606).
-private func playerCanBuild(_ kind: BuildKind, isBuildable: Bool, ownable: HouseFlag, pre: StructFlag,
-                            scenario: Int, gdi: Bool, flags: StructFlag) -> Bool {
-    guard isBuildable, ownable.contains(gdi ? .good : .bad) else { return false }
-    var level = session.scenarioBuildLevel
+/// A mission's [Buildables] Allow= puts a type in the tree whatever the tech
+/// level (the side's own exclusions and the prerequisites still apply); Deny=
+/// takes it out.
+private func playerCanBuild(_ kind: BuildKind, name: String, isBuildable: Bool, ownable: HouseFlag, pre: StructFlag,
+                            scenario: Int, gdi: Bool, flags: StructFlag,
+                            level: Int = session.scenarioBuildLevel,
+                            allow: Set<String> = session.buildAllow,
+                            deny: Set<String> = session.buildDeny) -> Bool {
+    guard isBuildable, ownable.contains(gdi ? .good : .bad), !deny.contains(name) else { return false }
+    let allowed = allow.contains(name)
+    var level = level
     var scenario = scenario
     switch kind {
-    case .infantry(.e3) where gdi && level < 7: return false        // no bazooka for GDI before #8
-    case .unit(.mlrs) where gdi && level < 9: return false          // MSAM from #9
+    case .infantry(.e3) where gdi && level < 7 && !allowed: return false  // no bazooka for GDI before #8
+    case .unit(.mlrs) where gdi && level < 9 && !allowed: return false    // MSAM from #9
     case .unit(.mlrs) where !gdi: return false
     case .unit(.apc) where !gdi: return false
     case .structure(.temple), .structure(.obelisk): if gdi { return false }
     case .structure(.eye): if !gdi { return false }
     case .structure(.advancedPower) where !gdi && level >= 12: scenario = level  // Nod gets it at #12
     case .structure(.helipad) where !gdi: return false
-    case .structure(.sandbagWall) where gdi && level < 8: return false
+    case .structure(.sandbagWall) where gdi && level < 8 && !allowed: return false
     default: break
     }
     if gdi && level == 2 { level = 1 }  // GDI's second training mission feels like #1
-    return flags.isSuperset(of: pre) && scenario <= level
+    return flags.isSuperset(of: pre) && (allowed || scenario <= level)
+}
+
+/// Something a side can ever build, for the mission editor's list.
+package struct TechTreeEntry {
+    package let name: String
+    package let fullName: String
+    package let category: String   // "Infantry", "Vehicles", "Aircraft", "Buildings"
+}
+
+/// Everything `gdi`'s side builds at some tech level, in the data tables' order.
+package func techTreeCandidates(gdi: Bool) -> [TechTreeEntry] {
+    let side: HouseFlag = gdi ? .good : .bad
+    var out: [TechTreeEntry] = []
+    for d in infantryTypeDataTable.values.sorted(by: { $0.iniName < $1.iniName })
+        where d.isBuildable && d.ownable.contains(side) && techTreeIncludes(d.iniName, gdi: gdi, level: 99) {
+        out.append(TechTreeEntry(name: d.iniName, fullName: d.fullName, category: "Infantry"))
+    }
+    for d in unitTypeDataTable.values.sorted(by: { $0.iniName < $1.iniName })
+        where d.isBuildable && d.ownable.contains(side) && techTreeIncludes(d.iniName, gdi: gdi, level: 99) {
+        out.append(TechTreeEntry(name: d.iniName, fullName: d.fullName, category: "Vehicles"))
+    }
+    for d in aircraftTypeDataTable.values.sorted(by: { $0.iniName < $1.iniName })
+        where d.isBuildable && d.ownable.contains(side) && techTreeIncludes(d.iniName, gdi: gdi, level: 99) {
+        out.append(TechTreeEntry(name: d.iniName, fullName: d.fullName, category: "Aircraft"))
+    }
+    for d in buildingTypeDataTable.values.sorted(by: { $0.iniName < $1.iniName })
+        where d.isBuildable && d.ownable.contains(side) && techTreeIncludes(d.iniName, gdi: gdi, level: 99) {
+        out.append(TechTreeEntry(name: d.iniName, fullName: d.fullName, category: "Buildings"))
+    }
+    return out
+}
+
+/// Whether a mission at tech level `level`, with its own Allow/Deny, puts
+/// `name` in the player's build tree. Prerequisite buildings aren't counted:
+/// the sidebar still waits for them in play. The mission editor's list.
+package func techTreeIncludes(_ name: String, gdi: Bool, level: Int,
+                              allow: Set<String> = [], deny: Set<String> = []) -> Bool {
+    let name = name.uppercased()
+    let all = StructFlag(rawValue: ~0)
+    if let d = infantryTypeDataTable.values.first(where: { $0.iniName.uppercased() == name }) {
+        return playerCanBuild(.infantry(d.type), name: name, isBuildable: d.isBuildable, ownable: d.ownable,
+                              pre: d.prerequisite, scenario: d.scenario, gdi: gdi, flags: all,
+                              level: level, allow: allow, deny: deny)
+    }
+    if let d = unitTypeDataTable.values.first(where: { $0.iniName.uppercased() == name }) {
+        return playerCanBuild(.unit(d.type), name: name, isBuildable: d.isBuildable, ownable: d.ownable,
+                              pre: d.prerequisite, scenario: d.scenario, gdi: gdi, flags: all,
+                              level: level, allow: allow, deny: deny)
+    }
+    if let d = aircraftTypeDataTable.values.first(where: { $0.iniName.uppercased() == name }) {
+        return playerCanBuild(.aircraft(d.type), name: name, isBuildable: d.isBuildable, ownable: d.ownable,
+                              pre: d.prerequisite, scenario: d.scenario, gdi: gdi, flags: all,
+                              level: level, allow: allow, deny: deny)
+    }
+    if let d = buildingTypeDataTable.values.first(where: { $0.iniName.uppercased() == name }),
+       let st = StructType.from(iniName: name) {
+        return playerCanBuild(.structure(st), name: name, isBuildable: d.isBuildable, ownable: d.ownable,
+                              pre: d.prerequisite, scenario: d.scenario, gdi: gdi, flags: all,
+                              level: level, allow: allow, deny: deny)
+    }
+    return false
 }
 
 /// Get available units the player can build
@@ -228,13 +296,13 @@ package func getAvailableUnits() -> [BuildableItem] {
         let name = item.name.uppercased()
         let ok: Bool
         if let d = infantryTypeDataTable.values.first(where: { $0.iniName.uppercased() == name }) {
-            ok = hasBarracks && playerCanBuild(.infantry(d.type), isBuildable: d.isBuildable, ownable: d.ownable,
+            ok = hasBarracks && playerCanBuild(.infantry(d.type), name: name, isBuildable: d.isBuildable, ownable: d.ownable,
                                                pre: d.prerequisite, scenario: d.scenario, gdi: gdi, flags: flags)
         } else if let d = unitTypeDataTable.values.first(where: { $0.iniName.uppercased() == name }) {
-            ok = hasVehicleFactory && playerCanBuild(.unit(d.type), isBuildable: d.isBuildable, ownable: d.ownable,
+            ok = hasVehicleFactory && playerCanBuild(.unit(d.type), name: name, isBuildable: d.isBuildable, ownable: d.ownable,
                                                      pre: d.prerequisite, scenario: d.scenario, gdi: gdi, flags: flags)
         } else if let d = aircraftTypeDataTable.values.first(where: { $0.iniName.uppercased() == name }) {
-            ok = hasHelipad && playerCanBuild(.aircraft(d.type), isBuildable: d.isBuildable, ownable: d.ownable,
+            ok = hasHelipad && playerCanBuild(.aircraft(d.type), name: name, isBuildable: d.isBuildable, ownable: d.ownable,
                                               pre: d.prerequisite, scenario: d.scenario, gdi: gdi, flags: flags)
         } else {
             ok = false
@@ -256,7 +324,7 @@ package func getAvailableStructures() -> [BuildableStructure] {
         let name = item.name.uppercased()
         guard let d = buildingTypeDataTable.values.first(where: { $0.iniName.uppercased() == name }),
               let st = StructType.from(iniName: name) else { return false }
-        return playerCanBuild(.structure(st), isBuildable: d.isBuildable, ownable: d.ownable,
+        return playerCanBuild(.structure(st), name: name, isBuildable: d.isBuildable, ownable: d.ownable,
                               pre: d.prerequisite, scenario: d.scenario, gdi: gdi, flags: flags)
     }
 }

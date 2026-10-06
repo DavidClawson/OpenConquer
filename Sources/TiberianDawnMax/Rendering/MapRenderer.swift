@@ -9,24 +9,7 @@ func loadMapViewerData(_ scenarioName: String = "SCG01EA") {
     renderState.cameraX = 0
     renderState.cameraY = 0
     renderState.zoomLevel = 1.0
-
-    // Clear texture caches since different theaters use different palettes/art
-    for (_, texture) in renderState.objectTextureCache { SDL_DestroyTexture(texture) }
-    renderState.objectTextureCache.removeAll()
-    renderState.objectSHPCache.removeAll()
-    renderState.objectFailedSHPs.removeAll()
-    clearRemasteredTextureCache()
-
-    for (_, texture) in renderState.terrainTextureCache { SDL_DestroyTexture(texture) }
-    renderState.terrainTextureCache.removeAll()
-    renderState.terrainSHPCache.removeAll()
-    renderState.terrainFailedSHPs.removeAll()
-
-    for (_, texture) in renderState.tileTextureCache { SDL_DestroyTexture(texture) }
-    renderState.tileTextureCache.removeAll()
-    renderState.icnCache.removeAll()
-    renderState.mapFailedICNs.removeAll()
-
+    clearMapViewTextures()
     let binName = scenarioName + ".BIN"
     let iniName = scenarioName + ".INI"
 
@@ -50,6 +33,30 @@ func loadMapViewerData(_ scenarioName: String = "SCG01EA") {
     }
 
 }
+
+/// Drops the map view's cached textures, since each theater has its own
+/// palette and art. Call before showing a different scenario.
+func clearMapViewTextures() {
+    // Clear texture caches since different theaters use different palettes/art
+    for (_, texture) in renderState.objectTextureCache { SDL_DestroyTexture(texture) }
+    renderState.objectTextureCache.removeAll()
+    renderState.objectSHPCache.removeAll()
+    renderState.objectFailedSHPs.removeAll()
+    clearRemasteredTextureCache()
+
+    for (_, texture) in renderState.terrainTextureCache { SDL_DestroyTexture(texture) }
+    renderState.terrainTextureCache.removeAll()
+    renderState.terrainSHPCache.removeAll()
+    renderState.terrainFailedSHPs.removeAll()
+
+    for (_, texture) in renderState.tileTextureCache { SDL_DestroyTexture(texture) }
+    renderState.tileTextureCache.removeAll()
+    renderState.icnCache.removeAll()
+}
+
+/// Room the map view leaves on the right for another screen's panel (the
+/// mission editor's); the minimap moves left of it.
+var mapViewRightInset: Int32 = 0
 
 // MARK: - Texture Creation
 
@@ -476,6 +483,19 @@ func renderMapViewer(_ renderer: OpaquePointer?) {
                 SDL_RenderFillRect(renderer, &rect)
             }
         }
+    } else {
+        // No world yet (the map viewer, the mission editor): the scenario's own
+        // tiberium overlays, at a middling density.
+        for overlay in scenario.overlays where overlay.typeName.uppercased().hasPrefix("TI") {
+            let pos = cellToPixel(overlay.cell)
+            let screenX = Int32(pos.px - renderState.cameraX)
+            let screenY = Int32(pos.py - renderState.cameraY)
+            if screenX > vw || screenY > vh || screenX + 24 < 0 || screenY + 24 < 0 { continue }
+            if let info = getObjectTexture(renderer, typeName: overlay.typeName, frame: 6, house: .neutral, theater: theater) {
+                var dstRect = SDL_Rect(x: screenX, y: screenY, w: Int32(info.width), h: Int32(info.height))
+                SDL_RenderCopy(renderer, info.texture, nil, &dstRect)
+            }
+        }
     }
 
     // === Pass 3: Terrain objects (trees, rocks) as SHP sprites ===
@@ -781,10 +801,12 @@ func renderMapViewer(_ renderer: OpaquePointer?) {
     SDL_RenderSetScale(renderer, 1.0, 1.0)
 
     // === Pass 10: Minimap (128x128 overview in bottom-right corner) ===
+    // (Not beside another screen's panel: its view box assumes the full window.)
+    guard mapViewRightInset == 0 else { return }
     let minimapCellSize: Int32 = 2
     let minimapSize: Int32 = 64 * minimapCellSize  // 128x128
     let minimapPad: Int32 = 10
-    let minimapX = renderState.windowWidth - minimapSize - minimapPad
+    let minimapX = renderState.windowWidth - mapViewRightInset - minimapSize - minimapPad
     let minimapY = renderState.windowHeight - minimapSize - minimapPad
 
     // Build quick lookup sets for structures and overlays by cell

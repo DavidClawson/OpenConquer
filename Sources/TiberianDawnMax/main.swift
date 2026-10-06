@@ -486,6 +486,7 @@ guard SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_AUDIO) == 0 else {
 if let code = runSidebarDiagnosticsIfRequested() { exit(code) }
 if let code = runScreenshotIfRequested() { exit(code) }
 if let code = runSetupDiagnosticsIfRequested() { exit(code) }
+if let code = runMissionEditorDiagnosticsIfRequested() { exit(code) }
 
 // Fog-aware ("advanced") wayfinding is now selected via the ruleset — the
 // player picks Classic vs Enhanced on the Options screen. Default is Classic
@@ -579,6 +580,13 @@ else if let i = CommandLine.arguments.firstIndex(of: "--ending") {
         app.currentScreen = ScorePresentationScreen.make(inputs: sampleScoreInputs(gdi: gdi), then: then) ?? makeMainMenu()
     }
 }
+else if let i = CommandLine.arguments.firstIndex(of: "--mission-editor") {
+    // --mission-editor [SCEN|MISSION] opens the window on the mission editor:
+    // a campaign map as a new mission, or one saved in <data>/missions.
+    let arg = i + 1 < CommandLine.arguments.count ? CommandLine.arguments[i + 1].uppercased() : "SCG01EA"
+    app.currentScreen = MissionEditorScreen.openSaved(arg) ?? MissionEditorScreen.openCampaign(arg)
+        ?? MissionEditorScreen.blank(.temperate)
+}
 else if let i = CommandLine.arguments.firstIndex(of: "--play-movie") {
     // Debug: --play-movie NAME [NAME...] plays those movies, then the menu.
     let names = CommandLine.arguments[(i + 1)...].prefix { !$0.hasPrefix("--") }
@@ -610,6 +618,11 @@ while app.running {
             }
         case SDL_KEYDOWN:
             handleKeyDown(event.key.keysym.sym)
+        case SDL_TEXTINPUT:
+            let text = withUnsafeBytes(of: event.text.text) { raw in
+                String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
+            }
+            app.currentScreen.handleTextInput(text)
         case SDL_MOUSEMOTION:
             handleMouseMotion(event)
         case SDL_MOUSEBUTTONDOWN:

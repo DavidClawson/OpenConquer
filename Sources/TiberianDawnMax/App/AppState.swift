@@ -16,6 +16,9 @@ final class AppState {
     var selectedFaction: Faction = .gdi
     var scenarioList: [String] = []
     var scenarioIndex: Int = 0
+    /// The mission editor a play-test came from: leaving the game for the
+    /// main menu goes back to it instead (`makeMainMenu`).
+    var playTestReturn: MenuScreen? = nil
     var soundTest = SoundTestState()
     var spritePlayground = SpritePlaygroundState()
 

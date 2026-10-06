@@ -113,27 +113,41 @@ package struct ScenarioTerrain: Equatable {
 }
 
 package struct ScenarioOverlay: Equatable {
-    package let cell: Int
-    package let typeName: String  // e.g. "TI1", "SBAG"
+    package var cell: Int
+    package var typeName: String  // e.g. "TI1", "SBAG"
+
+    package init(cell: Int, typeName: String) {
+        self.cell = cell
+        self.typeName = typeName
+    }
 }
 
 package struct ScenarioStructure: Equatable {
-    package let house: House
-    package let typeName: String   // e.g. "FACT", "PYLE"
-    package let strength: Int
-    package let cell: Int
-    package let facing: Int
-    package let trigger: String
+    package var house: House
+    package var typeName: String   // e.g. "FACT", "PYLE"
+    package var strength: Int
+    package var cell: Int
+    package var facing: Int
+    package var trigger: String
+
+    package init(house: House, typeName: String, strength: Int, cell: Int, facing: Int, trigger: String) {
+        self.house = house
+        self.typeName = typeName
+        self.strength = strength
+        self.cell = cell
+        self.facing = facing
+        self.trigger = trigger
+    }
 }
 
 package struct ScenarioUnit: Equatable {
-    package let house: House
-    package let typeName: String   // e.g. "MTNK", "JEEP"
-    package let strength: Int
-    package let cell: Int
-    package let facing: Int
-    package let mission: String
-    package let trigger: String
+    package var house: House
+    package var typeName: String   // e.g. "MTNK", "JEEP"
+    package var strength: Int
+    package var cell: Int
+    package var facing: Int
+    package var mission: String
+    package var trigger: String
 
     package init(house: House, typeName: String, strength: Int, cell: Int, facing: Int, mission: String, trigger: String) {
         self.house = house
@@ -147,24 +161,46 @@ package struct ScenarioUnit: Equatable {
 }
 
 package struct ScenarioInfantry: Equatable {
-    package let house: House
-    package let typeName: String   // e.g. "E1", "E3"
-    package let strength: Int
-    package let cell: Int
-    package let subLocation: Int   // 0-4 sub-cell position
-    package let mission: String
-    package let facing: Int
-    package let trigger: String
+    package var house: House
+    package var typeName: String   // e.g. "E1", "E3"
+    package var strength: Int
+    package var cell: Int
+    package var subLocation: Int   // 0-4 sub-cell position
+    package var mission: String
+    package var facing: Int
+    package var trigger: String
+
+    package init(house: House, typeName: String, strength: Int, cell: Int, subLocation: Int,
+                 mission: String, facing: Int, trigger: String) {
+        self.house = house
+        self.typeName = typeName
+        self.strength = strength
+        self.cell = cell
+        self.subLocation = subLocation
+        self.mission = mission
+        self.facing = facing
+        self.trigger = trigger
+    }
 }
 
 package struct ScenarioWaypoint: Equatable {
-    package let id: Int
-    package let cell: Int
+    package var id: Int
+    package var cell: Int
+
+    package init(id: Int, cell: Int) {
+        self.id = id
+        self.cell = cell
+    }
 }
 
 package struct ScenarioCellTrigger: Equatable {
-    package let cell: Int
-    package let triggerName: String
+    package var cell: Int
+    package var triggerName: String
+
+    package init(cell: Int, triggerName: String) {
+        self.cell = cell
+        self.triggerName = triggerName
+    }
 }
 
 package struct ScenarioBaseBuilding: Equatable {
@@ -180,17 +216,42 @@ package struct ScenarioData {
     package let theater: TheaterType
     package let mapBounds: MapBounds?
     package let terrain: [ScenarioTerrain]
-    package let overlays: [ScenarioOverlay]
+    package var overlays: [ScenarioOverlay]
     package var structures: [ScenarioStructure]
     package var units: [ScenarioUnit]
     package var infantry: [ScenarioInfantry]
-    package let waypoints: [ScenarioWaypoint]
+    package var waypoints: [ScenarioWaypoint]
     package var cellTriggers: [ScenarioCellTrigger]
     package var baseBuildings: [ScenarioBaseBuilding]
     package let ini: INIFile  // Keep reference for trigger parsing
     package let credits: Int      // Starting credits from [Basic] section
     package let buildLevel: Int   // Tech level cap from [Basic] section (1-15)
     package let houseEdges: [House: MapEdge]  // Edge= per house section (reinforcement entry)
+    package let playerHouse: House  // See scenarioPlayerHouse
+}
+
+/// The side the player commands. The campaign's names say it (SCG = GDI,
+/// SCB = Nod), as the game has always read them; any other mission, such as
+/// one made in the mission editor, says it with [Basic] Player= (INI.CPP:354,
+/// default GoodGuy).
+package func scenarioPlayerHouse(_ ini: INIFile, name: String) -> House {
+    let upper = name.uppercased()
+    if upper.hasPrefix("SCB") { return .badGuy }
+    if upper.hasPrefix("SCG") { return .goodGuy }
+    let player = House.from(ini.string("Basic", "Player", default: "GoodGuy"))
+    return player == .badGuy ? .badGuy : .goodGuy
+}
+
+/// [Buildables] Allow=TYPE,TYPE / Deny=TYPE,TYPE — a mission's changes to
+/// what its tech level gives the player. The mission editor's own section;
+/// the 1995 game ignores it (it reads only the sections it knows).
+package func parseBuildables(_ ini: INIFile) -> (allow: Set<String>, deny: Set<String>) {
+    func list(_ key: String) -> Set<String> {
+        Set(ini.string("Buildables", key).split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces).uppercased() }
+            .filter { !$0.isEmpty })
+    }
+    return (list("Allow"), list("Deny"))
 }
 
 // MARK: - Cell Coordinate Helpers
@@ -254,7 +315,8 @@ package func parseScenarioData(_ ini: INIFile, name: String) -> ScenarioData {
 
     // Credits: check player house section first ([GoodGuy] or [BadGuy]),
     // then fall back to [Basic]. C&C stores credits as value/100.
-    let playerSection = name.uppercased().hasPrefix("SCB") ? "BadGuy" : "GoodGuy"
+    let playerHouse = scenarioPlayerHouse(ini, name: name)
+    let playerSection = playerHouse.rawValue
     let houseCredits = ini.int(playerSection, "Credits", default: -1)
     let basicCredits = ini.int("Basic", "Credits", default: 0)
     let credits = (houseCredits >= 0 ? houseCredits : basicCredits) * 100
@@ -414,6 +476,7 @@ package func parseScenarioData(_ ini: INIFile, name: String) -> ScenarioData {
         ini: ini,
         credits: credits,
         buildLevel: buildLevel,
-        houseEdges: houseEdges
+        houseEdges: houseEdges,
+        playerHouse: playerHouse
     )
 }

@@ -158,3 +158,22 @@ Then the **editor track** (depends on T1–T4 for the data model):
   optional) and the editor UI track (E2–E6) + per-section Tier-1 writers in the
   EditorScenario document (so the editor can author [TriggersEx]/[Regions], not
   just pass them through).
+- **Editor UI (E2–E6, first cut) done (2026-10-06):** an in-game Mission Editor
+  (Developer Tools → Mission Editor). Map on the left, tabbed side panel: FILE
+  (open a campaign map as a new mission, an empty map per theater, or a saved
+  mission; rename; save), UNITS (place/move/delete objects incl. walls and
+  tiberium; owner, health, facing, orders, Invulnerable/MustSurvive, win/lose
+  when destroyed), SETUP (player side, money and reinforcement edge per side,
+  tech level, per-type build overrides via new `[Buildables]` Allow=/Deny=),
+  GOALS (win/lose presets as classic triggers: All/Bldgs/Units Destr., Time,
+  Player Enters + cell triggers, Destroyed on marked objects) and REINF.
+  (Time/spot/base-gone reinforcements, team members, transport, repeat).
+  Undo/redo, play-test with return to the editor. Saves to
+  `<data>/missions/`. Verified by `--test-mission-editor` (drives the panel by
+  button labels, saves, reopens, plays the mission headlessly: credits, build
+  list, reinforcement arrival at 0:30, timed win at 1:00, play-test return).
+  Determinism baselines and 28/28 `--editor-roundtrip` unchanged.
+  Not yet: terrain painting (the map's BIN is kept as loaded), waypoints,
+  [TriggersEx]/[Regions] authoring (passed through), briefing text, and a way
+  to play saved missions outside the editor.
+

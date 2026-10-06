@@ -105,6 +105,11 @@ package class GameSession {
     // MARK: - Game World
     package var world: GameWorld? = nil
     package var scenarioBuildLevel: Int = 99  // Tech level cap (from scenario INI)
+    /// A mission's own changes to what the tech level offers the player
+    /// ([Buildables] Allow=/Deny=, written by the mission editor). Empty in
+    /// the campaign, where the tech level alone decides. Reset per world.
+    package var buildAllow: Set<String> = []
+    package var buildDeny: Set<String> = []
 
     // Human-player fog-aware pathfinding is now a ruleset toggle
     // (`session.rules.fogAwarePathfinding`, off in Classic) — see GameRules.swift.

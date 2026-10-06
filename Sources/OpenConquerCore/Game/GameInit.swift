@@ -76,7 +76,9 @@ package func resolveStrength(typeName: String, kind: ObjectKind, scenarioStrengt
 
 // MARK: - Game World Initialization
 
-package func initGameWorld(scenario: ScenarioData, scenarioName: String) {
+/// `map` is the mission's terrain when it isn't `<scenarioName>.BIN` in the
+/// game's archives — a mission from the editor carries its own.
+package func initGameWorld(scenario: ScenarioData, scenarioName: String, map: [MapCell]? = nil) {
     let world = GameWorld()
     world.theater = scenario.theater
     world.mapBounds = scenario.mapBounds
@@ -112,6 +114,9 @@ package func initGameWorld(scenario: ScenarioData, scenarioName: String) {
     session.production.patrolModeWaypoints.removeAll()
     session.sidebarCredits = scenario.credits
     session.production.displayedCredits = scenario.credits
+    let buildables = parseBuildables(scenario.ini)
+    session.buildAllow = buildables.allow
+    session.buildDeny = buildables.deny
 
     // Tier-1 mission flags: [ObjectFlags] section maps cell -> flag set.
     // Classic scenarios have no such section, so this is empty and inert there.
@@ -226,12 +231,7 @@ package func initGameWorld(scenario: ScenarioData, scenarioName: String) {
         world.addObject(obj)
     }
 
-    // Set player house based on scenario name (SCG = GDI, SCB = Nod)
-    if scenarioName.uppercased().hasPrefix("SCB") {
-        world.playerHouse = .badGuy
-    } else {
-        world.playerHouse = .goodGuy
-    }
+    world.playerHouse = scenario.playerHouse
 
     session.world = world
     print("GameInit: Created \(world.objects.count) objects from \(scenarioName)")
@@ -240,7 +240,9 @@ package func initGameWorld(scenario: ScenarioData, scenarioName: String) {
 
     // Load map cell data (BIN file) if not already loaded
     let binName = scenarioName + ".BIN"
-    if let cells = loadMap(binName, from: mixManager) {
+    if let map, map.count == 4096 {
+        mapCells = map
+    } else if let cells = loadMap(binName, from: mixManager) {
         mapCells = cells
         print("GameInit: Loaded \(binName) (\(cells.count) cells)")
     } else if mapCells.count < 4096 {
