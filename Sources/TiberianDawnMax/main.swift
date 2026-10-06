@@ -544,6 +544,7 @@ do {
 // Initialize audio system
 gameAudio.initialize()
 audioManager = gameAudio  // the sim plays sounds through this
+NativeMenus.shared.install(window: window)
 subscribeScreenEffects()
 saveView = (
     current: { SavedView(cameraX: renderState.gameCameraX, cameraY: renderState.gameCameraY,

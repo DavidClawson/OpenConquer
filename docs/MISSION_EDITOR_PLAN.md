@@ -173,7 +173,10 @@ Then the **editor track** (depends on T1–T4 for the data model):
   button labels, saves, reopens, plays the mission headlessly: credits, build
   list, reinforcement arrival at 0:30, timed win at 1:00, play-test return).
   Determinism baselines and 28/28 `--editor-roundtrip` unchanged.
-  Not yet: terrain painting (the map's BIN is kept as loaded), waypoints,
+  Since then: a MAP tab (ground templates stamped from the theater's ICNs,
+  trees and rocks, play-area bounds), a toolbar, undo covering the map, and a
+  menu bar (Sound/View/Editor).
+  Not yet: waypoints,
   [TriggersEx]/[Regions] authoring (passed through), briefing text, and a way
   to play saved missions outside the editor.
 

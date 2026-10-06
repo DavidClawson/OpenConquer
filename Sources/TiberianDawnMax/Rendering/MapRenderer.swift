@@ -499,10 +499,11 @@ func renderMapViewer(_ renderer: OpaquePointer?) {
     }
 
     // === Pass 3: Terrain objects (trees, rocks) as SHP sprites ===
+    // Frame 0, as in the game: a tree's later frames are it burning down.
     for terrainObj in scenario.terrain {
         let pos = cellToPixel(terrainObj.cell)
 
-        if let info = getTerrainTexture(renderer, typeName: terrainObj.typeName, theater: theater, animFrame: renderState.animationFrame) {
+        if let info = getTerrainTexture(renderer, typeName: terrainObj.typeName, theater: theater, animFrame: 0) {
             let screenX = Int32(pos.px - renderState.cameraX)
             let screenY = Int32(pos.py + 24 - info.height - renderState.cameraY)
 

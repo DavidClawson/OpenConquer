@@ -143,6 +143,10 @@ class AudioManager: SimAudio {
     var isInitialized = false
     var masterVolume: Float = 0.8
     var sfxVolume: Float = 1.0
+    /// The Sound menu's switches. Muted, the mix still runs (silently), so
+    /// music and movies keep their place.
+    var isMuted = false
+    var effectsMuted = false
     var musicVolume: Float = 0.6  // was 0.3 — with master 0.8 that was only ~0.24 (far too quiet for the remastered masters)
 
     // Sound library (set after AssetManager is initialized)
@@ -291,7 +295,7 @@ class AudioManager: SimAudio {
 
     /// Play a sound effect at a world position (distance attenuation + panning)
     func playSoundEffect(_ voc: VocType, worldX: Double? = nil, worldY: Double? = nil) {
-        guard isInitialized && voc != .none else { return }
+        guard isInitialized && voc != .none && !effectsMuted else { return }
 
         let name = voc.filename
         guard !name.isEmpty else { return }
@@ -331,7 +335,7 @@ class AudioManager: SimAudio {
     /// if the sample isn't available.
     @discardableResult
     func playSample(_ name: String, volume: Int = 255) -> Int {
-        guard isInitialized, loadSound(name),
+        guard isInitialized, !effectsMuted, loadSound(name),
               let samples = soundCache[name], let rate = soundSampleRates[name] else { return 0 }
         if activeSounds.count >= maxActiveSounds { activeSounds.removeFirst() }
         nextSampleHandle += 1
@@ -356,7 +360,7 @@ class AudioManager: SimAudio {
 
     /// Play EVA speech (queued, one at a time)
     func speak(_ vox: VoxType) {
-        guard isInitialized && vox != .none else { return }
+        guard isInitialized && vox != .none && !effectsMuted else { return }
 
         let name = vox.filename
         guard !name.isEmpty else { return }
@@ -648,7 +652,7 @@ class AudioManager: SimAudio {
         // Convert to Int16 interleaved stereo and queue
         var output = [Int16](repeating: 0, count: stereoSampleCount)
         for i in 0..<stereoSampleCount {
-            let clamped = max(-32767.0, min(32767.0, mixBuffer[i]))
+            let clamped = isMuted ? 0 : max(-32767.0, min(32767.0, mixBuffer[i]))
             output[i] = Int16(clamped)
         }
 

@@ -53,8 +53,10 @@ swift build            # or:  swift run
     Collection (`Headless/SetupDiagnostics.swift`).
 - **Mission editor** (Developer Tools → Mission Editor, or `--mission-editor [SCEN|NAME]`):
   `UI/MissionEditorScreen.swift` (document, objects, map input), `UI/MissionEditorPanel.swift`
-  (the FILE/UNITS/SETUP/GOALS/REINF. tabs) and `UI/PanelPen.swift` (immediate-mode panel
-  widgets; each control registers its label, rect and action, so a test can click by label).
+  (the toolbar and the FILE/UNITS/SETUP/GOALS/REINF. tabs), `UI/MissionEditorMap.swift` (the
+  MAP tab: stamps BIN templates skipping the ICN's empty icons, trees/rocks as [TERRAIN],
+  the [Map] play area) and `UI/PanelPen.swift` (immediate-mode panel widgets; each control
+  registers its label, rect and action, so a test can click by label).
   - **Model:** Core's `EditorScenario` + `MissionState` (`Scenario/EditorMission.swift`):
     player, per-house credits and edge, tech level, [Buildables] Allow/Deny, triggers,
     team types and [ObjectFlags], kept as INI strings and written back only when changed,
@@ -66,6 +68,10 @@ swift build            # or:  swift run
     campaign's prefix decides the side). Play-test sets `app.playTestReturn`, which
     `makeMainMenu()` hands back once, so leaving the game returns to the editor.
   - **Testing:** `--test-mission-editor OUTDIR`.
+- **Menu bar** (`App/NativeMenus.swift`): Sound (mute all, music, effects and voices,
+  next track; remembered in user defaults), View (full screen) and Editor menus added to
+  SDL's. A menu shortcut is taken by AppKit before SDL sees the key, so Editor items are
+  enabled only while the editor is up; otherwise ⌘S and the rest reach the game.
 - **`tools/make-app.sh`** vendors the SDL dylibs into `Contents/Frameworks`,
   rewrites their load paths to `@rpath`, ad-hoc signs (required on Apple Silicon
   after `install_name_tool` edits), and smoke-tests the bundle with

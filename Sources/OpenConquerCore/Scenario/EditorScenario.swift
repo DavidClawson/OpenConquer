@@ -32,6 +32,8 @@ package final class EditorScenario {
     package var mission: MissionState
     private let loaded: MissionState
     private let loadedWaypoints: [ScenarioWaypoint]
+    private let loadedTerrain: [ScenarioTerrain]
+    private let loadedBounds: MapBounds?
 
     package init(name: String, data: ScenarioData) {
         self.name = name
@@ -40,6 +42,8 @@ package final class EditorScenario {
         mission = state
         loaded = state
         loadedWaypoints = data.waypoints
+        loadedTerrain = data.terrain
+        loadedBounds = data.mapBounds
     }
 
     /// Build the INIFile to save: a copy of the source INI with the editable
@@ -58,7 +62,17 @@ package final class EditorScenario {
             ini.setEntries("WAYPOINTS", data.waypoints.map { (key: String($0.id), value: String($0.cell)) },
                            display: "Waypoints")
         }
-        mission.write(into: &ini, changedFrom: loaded)
+        if data.terrain != loadedTerrain {
+            ini.setEntries("TERRAIN", data.terrain.map { (key: String($0.cell), value: "\($0.typeName),\($0.trigger)") },
+                           display: "TERRAIN")
+        }
+        if data.mapBounds != loadedBounds, let b = data.mapBounds {
+            ini.setValue("Map", "X", String(b.x))
+            ini.setValue("Map", "Y", String(b.y))
+            ini.setValue("Map", "Width", String(b.width))
+            ini.setValue("Map", "Height", String(b.height))
+        }
+                mission.write(into: &ini, changedFrom: loaded)
         // Outside the campaign's SCG/SCB names, Player= is what says the side.
         if !name.uppercased().hasPrefix("SC") {
             ini.setValue("Basic", "Player", mission.player.rawValue)

@@ -123,6 +123,35 @@ final class PanelPen {
         }
     }
 
+    /// Picture tiles in a grid, each with a caption: `draw` paints the picture
+    /// into the rect it's given.
+    func thumbnails(_ items: [(String, Bool, (SDL_Rect) -> Void, () -> Void)], columns: Int, height: Int32) {
+        let gap: Int32 = 4
+        let bw = (w - gap * Int32(columns - 1)) / Int32(columns)
+        for (i, item) in items.enumerated() {
+            let col = Int32(i % columns)
+            let top = y + Int32(i / columns) * (height + gap)
+            let rect = SDL_Rect(x: x + col * (bw + gap), y: top, w: bw, h: height)
+            guard visible(top, height) else { continue }
+            var rr = rect
+            let over = input.mouseX >= rect.x && input.mouseX < rect.x + bw && input.mouseY >= top && input.mouseY < top + height
+            SDL_SetRenderDrawColor(r, 0, item.1 ? 60 : 0, 0, 255)
+            SDL_RenderFillRect(r, &rr)
+            item.2(SDL_Rect(x: rect.x, y: rect.y, w: rect.w, h: rect.h - 10))
+            let border = item.1 ? Color.white : (over ? Color.brightGreen : Color.darkGreen)
+            SDL_SetRenderDrawColor(r, border.r, border.g, border.b, 255)
+            SDL_RenderDrawRect(r, &rr)
+            if item.1 {
+                var inner = SDL_Rect(x: rect.x + 1, y: rect.y + 1, w: rect.w - 2, h: rect.h - 2)
+                SDL_RenderDrawRect(r, &inner)
+            }
+            drawText(r, item.0, centerX: rect.x + bw / 2, centerY: top + height - 7, color: item.1 ? .white : .green, scale: 1)
+            if top >= clip.top { hit(rect, item.0.uppercased(), item.3) }
+        }
+        let rows = Int32((items.count + columns - 1) / columns)
+        y += rows * (height + gap)
+    }
+
     /// LABEL ........ [-] VALUE [+]
     func stepper(_ label: String, _ value: String, _ dec: @escaping () -> Void, _ inc: @escaping () -> Void) {
         let bh = Self.smallButtonH

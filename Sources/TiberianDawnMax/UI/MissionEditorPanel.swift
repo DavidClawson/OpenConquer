@@ -9,21 +9,15 @@ extension MissionEditorScreen {
     // MARK: Panel
 
     func drawPanel(_ r: OpaquePointer?) {
-        hits.removeAll()
         let x = panelX, w = panelWidth, h = renderState.windowHeight
-        fill(r, SDL_Rect(x: x, y: 0, w: w, h: h), Color(r: 8, g: 12, b: 8, a: 255), alpha: 245)
+        fill(r, SDL_Rect(x: x, y: toolbarHeight, w: w, h: h - toolbarHeight), Color(r: 8, g: 12, b: 8, a: 255), alpha: 245)
         SDL_SetRenderDrawColor(r, Color.darkGreen.r, Color.darkGreen.g, Color.darkGreen.b, 255)
-        SDL_RenderDrawLine(r, x, 0, x, h)
+        SDL_RenderDrawLine(r, x, toolbarHeight, x, h)
 
-        // Header: title, the always-there buttons, the tabs.
-        let pen = PanelPen(renderer: r, x: x + 12, w: w - 24, y: 10, clip: (0, h)) { [unowned self] rect, label, action in
+        // The tabs.
+        let pen = PanelPen(renderer: r, x: x + 12, w: w - 24, y: toolbarHeight + 12, clip: (0, h)) { [unowned self] rect, label, action in
             hits.append((rect, label, action))
         }
-        pen.text("MISSION EDITOR", .amber)
-        pen.row([("SAVE", false, { [unowned self] in save() }),
-                 ("PLAY-TEST", false, { [unowned self] in playTest() }),
-                 ("UNDO", false, { [unowned self] in undo() }),
-                 ("EXIT", false, { [unowned self] in exit() })])
         pen.row(Tab.allCases.map { t in (t.rawValue, tab == t, { [unowned self] in switchTab(t) }) }, small: true)
 
         // Content, scrolled and clipped below the header.
@@ -36,6 +30,7 @@ extension MissionEditorScreen {
         }
         switch tab {
         case .file: fileTab(content)
+        case .map: mapTab(content)
         case .units: unitsTab(content)
         case .setup: setupTab(content)
         case .goals: goalsTab(content)
@@ -47,12 +42,56 @@ extension MissionEditorScreen {
         if offset > maxScroll { scroll[tab] = maxScroll }
     }
 
+    /// Across the top: the mission's name, then the commands used all the time.
+    func drawToolbar(_ r: OpaquePointer?) {
+        let w = renderState.windowWidth
+        fill(r, SDL_Rect(x: 0, y: 0, w: w, h: toolbarHeight), Color(r: 8, g: 12, b: 8, a: 255), alpha: 250)
+        SDL_SetRenderDrawColor(r, Color.darkGreen.r, Color.darkGreen.g, Color.darkGreen.b, 255)
+        SDL_RenderDrawLine(r, 0, toolbarHeight - 1, w, toolbarHeight - 1)
+        let pen = PanelPen(renderer: r, x: 0, w: w, y: 0, clip: (0, toolbarHeight)) { [unowned self] rect, label, action in
+            hits.append((rect, label, action))
+        }
+        let title = "\(doc.name)\(dirty ? "*" : "")"
+        drawTextLeft(r, title, x: 10, y: 11, color: .amber, scale: 2)
+        var x: Int32 = 10 + Int32(max(title.count, 9)) * 12 + 14
+        let y: Int32 = 5, h: Int32 = 26
+        func button(_ label: String, on: Bool = false, enabled: Bool = true, gapAfter: Int32 = 4, _ action: @escaping () -> Void) {
+            let bw = Int32(label.count) * 6 + 18
+            guard x + bw < w - 4 else { return }
+            pen.button(label, x: x, y: y, w: bw, h: h, selected: on, small: true, action: enabled ? action : {})
+            x += bw + gapAfter
+        }
+        button("SAVE") { [unowned self] in save() }
+        button("PLAY-TEST", gapAfter: 16) { [unowned self] in playTest() }
+        button("UNDO", enabled: !undoStack.isEmpty) { [unowned self] in undo() }
+        button("REDO", enabled: !redoStack.isEmpty, gapAfter: 16) { [unowned self] in redo() }
+        button("GRID", on: renderState.showGrid) { renderState.showGrid.toggle() }
+        button("ZOOM -") { [unowned self] in zoom(by: -0.25) }
+        button("ZOOM +", gapAfter: 16) { [unowned self] in zoom(by: 0.25) }
+        button(gameAudio.isMuted ? "SOUND OFF" : "SOUND ON", on: gameAudio.isMuted, gapAfter: 16) {
+            NativeMenus.shared.toggleMuteAll(nil)
+        }
+        button("EXIT") { [unowned self] in exit() }
+    }
+
+    /// Zooms about the middle of the map view.
+    func zoom(by step: Double) {
+        let old = renderState.zoomLevel
+        let new = max(0.5, min(3.0, old + step))
+        let cx = Double(panelX) / 2, cy = Double(renderState.windowHeight) / 2
+        renderState.cameraX += Int(cx * (1 / old - 1 / new))
+        renderState.cameraY += Int(cy * (1 / old - 1 / new))
+        renderState.zoomLevel = new
+        clampCamera()
+    }
+
     func switchTab(_ t: Tab) {
         tab = t
         renaming = false
         if t == .file { savedMissions = customMissionNames() }
         if t != .goals && t != .reinforce { markingSpotsFor = nil }
         if t != .units { placeType = nil }
+        if t != .units { selection = nil }
     }
 
     func exit() {

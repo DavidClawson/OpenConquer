@@ -33,17 +33,41 @@ func customMissionNames() -> [String] {
 }
 
 final class MissionEditorScreen: MenuScreen {
-    enum Tab: String, CaseIterable { case file = "FILE", units = "UNITS", setup = "SETUP", goals = "GOALS", reinforce = "REINF." }
+    enum Tab: String, CaseIterable {
+        case file = "FILE", map = "MAP", units = "UNITS", setup = "SETUP", goals = "GOALS", reinforce = "REINF."
+    }
+    /// What a click on the map does on the MAP tab.
+    enum MapTool: String, CaseIterable { case ground = "GROUND", trees = "TREES, ROCKS", erase = "ERASE" }
+    /// One undo step: everything the editor changes.
+    struct Snapshot {
+        let data: ScenarioData
+        let mission: MissionState
+        let map: [MapCell]
+    }
     enum Category: String, CaseIterable { case infantry = "INFANTRY", vehicles = "VEHICLES", buildings = "BUILDINGS", other = "WALLS ETC" }
     enum Selection: Equatable { case structure(Int), unit(Int), infantry(Int), overlay(Int) }
 
     private(set) var doc: EditorScenario
-    private(set) var map: [MapCell]
-    var undoStack: [(ScenarioData, MissionState)] = []
-    var redoStack: [(ScenarioData, MissionState)] = []
+    var map: [MapCell]
+    var undoStack: [Snapshot] = []
+    var redoStack: [Snapshot] = []
     private(set) var dirty = false
 
     var tab: Tab = .units
+    var mapTool: MapTool = .ground
+    var tileGroup: TileGroup = .water
+    /// The ground piece (a template number) the next click stamps.
+    var brushTemplate: Int?
+    /// The tree or rock the next click places.
+    var brushTerrain: String?
+    /// The cells the last stamp of a drag covered, so a drag doesn't restamp
+    /// over its own piece.
+    var lastStamp: Set<Int> = []
+    /// True between a map press and release that's painting: the whole
+    /// stroke is one undo step.
+    var painting = false
+    /// Tile sets loaded for this theater (to know which of a piece's cells exist).
+    var icnFiles: [String: ICNFile] = [:]
     var category: Category = .infantry
     var placeHouse: House = .goodGuy
     /// The type the next map click places; nil selects instead.
@@ -170,32 +194,42 @@ final class MissionEditorScreen: MenuScreen {
 
     // MARK: Editing
 
-    /// Runs a change with undo.
-    func edit(_ change: () -> Void) {
-        undoStack.append((doc.data, doc.mission))
-        if undoStack.count > 200 { undoStack.removeFirst() }
-        redoStack.removeAll()
+    var snapshot: Snapshot { Snapshot(data: doc.data, mission: doc.mission, map: map) }
+
+    func restore(_ s: Snapshot) {
+        doc.data = s.data
+        doc.mission = s.mission
+        map = s.map
+        selection = nil
+        scenarioData = doc.data
+        mapCells = map
+        dirty = true
+    }
+
+    /// Runs a change with undo. `continuing` folds it into the last step
+    /// (the rest of a paint stroke).
+    func edit(continuing: Bool = false, _ change: () -> Void) {
+        if !continuing {
+            undoStack.append(snapshot)
+            if undoStack.count > 200 { undoStack.removeFirst() }
+            redoStack.removeAll()
+        }
         change()
         dirty = true
         scenarioData = doc.data
+        mapCells = map
     }
 
     func undo() {
         guard let last = undoStack.popLast() else { return }
-        redoStack.append((doc.data, doc.mission))
-        (doc.data, doc.mission) = last
-        selection = nil
-        scenarioData = doc.data
-        dirty = true
+        redoStack.append(snapshot)
+        restore(last)
     }
 
     func redo() {
         guard let next = redoStack.popLast() else { return }
-        undoStack.append((doc.data, doc.mission))
-        (doc.data, doc.mission) = next
-        selection = nil
-        scenarioData = doc.data
-        dirty = true
+        undoStack.append(snapshot)
+        restore(next)
     }
 
     func say(_ text: String) {
@@ -559,7 +593,9 @@ final class MissionEditorScreen: MenuScreen {
 
     var panelWidth: Int32 { renderState.windowWidth >= 1100 ? 420 : 360 }
     var panelX: Int32 { renderState.windowWidth - panelWidth }
-    let headerHeight: Int32 = 96
+    /// The toolbar across the top, and where the panel's scrolling content starts.
+    let toolbarHeight: Int32 = 36
+    let headerHeight: Int32 = 70
 
     // MARK: Render
 
@@ -578,8 +614,10 @@ final class MissionEditorScreen: MenuScreen {
         renderState.showInfoPanel = false
         renderMapViewer(renderer)
         mapViewRightInset = 0
+        hits.removeAll()
         drawMapOverlays(renderer)
         drawPanel(renderer)
+        drawToolbar(renderer)
         drawStatusBar(renderer)
     }
 
@@ -625,6 +663,10 @@ final class MissionEditorScreen: MenuScreen {
         var clip = SDL_Rect(x: 0, y: 0, w: panelX, h: renderState.windowHeight)
         SDL_RenderSetClipRect(r, &clip)
         defer { SDL_RenderSetClipRect(r, nil) }
+        if tab == .map {
+            drawMapToolOverlays(r)
+            return
+        }
 
         // Marked spots: the goal or reinforcement being edited bright, the
         // rest dim.
@@ -662,11 +704,10 @@ final class MissionEditorScreen: MenuScreen {
 
     func drawStatusBar(_ r: OpaquePointer?) {
         let w = panelX
-        fill(r, SDL_Rect(x: 0, y: 0, w: w, h: 22), .black, alpha: 170)
-        let title = "\(doc.name)\(dirty ? "*" : "")  -  \(doc.data.theater.rawValue)"
-        drawTextLeft(r, title, x: 8, y: 4, color: .amber, scale: 2)
         var hint: String
-        if markingSpotsFor != nil {
+        if tab == .map {
+            hint = mapHint
+        } else if markingSpotsFor != nil {
             hint = "CLICK CELLS TO MARK OR UNMARK. RIGHT CLICK WHEN DONE"
         } else if let t = placeType {
             hint = "CLICK TO PLACE \(displayName(t).uppercased()). RIGHT CLICK TO STOP"
@@ -685,7 +726,7 @@ final class MissionEditorScreen: MenuScreen {
     func subUnderMouse() -> Int { sub(atX: input.mouseX, y: input.mouseY) }
 
     func cell(atX x: Int32, y: Int32) -> Int? {
-        guard x >= 0, x < panelX, y >= 0, y < renderState.windowHeight else { return nil }
+        guard x >= 0, x < panelX, y >= toolbarHeight, y < renderState.windowHeight else { return nil }
         let wx = renderState.cameraX + Int(Double(x) / renderState.zoomLevel)
         let wy = renderState.cameraY + Int(Double(y) / renderState.zoomLevel)
         guard wx >= 0, wy >= 0, wx < 64 * 24, wy < 64 * 24 else { return nil }
@@ -701,7 +742,7 @@ final class MissionEditorScreen: MenuScreen {
     }
 
     func handleMouseDown(_ x: Int32, _ y: Int32, button: UInt8) {
-        if x >= panelX {
+        if x >= panelX || y < toolbarHeight {
             guard button == UInt8(SDL_BUTTON_LEFT) else { return }
             renaming = renaming && y < headerHeight + 60 && tab == .file
             for hit in hits.reversed() where SDL_PointInRect([SDL_Point(x: x, y: y)], [hit.rect]) == SDL_TRUE {
@@ -711,6 +752,10 @@ final class MissionEditorScreen: MenuScreen {
             return
         }
         renaming = false
+        if tab == .map && button == UInt8(SDL_BUTTON_LEFT) {
+            if let cell = cell(atX: x, y: y) { startPainting(at: cell) }
+            return
+        }
         if button == UInt8(SDL_BUTTON_RIGHT) {
             if markingSpotsFor != nil || placeType != nil {
                 markingSpotsFor = nil
@@ -740,6 +785,7 @@ final class MissionEditorScreen: MenuScreen {
 
     func handleMouseUp(_ x: Int32, _ y: Int32, button: UInt8) {
         panning = false
+        painting = false
         guard let from = dragFrom else { return }
         dragFrom = nil
         guard let s = selection, let cell = cell(atX: x, y: y) else { return }
@@ -769,6 +815,7 @@ final class MissionEditorScreen: MenuScreen {
             renderState.cameraY -= Int(Double(yrel) / renderState.zoomLevel)
             clampCamera()
         }
+        if painting, let cell = cell(atX: x, y: y) { paint(at: cell) }
         if dragFrom != nil {
             dragCell = cell(atX: x, y: y)
             if abs(xrel) + abs(yrel) > 0 { dragMoved = true }
@@ -776,7 +823,7 @@ final class MissionEditorScreen: MenuScreen {
     }
 
     func handleMouseWheel(_ dy: Int32, atX: Int32, atY: Int32) {
-        if atX >= panelX {
+        if atX >= panelX || atY < toolbarHeight {
             let s = (scroll[tab] ?? 0) - dy * 40
             scroll[tab] = max(0, min(max(0, contentHeight - (renderState.windowHeight - headerHeight)), s))
             return

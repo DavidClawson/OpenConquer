@@ -108,8 +108,15 @@ package struct MapBounds: Equatable {
 }
 
 package struct ScenarioTerrain: Equatable {
-    package let cell: Int
-    package let typeName: String  // e.g. "T08", "TC01"
+    package var cell: Int
+    package var typeName: String  // e.g. "T08", "TC01"
+    package var trigger: String   // the [TERRAIN] value's second field, usually "None"
+
+    package init(cell: Int, typeName: String, trigger: String = "None") {
+        self.cell = cell
+        self.typeName = typeName
+        self.trigger = trigger
+    }
 }
 
 package struct ScenarioOverlay: Equatable {
@@ -214,8 +221,8 @@ package struct ScenarioData {
     // `var` on the entity lists so the editor (EditorScenario) can place, move,
     // and delete objects. Readers (GameInit, renderers) are unaffected.
     package let theater: TheaterType
-    package let mapBounds: MapBounds?
-    package let terrain: [ScenarioTerrain]
+    package var mapBounds: MapBounds?
+    package var terrain: [ScenarioTerrain]
     package var overlays: [ScenarioOverlay]
     package var structures: [ScenarioStructure]
     package var units: [ScenarioUnit]
@@ -338,9 +345,9 @@ package func parseScenarioData(_ ini: INIFile, name: String) -> ScenarioData {
     var terrain: [ScenarioTerrain] = []
     for entry in ini.entries("TERRAIN") {
         if let cell = Int(entry.key) {
-            // Strip trigger name after comma (e.g. "T08,NONE" -> "T08")
-            let typeName = entry.value.components(separatedBy: ",").first ?? entry.value
-            terrain.append(ScenarioTerrain(cell: cell, typeName: typeName.trimmingCharacters(in: .whitespaces)))
+            // "T08,None": the type, then a trigger name
+            let parts = entry.value.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            terrain.append(ScenarioTerrain(cell: cell, typeName: parts[0], trigger: parts.count > 1 ? parts[1] : "None"))
         }
     }
 

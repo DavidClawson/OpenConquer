@@ -207,6 +207,39 @@ func runMissionEditorDiagnosticsIfRequested() -> Int32? {
     check(rfNow?.data == 5, "arrives at 0:30 (\(rfNow.map { EditorTrigger.clock(tenths: $0.data) } ?? "-"))")
     snapshot(editor, "editor-reinforcements.png")
 
+    // The map: paint a water piece, place a tree, erase it, shrink the play area.
+    click(editor, "MAP")
+    click(editor, "WATER")
+    click(editor, "W2")
+    let waterCell = (b.y + 2) * 64 + b.x + 2
+    clickMap(editor, waterCell)
+    let w2 = templateTable.firstIndex { $0.icnName == "W2" }!
+    check([waterCell, waterCell + 1, waterCell + 64, waterCell + 65].allSatisfy { editor.map[$0].templateType == UInt8(w2) },
+          "stamped a 2x2 water piece")
+    check(editor.map[waterCell + 65].iconIndex == 3, "with its four icons in order")
+    click(editor, "CLIFFS")
+    snapshot(editor, "editor-ground.png")
+    click(editor, "WATER")
+    editor.undo()
+    check(editor.map[waterCell].templateType != UInt8(w2), "undo takes the paint stroke back")
+    editor.redo()
+    click(editor, "TREES")
+    click(editor, "T01")
+    let treeCell = (b.y + 5) * 64 + b.x + 6
+    let terrainBefore = editor.doc.data.terrain.count
+    clickMap(editor, treeCell)
+    check(editor.doc.data.terrain.count == terrainBefore + 1 && editor.doc.data.terrain.last?.typeName == "T01", "placed a tree")
+    snapshot(editor, "editor-map.png")
+    click(editor, "ERASE")
+    clickMap(editor, treeCell)
+    check(editor.doc.data.terrain.count == terrainBefore, "erased it")
+    click(editor, "WIDTH -")
+    click(editor, "HEIGHT -")
+    check(editor.doc.data.mapBounds?.width == b.width - 1 && editor.doc.data.mapBounds?.height == b.height - 1,
+          "play area one cell smaller each way")
+    click(editor, "TREES")
+    clickMap(editor, treeCell)  // T01 is still the brush: keep one for the save
+
     // Save, reopen, compare.
     click(editor, "FILE")
     snapshot(editor, "editor-file.png")
@@ -222,7 +255,10 @@ func runMissionEditorDiagnosticsIfRequested() -> Int32? {
     check(reopened.doc.data.infantry == editor.doc.data.infantry, "infantry survive the save")
     check(reopened.doc.data.structures == editor.doc.data.structures, "buildings survive the save")
     check(reopened.doc.mission == editor.doc.mission, "the mission's rules survive the save")
-    check(reopened.map.map(\.templateType) == editor.map.map(\.templateType), "the map survives the save")
+    check(reopened.map.map(\.templateType) == editor.map.map(\.templateType)
+          && reopened.map.map(\.iconIndex) == editor.map.map(\.iconIndex), "the ground survives the save")
+    check(reopened.doc.data.terrain == editor.doc.data.terrain, "trees and rocks survive the save")
+    check(reopened.doc.data.mapBounds == editor.doc.data.mapBounds, "the play area survives the save")
 
     // Play it headlessly.
     print("playing \(name)")
