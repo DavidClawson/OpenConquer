@@ -54,6 +54,7 @@ final class NativeMenus: NSObject, NSMenuItemValidation {
             item("Redo", #selector(editorRedo(_:)), "z", [.command, .shift]),
             .separator(),
             item("Show Grid", #selector(editorGrid(_:)), "g"),
+            item("Show Blocked Cells", #selector(editorBlocked(_:)), "b"),
             item("Zoom In", #selector(editorZoomIn(_:)), "="),
             item("Zoom Out", #selector(editorZoomOut(_:)), "-"),
             .separator(),
@@ -102,6 +103,9 @@ final class NativeMenus: NSObject, NSMenuItemValidation {
             return editor == nil && !app.isPlaying && assetManager.mixManager.totalEntries > 0
         case #selector(editorGrid(_:)):
             item.state = renderState.showGrid ? .on : .off
+            return editor != nil
+        case #selector(editorBlocked(_:)):
+            item.state = editor?.showBlocked == true ? .on : .off
             return editor != nil
         case #selector(editorUndo(_:)):
             return editor.map { !$0.undoStack.isEmpty } ?? false
@@ -158,6 +162,7 @@ final class NativeMenus: NSObject, NSMenuItemValidation {
     @objc func editorUndo(_ sender: Any?) { editor?.undo() }
     @objc func editorRedo(_ sender: Any?) { editor?.redo() }
     @objc func editorGrid(_ sender: Any?) { renderState.showGrid.toggle() }
+    @objc func editorBlocked(_ sender: Any?) { editor?.showBlocked.toggle() }
     @objc func editorZoomIn(_ sender: Any?) { editor?.zoom(by: 0.25) }
     @objc func editorZoomOut(_ sender: Any?) { editor?.zoom(by: -0.25) }
     @objc func editorExit(_ sender: Any?) { editor?.exit() }

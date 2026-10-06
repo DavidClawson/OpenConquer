@@ -226,3 +226,9 @@ If you fix a 🟡 or ⬜ row, move it up **and add the evidence** — a `--test-
 entry, or a determinism baseline it now pins. A row only reaches ✅ when something
 fails if it regresses. If you find a gap that isn't listed, add the row before
 fixing it; the honest map is the point.
+
+- **Terrain object footprints (open, found 2026-10-06 via the mission editor's BLOCKED
+  overlay):** `computePassability` blocks only a tree or rock's own cell. The original
+  blocks every cell in the type's Occupy list (TDATA.CPP), so multi-cell trees and the
+  TC01-TC05 clusters are passable around their base here. Fixing it will move the
+  determinism baselines.

@@ -85,6 +85,8 @@ extension MissionEditorScreen {
     /// the rest join it.
     func paint(at cell: Int, first: Bool = false) {
         switch mapTool {
+        case .select:
+            return
         case .ground:
             guard let template = brushTemplate else { return }
             let cells = stampCells(template, at: cell)
@@ -119,7 +121,7 @@ extension MissionEditorScreen {
         return cells
     }
 
-    func setBounds(_ change: (inout (x: Int, y: Int, w: Int, h: Int)) -> Void) {
+    func setBounds(continuing: Bool = false, _ change: (inout (x: Int, y: Int, w: Int, h: Int)) -> Void) {
         let b = doc.data.mapBounds ?? MapBounds(x: 1, y: 1, width: 62, height: 62)
         var v = (x: b.x, y: b.y, w: b.width, h: b.height)
         change(&v)
@@ -127,7 +129,54 @@ extension MissionEditorScreen {
         v.h = max(8, min(62, v.h))
         v.x = max(1, min(63 - v.w, v.x))
         v.y = max(1, min(63 - v.h, v.y))
-        edit { doc.data.mapBounds = MapBounds(x: v.x, y: v.y, width: v.w, height: v.h) }
+        let new = MapBounds(x: v.x, y: v.y, width: v.w, height: v.h)
+        guard new != doc.data.mapBounds else { return }
+        edit(continuing: continuing) { doc.data.mapBounds = new }
+    }
+
+    // MARK: Resizing the play area by its edges
+
+    /// The play-area edges within a few pixels of the mouse, if any.
+    func boundsEdges(nearX x: Int32, y: Int32) -> (left: Bool, right: Bool, top: Bool, bottom: Bool)? {
+        guard let b = doc.data.mapBounds, x < panelX, y >= toolbarHeight else { return nil }
+        let r = cellRect(b.y * 64 + b.x, w: b.width, h: b.height)
+        let slop: Int32 = 7
+        let inX = x > r.x - slop && x < r.x + r.w + slop, inY = y > r.y - slop && y < r.y + r.h + slop
+        let e = (left: inY && abs(x - r.x) <= slop, right: inY && abs(x - (r.x + r.w)) <= slop,
+                 top: inX && abs(y - r.y) <= slop, bottom: inX && abs(y - (r.y + r.h)) <= slop)
+        return e.left || e.right || e.top || e.bottom ? e : nil
+    }
+
+    /// Moves the dragged edges to the grid line nearest the mouse; the
+    /// others stay put. At least 8 cells each way, inside cells 1-62.
+    func dragBounds(_ e: (left: Bool, right: Bool, top: Bool, bottom: Bool), toX x: Int32, y: Int32) {
+        guard let b = doc.data.mapBounds else { return }
+        let gx = Int((Double(renderState.cameraX) + Double(x) / renderState.zoomLevel) / 24 + 0.5)
+        let gy = Int((Double(renderState.cameraY) + Double(y) / renderState.zoomLevel) / 24 + 0.5)
+        var left = b.x, right = b.x + b.width, top = b.y, bottom = b.y + b.height
+        if e.left { left = max(1, min(right - 8, gx)) }
+        if e.right { right = min(63, max(left + 8, gx)) }
+        if e.top { top = max(1, min(bottom - 8, gy)) }
+        if e.bottom { bottom = min(63, max(top + 8, gy)) }
+        setBounds(continuing: true) { $0 = (left, top, right - left, bottom - top) }
+    }
+
+    /// Which cells ground units can't enter: water, cliffs and rock, trees,
+    /// walls and buildings (the game's own passability, `computePassability`).
+    func drawBlocked(_ r: OpaquePointer?) {
+        if blockedCache?.version != editVersion {
+            blockedCache = (editVersion, computePassability(scenario: doc.data, cells: map).land)
+        }
+        guard let land = blockedCache?.land else { return }
+        let b = doc.data.mapBounds ?? MapBounds(x: 0, y: 0, width: 64, height: 64)
+        SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND)
+        SDL_SetRenderDrawColor(r, 255, 30, 30, 85)
+        for y in b.y..<(b.y + b.height) {
+            for x in b.x..<(b.x + b.width) where !land[y * 64 + x] {
+                var rect = cellRect(y * 64 + x)
+                SDL_RenderFillRect(r, &rect)
+            }
+        }
     }
 
     // MARK: Panel
@@ -136,6 +185,12 @@ extension MissionEditorScreen {
         p.heading("PAINT")
         p.row(MapTool.allCases.map { t in (t.rawValue, mapTool == t, { [unowned self] in mapTool = t }) }, small: true)
         switch mapTool {
+        case .select:
+            if let sel = selection, isValid(sel) {
+                selectedObject(p, sel)
+            } else {
+                p.note("CLICK A TREE, ROCK OR ANYTHING ELSE ON THE MAP TO SELECT IT. DRAG TO MOVE IT, DELETE TO REMOVE IT.")
+            }
         case .ground:
             p.grid(TileGroup.allCases.map { g in (g.rawValue, tileGroup == g, { [unowned self] in tileGroup = g }) },
                    columns: 4, small: true)
@@ -190,6 +245,7 @@ extension MissionEditorScreen {
 
     var mapHint: String {
         switch mapTool {
+        case .select: return "CLICK SELECTS. DRAG MOVES. DEL DELETES. DRAG THE AMBER EDGES TO RESIZE THE PLAY AREA"
         case .ground where brushTemplate == nil: return "PICK A GROUND PIECE ON THE RIGHT, THEN CLICK OR DRAG ON THE MAP"
         case .ground: return "CLICK OR DRAG TO PAINT \(templateTable[brushTemplate!].icnName). RIGHT DRAG PANS"
         case .trees where brushTerrain == nil: return "PICK A TREE OR ROCK ON THE RIGHT, THEN CLICK THE MAP"
@@ -199,12 +255,31 @@ extension MissionEditorScreen {
     }
 
     func drawMapToolOverlays(_ r: OpaquePointer?) {
-        // The play area.
+        // The play area, its edge under the mouse lit for dragging.
         if let b = doc.data.mapBounds {
-            outline(r, cellRect(b.y * 64 + b.x, w: b.width, h: b.height), .amber, thick: 2)
+            let rect = cellRect(b.y * 64 + b.x, w: b.width, h: b.height)
+            outline(r, rect, .amber, thick: 2)
+            if let e = resizing ?? boundsEdges(nearX: input.mouseX, y: input.mouseY) {
+                SDL_SetRenderDrawColor(r, 255, 255, 255, 255)
+                for i: Int32 in -1...1 {
+                    if e.left { SDL_RenderDrawLine(r, rect.x + i, rect.y, rect.x + i, rect.y + rect.h) }
+                    if e.right { SDL_RenderDrawLine(r, rect.x + rect.w + i, rect.y, rect.x + rect.w + i, rect.y + rect.h) }
+                    if e.top { SDL_RenderDrawLine(r, rect.x, rect.y + i, rect.x + rect.w, rect.y + i) }
+                    if e.bottom { SDL_RenderDrawLine(r, rect.x, rect.y + rect.h + i, rect.x + rect.w, rect.y + rect.h + i) }
+                }
+                return
+            }
+            for (cx, cy) in [(rect.x, rect.y), (rect.x + rect.w, rect.y), (rect.x, rect.y + rect.h), (rect.x + rect.w, rect.y + rect.h)] {
+                fill(r, SDL_Rect(x: cx - 4, y: cy - 4, w: 9, h: 9), .amber, alpha: 255)
+            }
         }
         guard let cell = cellUnderMouse() else { return }
         switch mapTool {
+        case .select:
+            if dragFrom != nil, let s = selection {
+                let fit = canPlace(typeName(s), at: cell, except: s)
+                fill(r, cellRect(cell), fit.ok ? .brightGreen : .red, alpha: 70)
+            }
         case .ground:
             guard let template = brushTemplate else { return }
             let t = templateTable[template]

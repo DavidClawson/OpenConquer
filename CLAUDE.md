@@ -55,7 +55,8 @@ swift build            # or:  swift run
   `UI/MissionEditorScreen.swift` (document, objects, map input), `UI/MissionEditorPanel.swift`
   (the toolbar and the FILE/UNITS/SETUP/GOALS/REINF. tabs), `UI/MissionEditorMap.swift` (the
   MAP tab: stamps BIN templates skipping the ICN's empty icons, trees/rocks as [TERRAIN],
-  the [Map] play area) and `UI/PanelPen.swift` (immediate-mode panel widgets; each control
+  the [Map] play area with draggable edges, and the BLOCKED overlay drawn from Core's
+  `computePassability`, the same function `buildPassabilityMap` uses) and `UI/PanelPen.swift` (immediate-mode panel widgets; each control
   registers its label, rect and action, so a test can click by label).
   - **Model:** Core's `EditorScenario` + `MissionState` (`Scenario/EditorMission.swift`):
     player, per-house credits and edge, tech level, [Buildables] Allow/Deny, triggers,

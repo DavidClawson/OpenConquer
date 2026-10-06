@@ -37,7 +37,7 @@ final class MissionEditorScreen: MenuScreen {
         case file = "FILE", map = "MAP", units = "UNITS", setup = "SETUP", goals = "GOALS", reinforce = "REINF."
     }
     /// What a click on the map does on the MAP tab.
-    enum MapTool: String, CaseIterable { case ground = "GROUND", trees = "TREES, ROCKS", erase = "ERASE" }
+    enum MapTool: String, CaseIterable { case select = "SELECT", ground = "GROUND", trees = "TREES, ROCKS", erase = "ERASE" }
     /// One undo step: everything the editor changes.
     struct Snapshot {
         let data: ScenarioData
@@ -45,7 +45,7 @@ final class MissionEditorScreen: MenuScreen {
         let map: [MapCell]
     }
     enum Category: String, CaseIterable { case infantry = "INFANTRY", vehicles = "VEHICLES", buildings = "BUILDINGS", other = "WALLS ETC" }
-    enum Selection: Equatable { case structure(Int), unit(Int), infantry(Int), overlay(Int) }
+    enum Selection: Equatable { case structure(Int), unit(Int), infantry(Int), overlay(Int), terrain(Int) }
 
     private(set) var doc: EditorScenario
     var map: [MapCell]
@@ -54,7 +54,14 @@ final class MissionEditorScreen: MenuScreen {
     private(set) var dirty = false
 
     var tab: Tab = .units
-    var mapTool: MapTool = .ground
+    var mapTool: MapTool = .select
+    /// The faint red layer over cells ground units can't enter.
+    var showBlocked = false
+    /// Bumped by every change, so the blocked layer knows to recompute.
+    var editVersion = 0
+    var blockedCache: (version: Int, land: [Bool])?
+    /// The play-area edges a drag is moving, while one is.
+    var resizing: (left: Bool, right: Bool, top: Bool, bottom: Bool)?
     var tileGroup: TileGroup = .water
     /// The ground piece (a template number) the next click stamps.
     var brushTemplate: Int?
@@ -204,6 +211,7 @@ final class MissionEditorScreen: MenuScreen {
         scenarioData = doc.data
         mapCells = map
         dirty = true
+        editVersion += 1
     }
 
     /// Runs a change with undo. `continuing` folds it into the last step
@@ -216,6 +224,7 @@ final class MissionEditorScreen: MenuScreen {
         }
         change()
         dirty = true
+        editVersion += 1
         scenarioData = doc.data
         mapCells = map
     }
@@ -280,6 +289,7 @@ final class MissionEditorScreen: MenuScreen {
         case .unit(let i): return doc.data.units[i].typeName
         case .infantry(let i): return doc.data.infantry[i].typeName
         case .overlay(let i): return doc.data.overlays[i].typeName
+        case .terrain(let i): return doc.data.terrain[i].typeName
         }
     }
 
@@ -289,6 +299,7 @@ final class MissionEditorScreen: MenuScreen {
         case .unit(let i): return doc.data.units[i].cell
         case .infantry(let i): return doc.data.infantry[i].cell
         case .overlay(let i): return doc.data.overlays[i].cell
+        case .terrain(let i): return doc.data.terrain[i].cell
         }
     }
 
@@ -298,11 +309,12 @@ final class MissionEditorScreen: MenuScreen {
         case .unit(let i): return i < doc.data.units.count
         case .infantry(let i): return i < doc.data.infantry.count
         case .overlay(let i): return i < doc.data.overlays.count
+        case .terrain(let i): return i < doc.data.terrain.count
         }
     }
 
-    /// The topmost object at `cell`: infantry, then vehicles, buildings and
-    /// overlays.
+    /// The topmost object at `cell`: infantry, then vehicles, buildings,
+    /// trees and rocks, and overlays.
     func object(at cell: Int, sub: Int? = nil) -> Selection? {
         let inf = doc.data.infantry.indices.filter { doc.data.infantry[$0].cell == cell }
         if let sub, let i = inf.first(where: { doc.data.infantry[$0].subLocation == sub }) { return .infantry(i) }
@@ -311,6 +323,8 @@ final class MissionEditorScreen: MenuScreen {
         if let i = doc.data.structures.firstIndex(where: { footprint($0.typeName, at: $0.cell).contains(cell) }) {
             return .structure(i)
         }
+        if let i = doc.data.terrain.firstIndex(where: { $0.cell == cell }) { return .terrain(i) }
+        if let i = doc.data.terrain.firstIndex(where: { terrainCells($0).contains(cell) }) { return .terrain(i) }
         if let i = doc.data.overlays.firstIndex(where: { $0.cell == cell }) { return .overlay(i) }
         return nil
     }
@@ -362,6 +376,9 @@ final class MissionEditorScreen: MenuScreen {
             guard x + size.w <= 64, y + size.h <= 64 else { return (false, 0) }
             let infantryCells = Set(doc.data.infantry.enumerated().filter { except != .infantry($0.offset) }.map(\.element.cell))
             return (!cells.contains { blocked.contains($0) || infantryCells.contains($0) }, 0)
+        case .other where terrainObjectTypes.contains(type.uppercased()):
+            let taken = doc.data.terrain.enumerated().contains { $0.element.cell == cell && except != .terrain($0.offset) }
+            return (!taken && !blocked.contains(cell), 0)
         case .other:
             let taken = doc.data.overlays.enumerated().contains { $0.element.cell == cell && except != .overlay($0.offset) }
             return (!taken, 0)
@@ -410,6 +427,7 @@ final class MissionEditorScreen: MenuScreen {
                 doc.data.infantry[i].cell = cell
                 doc.data.infantry[i].subLocation = fit.sub
             case .overlay(let i): doc.data.overlays[i].cell = cell
+            case .terrain(let i): doc.data.terrain[i].cell = cell
             }
             doc.mission.moveFlags(from: from, to: cell)
         }
@@ -423,6 +441,7 @@ final class MissionEditorScreen: MenuScreen {
             case .unit(let i): doc.data.units.remove(at: i)
             case .infantry(let i): doc.data.infantry.remove(at: i)
             case .overlay(let i): doc.data.overlays.remove(at: i)
+            case .terrain(let i): doc.data.terrain.remove(at: i)
             }
             if object(at: cell) == nil { doc.mission.objectFlags[cell] = nil }
         }
@@ -434,7 +453,7 @@ final class MissionEditorScreen: MenuScreen {
         case .structure(let i): return doc.data.structures[i].house
         case .unit(let i): return doc.data.units[i].house
         case .infantry(let i): return doc.data.infantry[i].house
-        case .overlay: return nil
+        case .overlay, .terrain: return nil
         }
     }
 
@@ -444,7 +463,7 @@ final class MissionEditorScreen: MenuScreen {
             case .structure(let i): doc.data.structures[i].house = h
             case .unit(let i): doc.data.units[i].house = h
             case .infantry(let i): doc.data.infantry[i].house = h
-            case .overlay: break
+            case .overlay, .terrain: break
             }
         }
     }
@@ -454,7 +473,7 @@ final class MissionEditorScreen: MenuScreen {
         case .structure(let i): return doc.data.structures[i].strength
         case .unit(let i): return doc.data.units[i].strength
         case .infantry(let i): return doc.data.infantry[i].strength
-        case .overlay: return 256
+        case .overlay, .terrain: return 256
         }
     }
 
@@ -465,7 +484,7 @@ final class MissionEditorScreen: MenuScreen {
             case .structure(let i): doc.data.structures[i].strength = v
             case .unit(let i): doc.data.units[i].strength = v
             case .infantry(let i): doc.data.infantry[i].strength = v
-            case .overlay: break
+            case .overlay, .terrain: break
             }
         }
     }
@@ -475,7 +494,7 @@ final class MissionEditorScreen: MenuScreen {
         case .structure(let i): return doc.data.structures[i].facing
         case .unit(let i): return doc.data.units[i].facing
         case .infantry(let i): return doc.data.infantry[i].facing
-        case .overlay: return 0
+        case .overlay, .terrain: return 0
         }
     }
 
@@ -486,7 +505,7 @@ final class MissionEditorScreen: MenuScreen {
             case .structure: break
             case .unit(let i): doc.data.units[i].facing = f
             case .infantry(let i): doc.data.infantry[i].facing = f
-            case .overlay: break
+            case .overlay, .terrain: break
             }
         }
     }
@@ -514,7 +533,7 @@ final class MissionEditorScreen: MenuScreen {
         case .structure(let i): return doc.data.structures[i].trigger
         case .unit(let i): return doc.data.units[i].trigger
         case .infantry(let i): return doc.data.infantry[i].trigger
-        case .overlay: return "None"
+        case .overlay, .terrain: return "None"
         }
     }
 
@@ -523,7 +542,7 @@ final class MissionEditorScreen: MenuScreen {
         case .structure(let i): doc.data.structures[i].trigger = t
         case .unit(let i): doc.data.units[i].trigger = t
         case .infantry(let i): doc.data.infantry[i].trigger = t
-        case .overlay: break
+        case .overlay, .terrain: break
         }
     }
 
@@ -654,6 +673,10 @@ final class MissionEditorScreen: MenuScreen {
             let st = doc.data.structures[i]
             let size = buildingSize(st.typeName)
             return cellRect(st.cell, w: size.w, h: size.h)
+        case .terrain(let i):
+            // The picture stands on its cell and reaches up a cell.
+            let cell = doc.data.terrain[i].cell
+            return cellToXY(cell).y > 0 ? cellRect(cell - 64, w: 2, h: 2) : cellRect(cell, w: 2, h: 1)
         default:
             return cellRect(cellOf(s))
         }
@@ -663,6 +686,10 @@ final class MissionEditorScreen: MenuScreen {
         var clip = SDL_Rect(x: 0, y: 0, w: panelX, h: renderState.windowHeight)
         SDL_RenderSetClipRect(r, &clip)
         defer { SDL_RenderSetClipRect(r, nil) }
+        if showBlocked { drawBlocked(r) }
+        if let s = selection, isValid(s), tab == .map {
+            outline(r, objectRect(s), .white)
+        }
         if tab == .map {
             drawMapToolOverlays(r)
             return
@@ -753,8 +780,15 @@ final class MissionEditorScreen: MenuScreen {
         }
         renaming = false
         if tab == .map && button == UInt8(SDL_BUTTON_LEFT) {
-            if let cell = cell(atX: x, y: y) { startPainting(at: cell) }
-            return
+            if let edges = boundsEdges(nearX: x, y: y) {
+                edit {}  // the drag is one undo step
+                resizing = edges
+                return
+            }
+            if mapTool != .select {
+                if let cell = cell(atX: x, y: y) { startPainting(at: cell) }
+                return
+            }
         }
         if button == UInt8(SDL_BUTTON_RIGHT) {
             if markingSpotsFor != nil || placeType != nil {
@@ -774,7 +808,7 @@ final class MissionEditorScreen: MenuScreen {
             place(type, at: cell, sub: sub(atX: x, y: y))
             return
         }
-        if tab != .units { switchTab(.units) }
+        if tab != .units && tab != .map { switchTab(.units) }
         selection = object(at: cell, sub: sub(atX: x, y: y))
         if selection != nil {
             dragFrom = cell
@@ -786,6 +820,7 @@ final class MissionEditorScreen: MenuScreen {
     func handleMouseUp(_ x: Int32, _ y: Int32, button: UInt8) {
         panning = false
         painting = false
+        resizing = nil
         guard let from = dragFrom else { return }
         dragFrom = nil
         guard let s = selection, let cell = cell(atX: x, y: y) else { return }
@@ -816,6 +851,7 @@ final class MissionEditorScreen: MenuScreen {
             clampCamera()
         }
         if painting, let cell = cell(atX: x, y: y) { paint(at: cell) }
+        if let edges = resizing { dragBounds(edges, toX: x, y: y) }
         if dragFrom != nil {
             dragCell = cell(atX: x, y: y)
             if abs(xrel) + abs(yrel) > 0 { dragMoved = true }

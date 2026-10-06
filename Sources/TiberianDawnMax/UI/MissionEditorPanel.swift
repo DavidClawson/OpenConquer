@@ -66,6 +66,7 @@ extension MissionEditorScreen {
         button("UNDO", enabled: !undoStack.isEmpty) { [unowned self] in undo() }
         button("REDO", enabled: !redoStack.isEmpty, gapAfter: 16) { [unowned self] in redo() }
         button("GRID", on: renderState.showGrid) { renderState.showGrid.toggle() }
+        button("BLOCKED", on: showBlocked) { [unowned self] in showBlocked.toggle() }
         button("ZOOM -") { [unowned self] in zoom(by: -0.25) }
         button("ZOOM +", gapAfter: 16) { [unowned self] in zoom(by: 0.25) }
         button(gameAudio.isMuted ? "SOUND OFF" : "SOUND ON", on: gameAudio.isMuted, gapAfter: 16) {
@@ -91,7 +92,7 @@ extension MissionEditorScreen {
         if t == .file { savedMissions = customMissionNames() }
         if t != .goals && t != .reinforce { markingSpotsFor = nil }
         if t != .units { placeType = nil }
-        if t != .units { selection = nil }
+        if t != .units && t != .map { selection = nil }
     }
 
     func exit() {
@@ -131,6 +132,10 @@ extension MissionEditorScreen {
         if let d = aircraftTypeDataTable.values.first(where: { $0.iniName == upper }) { return d.fullName }
         if let d = buildingTypeDataTable.values.first(where: { $0.iniName == upper }) { return d.fullName }
         if upper.hasPrefix("TI") { return "Tiberium" }
+        if upper.hasPrefix("TC") { return "Trees" }
+        if upper.hasPrefix("T") && terrainObjectTypes.contains(upper) { return "Tree" }
+        if upper.hasPrefix("ROCK") { return "Rock" }
+        if upper.hasPrefix("SPLIT") { return "Blossom tree" }
         return Self.overlayTypes.first { $0.0 == upper }?.1 ?? type
     }
 
@@ -186,7 +191,7 @@ extension MissionEditorScreen {
             p.stepper("HEALTH", "\(Int((Double(st) / 256 * 100).rounded()))%",
                       { [unowned self] in setStrength(s, st - 32) }, { [unowned self] in setStrength(s, st + 32) })
         }
-        if case .structure = s {} else if case .overlay = s {} else {
+        if mission(s) != nil {
             let names = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
             p.stepper("FACING", names[((facing(s) + 16) / 32) % 8],
                       { [unowned self] in rotate(s, by: -32) }, { [unowned self] in rotate(s, by: 32) })

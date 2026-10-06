@@ -97,12 +97,27 @@ private let blockingOverlayTypes: Set<String> = [
 /// Build the static passability map from terrain data.
 /// Called once after loading a scenario into game mode.
 package func buildPassabilityMap() {
-    // Start with all cells passable in both maps
-    landPassability = Array(repeating: true, count: 4096)
-    waterPassability = Array(repeating: true, count: 4096)
+    let p = computePassability(scenario: scenarioData, cells: mapCells)
+    landPassability = p.land
+    waterPassability = p.water
+    deckCells = p.deck
+    let landImpassable = p.land.filter { !$0 }.count
+    let waterImpassable = p.water.filter { !$0 }.count
+    print("GameMap: Built passability map, \(landImpassable) land-impassable, \(waterImpassable) water-impassable cells")
+}
 
+/// Which cells ground units (`land`) and boats (`water`) can enter, and which
+/// are bridge/ford decks, for a scenario on a map, without a world. The
+/// game's passability (buildPassabilityMap) and the mission editor's blocked
+/// overlay both come from here.
+package func computePassability(scenario: ScenarioData?, cells mapCells: [MapCell])
+    -> (land: [Bool], water: [Bool], deck: [Bool]) {
+    // Start with all cells passable in both maps
+    var landPassability = Array(repeating: true, count: 4096)
+    var waterPassability = Array(repeating: true, count: 4096)
+    var deckCells = Array(repeating: false, count: 4096)
     // Mark structure footprints as impassable in BOTH maps
-    if let scenario = scenarioData {
+    if let scenario {
         for structure in scenario.structures {
             let size = buildingSize(structure.typeName)
             let baseXY = cellToXY(structure.cell)
@@ -148,7 +163,7 @@ package func buildPassabilityMap() {
     //   - Naval units can only traverse water.
     // Per-icon exceptions (e.g. the walkable ramp icon of a slope, the deck of a
     // bridge, the fordable icons of a river) are honored via altIcons.
-    for i in 0..<4096 {
+    for i in 0..<min(4096, mapCells.count) {
         let land = cellLandType(templateType: mapCells[i].templateType,
                                 iconIndex: mapCells[i].iconIndex)
         if land == .water || land == .rock || land == .wall {
@@ -163,7 +178,7 @@ package func buildPassabilityMap() {
     }
 
     // Mark cells outside map bounds as impassable in BOTH maps
-    if let bounds = scenarioData?.mapBounds {
+    if let bounds = scenario?.mapBounds {
         for y in 0..<64 {
             for x in 0..<64 {
                 if x < bounds.x || x >= bounds.x + bounds.width ||
@@ -175,9 +190,7 @@ package func buildPassabilityMap() {
         }
     }
 
-    let landImpassable = landPassability.filter { !$0 }.count
-    let waterImpassable = waterPassability.filter { !$0 }.count
-    print("GameMap: Built passability map, \(landImpassable) land-impassable, \(waterImpassable) water-impassable cells")
+    return (landPassability, waterPassability, deckCells)
 }
 
 /// Land type of a cell, resolved from its template + icon index. Mirrors

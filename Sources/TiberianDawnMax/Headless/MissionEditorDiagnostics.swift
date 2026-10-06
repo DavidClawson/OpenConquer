@@ -209,6 +209,7 @@ func runMissionEditorDiagnosticsIfRequested() -> Int32? {
 
     // The map: paint a water piece, place a tree, erase it, shrink the play area.
     click(editor, "MAP")
+    click(editor, "GROUND")
     click(editor, "WATER")
     click(editor, "W2")
     let waterCell = (b.y + 2) * 64 + b.x + 2
@@ -229,10 +230,36 @@ func runMissionEditorDiagnosticsIfRequested() -> Int32? {
     let terrainBefore = editor.doc.data.terrain.count
     clickMap(editor, treeCell)
     check(editor.doc.data.terrain.count == terrainBefore + 1 && editor.doc.data.terrain.last?.typeName == "T01", "placed a tree")
+    // Select the tree, drag it a cell left, delete it with the key.
+    click(editor, "SELECT")
+    clickMap(editor, treeCell, drag: treeCell - 1)
+    check(editor.doc.data.terrain.last?.cell == treeCell - 1, "selected the tree and dragged it a cell")
+    if case .terrain = editor.selection {} else { check(false, "the tree is the selection") }
+    // The blocked layer: the tree and the water are blocked, open grass isn't.
+    click(editor, "BLOCKED")
+    let land = computePassability(scenario: editor.doc.data, cells: editor.map).land
+    let open = (b.y + 1) * 64 + b.x + 1 ..< (b.y + b.height - 1) * 64
+    let grass = open.first { land[$0] && editor.object(at: $0) == nil }
+    check(!land[treeCell - 1] && !land[waterCell] && grass != nil,
+          "blocked: tree \(!land[treeCell - 1]), water \(!land[waterCell]); some grass open \(grass != nil)")
     snapshot(editor, "editor-map.png")
+    click(editor, "BLOCKED")
+    editor.handleKeyDown(Int32(SDLK_DELETE.rawValue))
+    check(editor.doc.data.terrain.count == terrainBefore, "Delete removes it")
+    // Drag the play area's bottom-right corner two cells in.
+    let corner = (b.y + b.height) * 64 + b.x + b.width  // the cell just past the corner
+    let (cx, cy) = point(corner)
+    let half = Int32(12 * renderState.zoomLevel)
+    editor.render(renderer)
+    editor.handleMouseDown(cx - half, cy - half, button: UInt8(SDL_BUTTON_LEFT))
+    editor.handleMouseMotion(cx - half - 2 * 2 * half, cy - half - 2 * 2 * half, xrel: -48, yrel: -48)
+    editor.handleMouseUp(cx - half - 2 * 2 * half, cy - half - 2 * 2 * half, button: UInt8(SDL_BUTTON_LEFT))
+    check(editor.doc.data.mapBounds == MapBounds(x: b.x, y: b.y, width: b.width - 2, height: b.height - 2),
+          "dragged the play area's corner in two cells (\(editor.doc.data.mapBounds.map { "\($0.width)x\($0.height)" } ?? "-"))")
+    editor.undo()
+    check(editor.doc.data.mapBounds == b, "one undo puts it back")
     click(editor, "ERASE")
-    clickMap(editor, treeCell)
-    check(editor.doc.data.terrain.count == terrainBefore, "erased it")
+    click(editor, "SELECT")
     click(editor, "WIDTH -")
     click(editor, "HEIGHT -")
     check(editor.doc.data.mapBounds?.width == b.width - 1 && editor.doc.data.mapBounds?.height == b.height - 1,
